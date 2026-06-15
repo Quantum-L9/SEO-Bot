@@ -1,0 +1,28 @@
+# Website Factory Integration Contract
+# Defines the handoff interface between the L9 Website Factory and the L9 SEO Bot.
+
+schema_version: "1.0"
+owner: "operator"
+
+handoff_trigger:
+  method: "manual_cli"
+  command: "pnpm run add-client <domain> <client_id>"
+  future_state: "webhook_from_website_factory"
+
+content_update_mechanism:
+  primary: "wordpress_mcp"
+  fallback: "ssh_exec"
+  astro_sites: "git_commit_and_push_to_source_repo"
+
+required_from_website_factory:
+  - "domain_name"
+  - "target_keywords"
+  - "competitor_urls"
+  - "google_search_console_access"
+  - "posthog_project_api_key"
+
+posthog_event_alignment:
+  pageview: "$pageview"
+  scroll_depth: "scroll_depth"
+  form_submission: "lead_form_submitted"
+  click_cta: "cta_clicked"

@@ -1,0 +1,81 @@
+<!--
+  ═══════════════════════════════════════════════════════════════════════════════
+  L9 SEO Bot - Client Site Tracking Snippet
+  
+  INSTALLATION:
+  Add this snippet to your Astro site's <head> in src/layouts/BaseLayout.astro
+  Replace POSTHOG_HOST and POSTHOG_PROJECT_KEY with your values.
+  
+  This captures:
+  - Page views with timing
+  - Scroll depth
+  - Core Web Vitals (LCP, INP, CLS, FCP, TTFB)
+  - Click events on CTAs
+  - Form submissions
+  ═══════════════════════════════════════════════════════════════════════════════
+-->
+
+<!-- PostHog Analytics + Web Vitals -->
+<script>
+  !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.async=!0,p.src=s.api_host+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys onFeatureFlags onSessionId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+
+  // Initialize PostHog — replace these values
+  posthog.init('__POSTHOG_PROJECT_KEY__', {
+    api_host: '__POSTHOG_HOST__',
+    capture_pageview: true,
+    capture_pageleave: true,
+    autocapture: true,
+    session_recording: { recordCrossOriginIframes: true },
+  });
+</script>
+
+<!-- Web Vitals Reporting to PostHog -->
+<script type="module">
+  import { onLCP, onINP, onCLS, onFCP, onTTFB } from 'https://unpkg.com/web-vitals@4/dist/web-vitals.attribution.js?module';
+
+  function sendToPostHog(metric) {
+    posthog.capture('web_vitals', {
+      metric_name: metric.name,
+      [metric.name.toLowerCase()]: metric.value,
+      rating: metric.rating,
+      delta: metric.delta,
+      navigation_type: metric.navigationType,
+    });
+  }
+
+  onLCP(sendToPostHog);
+  onINP(sendToPostHog);
+  onCLS(sendToPostHog);
+  onFCP(sendToPostHog);
+  onTTFB(sendToPostHog);
+</script>
+
+<!-- Scroll Depth Tracking -->
+<script>
+  (function() {
+    let maxScroll = 0;
+    let ticking = false;
+
+    window.addEventListener('scroll', function() {
+      if (!ticking) {
+        window.requestAnimationFrame(function() {
+          const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+          const scrollPercent = scrollHeight > 0 ? (window.scrollY / scrollHeight) : 0;
+          maxScroll = Math.max(maxScroll, scrollPercent);
+          ticking = false;
+        });
+        ticking = true;
+      }
+    });
+
+    // Send scroll depth on page leave
+    document.addEventListener('visibilitychange', function() {
+      if (document.visibilityState === 'hidden') {
+        posthog.capture('scroll_depth', {
+          scroll_depth: Math.round(maxScroll * 100),
+          page_path: window.location.pathname,
+        });
+      }
+    });
+  })();
+</script>

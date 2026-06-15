@@ -1,0 +1,106 @@
+/* L9_META
+ * layer: module
+ * role: seo_bot_engine
+ * status: active
+ */
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * L9 SEO Bot - Configuration Loader
+ * Validates all environment variables at startup via Zod schemas.
+ * Fails fast with clear error messages if config is invalid.
+ * ═══════════════════════════════════════════════════════════════════════════════
+ */
+
+import { z } from 'zod';
+import * as dotenv from 'dotenv';
+
+dotenv.config();
+
+const envSchema = z.object({
+  // Database
+  DATABASE_URL: z.string().url(),
+  REDIS_URL: z.string().url(),
+
+  // PostHog
+  POSTHOG_API_URL: z.string().url(),
+  POSTHOG_PERSONAL_API_KEY: z.string().min(1),
+
+  // DataForSEO
+  DATAFORSEO_LOGIN: z.string().min(1),
+  DATAFORSEO_PASSWORD: z.string().min(1),
+
+  // Google APIs
+  PAGESPEED_API_KEY: z.string().min(1),
+  GOOGLE_SERVICE_ACCOUNT_JSON: z.string().optional(),
+  GOOGLE_SEARCH_CONSOLE_SITE_URL: z.string().optional(),
+
+  // LLM — @l9/llm-router (replaces old tiered model)
+  OPENROUTER_API_KEY: z.string().min(1),
+  PERPLEXITY_API_KEY: z.string().min(1),
+
+  // Email Outreach
+  SMTP_HOST: z.string().default('smtp.sendgrid.net'),
+  SMTP_PORT: z.coerce.number().default(587),
+  SMTP_USER: z.string().default('apikey'),
+  SMTP_PASSWORD: z.string().optional(),
+  OUTREACH_FROM_EMAIL: z.string().email().optional(),
+  OUTREACH_FROM_NAME: z.string().optional(),
+
+  // Hunter.io
+  HUNTER_API_KEY: z.string().optional(),
+
+  // Citation Services
+  BRIGHTLOCAL_API_KEY: z.string().optional(),
+
+  // Bot Config
+  BOT_PORT: z.coerce.number().default(3100),
+  BOT_LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
+  BOT_TIMEZONE: z.string().default('America/New_York'),
+
+  // Notifications
+  OPERATOR_EMAIL: z.string().email().optional(),
+  OPERATOR_CC_EMAIL: z.string().email().optional(),
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
+  TELEGRAM_CHAT_ID: z.string().optional(),
+
+  // Budget — @l9/llm-router surge-aware model
+  DEFAULT_CLIENT_MONTHLY_BUDGET: z.coerce.number().default(200.00),
+  DEFAULT_CLIENT_WEEKLY_TARGET: z.coerce.number().default(50.00),
+  DEFAULT_CLIENT_WEEKLY_CEILING: z.coerce.number().default(100.00),
+  GLOBAL_MONTHLY_HARD_CEILING: z.coerce.number().default(2000.00),
+  SURGE_THRESHOLD: z.coerce.number().default(0.6),
+
+  // Execution Policy
+  AUTO_EXECUTE_THRESHOLD: z.enum(['low', 'medium', 'high']).default('high'),
+  REQUIRE_APPROVAL_ONLY_FOR: z.string().default('critical'),
+});
+
+export type EnvConfig = z.infer<typeof envSchema>;
+
+let _config: EnvConfig | null = null;
+
+export function loadConfig(): EnvConfig {
+  if (_config) return _config;
+
+  const result = envSchema.safeParse(process.env);
+
+  if (!result.success) {
+    const errors = result.error.issues.map(
+      (issue) => `  ${issue.path.join('.')}: ${issue.message}`
+    );
+    console.error('═══ L9 SEO Bot - Configuration Error ═══');
+    console.error('The following environment variables are missing or invalid:');
+    console.error(errors.join('\n'));
+    console.error('═══════════════════════════════════════════');
+    process.exit(1);
+  }
+
+  _config = result.data;
+  return _config;
+}
+
+export function getConfig(): EnvConfig {
+  if (!_config) return loadConfig();
+  return _config;
+}
