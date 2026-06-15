@@ -276,6 +276,10 @@ export class Scheduler {
     }
   }
 
+  isRunning(): boolean {
+    return this.workers.size > 0;
+  }
+
   async stop(): Promise<void> {
     logger.info('Stopping scheduler...');
     for (const [, worker] of this.workers) {
@@ -285,8 +289,21 @@ export class Scheduler {
       await queue.close();
     }
     await this.connection.quit();
+    this.workers.clear();
+    this.queues.clear();
     logger.info('Scheduler stopped');
   }
+}
+
+// ─── Singleton ───────────────────────────────────────────────────────────────
+
+let _scheduler: Scheduler | null = null;
+
+export function getScheduler(): Scheduler {
+  if (!_scheduler) {
+    _scheduler = new Scheduler();
+  }
+  return _scheduler;
 }
 
 export const jobDefinitions = JOB_DEFINITIONS;

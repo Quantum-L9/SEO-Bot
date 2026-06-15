@@ -407,6 +407,14 @@ export class LlmService {
     return this.router.getGlobalSpend();
   }
 
+  getDailySpend(): number {
+    const today = new Date().toISOString().slice(0, 10);
+    const log = this.router.getCallLog(1000);
+    return log
+      .filter(d => d.timestamp.toISOString().slice(0, 10) === today)
+      .reduce((sum, d) => sum + d.cost, 0);
+  }
+
   getCallLog(limit: number = 100): RoutingDecision[] {
     return this.router.getCallLog(limit);
   }

@@ -1,6 +1,7 @@
 {
   "name": "@l9/llm-router",
   "version": "1.0.0",
+  "type": "module",
   "description": "Reusable multi-provider LLM routing module with task-to-model matrix, Perplexity search depth optimization, vision QA, and budget enforcement. Shared across all L9 bots.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
