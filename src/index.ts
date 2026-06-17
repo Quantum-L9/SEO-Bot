@@ -8,10 +8,10 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  * L9 SEO Bot - Main Entry Point
  * Version: 1.0.0
- * 
+ *
  * Autonomous, multi-tenant SEO optimization engine.
  * Runs 24/7 on Hetzner CX32 via Docker Compose.
- * 
+ *
  * Architecture:
  * - BullMQ scheduler dispatches cron jobs
  * - 5 modules execute independently
@@ -96,12 +96,18 @@ async function main() {
   });
 
   // LLM spend endpoint
+  // FIX(review): added try/catch — consistent error handling with all other async routes
   app.get('/api/llm-spend', async (req, res) => {
-    const llm = getLlmService();
-    res.json({
-      dailySpend: llm.getDailySpend(),
-      timestamp: new Date().toISOString(),
-    });
+    try {
+      const llm = getLlmService();
+      res.json({
+        dailySpend: llm.getDailySpend(),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error: any) {
+      logger.error({ error: error.message }, 'Failed to retrieve LLM spend');
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // Start HTTP server

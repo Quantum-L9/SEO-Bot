@@ -409,7 +409,8 @@ export class LlmService {
 
   getDailySpend(): number {
     const today = new Date().toISOString().slice(0, 10);
-    const log = this.router.getCallLog(1000);
+    // FIX(review): removed 1000-entry cap — fetch all records so spend is never under-reported
+    const log = this.router.getCallLog(Number.MAX_SAFE_INTEGER);
     return log
       .filter(d => d.timestamp.toISOString().slice(0, 10) === today)
       .reduce((sum, d) => sum + d.cost, 0);
