@@ -156,15 +156,18 @@ export class Scheduler {
       throw new Error(`Unknown job: ${jobName}`);
     }
     const queueName = `l9:${jobDef.module}`;
-    const queue = this.queues.get(queueName);
+    // FIX(T-A): Initialize queue on-demand — handles disabled jobs skipped during startup.
+    // Without this, addJob() throws if the job was disabled and its queue was never created.
+    let queue = this.queues.get(queueName);
     if (!queue) {
-      throw new Error(`Queue not initialized for module: ${jobDef.module}`);
+      queue = new Queue(queueName, { connection: this.connection });
+      this.queues.set(queueName, queue);
     }
     await queue.add(jobName, { definition: jobDef, ...data }, {
       removeOnComplete: { count: 100 },
       removeOnFail: { count: 50 },
     });
-    // FIX(review): log only jobName — data contains clientConfig and may include secrets/PII
+    // Log only jobName — data contains clientConfig and may include secrets/PII
     logger.info({ jobName }, 'Manual job queued');
   }
 
@@ -293,7 +296,7 @@ export class Scheduler {
     this.workers.clear();
     this.queues.clear();
     logger.info('Scheduler stopped');
-    // FIX(review): Reset singleton so next getScheduler() call creates a fresh instance
+    // Reset singleton so next getScheduler() call creates a fresh instance
     if (_scheduler === this) {
       _scheduler = null;
     }

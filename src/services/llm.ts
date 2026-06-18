@@ -44,11 +44,6 @@ const logger = createModuleLogger('llm');
 // MODULE-TO-TASK-TYPE MAPPING
 // ═══════════════════════════════════════════════════════════════
 
-/**
- * Maps the old tier-based call pattern to the new TaskDescriptor pattern.
- * This allows modules to migrate incrementally — they can use convenience
- * methods now and switch to direct router.execute() later.
- */
 type LegacyTier = 'fast' | 'strategic';
 
 function tierToComplexity(tier: LegacyTier): TaskComplexity {
@@ -85,18 +80,10 @@ export class LlmService {
   // PRIMARY API: Direct router access (preferred for new code)
   // ─────────────────────────────────────────────────────────────
 
-  /**
-   * Direct access to the router for modules that want full control.
-   * This is the preferred API for new module code.
-   */
   getRouter(): L9LLMRouter {
     return this.router;
   }
 
-  /**
-   * Execute a fully-specified task descriptor.
-   * Modules that have migrated to TaskDescriptor-based calls use this.
-   */
   async execute(
     task: TaskDescriptor,
     systemPrompt: string,
@@ -105,10 +92,7 @@ export class LlmService {
   ): Promise<LLMResponse> {
     try {
       const response = await this.router.execute(task, systemPrompt, userPrompt, options);
-
-      // Log to database
       await this.logUsage(task, response);
-
       return response;
     } catch (error: any) {
       if (error instanceof BudgetExhaustedError) {
@@ -126,13 +110,9 @@ export class LlmService {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // CONVENIENCE METHODS (backward-compatible with old module code)
+  // CONVENIENCE METHODS
   // ─────────────────────────────────────────────────────────────
 
-  /**
-   * Classification — fast, cheap, deterministic.
-   * Maps to: TaskType.CLASSIFICATION, TaskComplexity.LOW
-   */
   async classify(
     prompt: string,
     clientId: string,
@@ -153,10 +133,6 @@ export class LlmService {
     return response.content.trim();
   }
 
-  /**
-   * JSON extraction — fast, structured output.
-   * Maps to: TaskType.EXTRACTION, TaskComplexity.LOW-MEDIUM
-   */
   async extractJson<T>(
     prompt: string,
     clientId: string,
@@ -178,10 +154,6 @@ export class LlmService {
     return JSON.parse(response.content) as T;
   }
 
-  /**
-   * Scoring — fast, returns a number.
-   * Maps to: TaskType.SCORING, TaskComplexity.LOW
-   */
   async score(
     prompt: string,
     clientId: string,
@@ -202,10 +174,6 @@ export class LlmService {
     return parseFloat(response.content.trim());
   }
 
-  /**
-   * Content generation — strategic, creative.
-   * Maps to: TaskType.CONTENT_GENERATION, TaskComplexity.MEDIUM-HIGH
-   */
   async generateContent(
     systemPrompt: string,
     userPrompt: string,
@@ -228,10 +196,6 @@ export class LlmService {
     return response.content;
   }
 
-  /**
-   * Strategic reasoning — expensive, used for surpass plans, strategy pivots.
-   * Maps to: TaskType.STRATEGIC_REASONING, TaskComplexity.HIGH
-   */
   async strategize(
     systemPrompt: string,
     userPrompt: string,
@@ -255,10 +219,6 @@ export class LlmService {
     return response.content;
   }
 
-  /**
-   * Search-grounded research — uses Perplexity with web search.
-   * Maps to: TaskType.COMPETITOR_RESEARCH | MARKET_RESEARCH | etc.
-   */
   async research(
     prompt: string,
     clientId: string,
@@ -283,10 +243,6 @@ export class LlmService {
     );
   }
 
-  /**
-   * Citation check — uses Perplexity to verify AI search citations.
-   * Maps to: TaskType.CITATION_CHECK, TaskComplexity.MEDIUM
-   */
   async checkCitation(
     query: string,
     clientId: string,
@@ -305,10 +261,6 @@ export class LlmService {
     );
   }
 
-  /**
-   * Visual QA — screenshot analysis for layout validation.
-   * Maps to: TaskType.LAYOUT_VALIDATION | VISUAL_QA
-   */
   async analyzeScreenshot(
     prompt: string,
     imageUrls: string[],
@@ -332,21 +284,15 @@ export class LlmService {
     return response.content;
   }
 
-  /**
-   * Plan a full visual QA audit for a client site.
-   */
   planVisualQA(config: FullSiteQAConfig): VisualQATask[] {
     return this.router.planVisualQA(config);
   }
 
   // ─────────────────────────────────────────────────────────────
-  // LEGACY COMPATIBILITY (maps old tier-based calls)
+  // LEGACY COMPATIBILITY
   // ─────────────────────────────────────────────────────────────
 
-  /**
-   * @deprecated Use execute() or convenience methods instead.
-   * Preserved for modules that haven't migrated yet.
-   */
+  /** @deprecated Use execute() or convenience methods instead. */
   async call(request: {
     tier: LegacyTier;
     systemPrompt: string;
@@ -407,13 +353,38 @@ export class LlmService {
     return this.router.getGlobalSpend();
   }
 
-  getDailySpend(): number {
-    const today = new Date().toISOString().slice(0, 10);
-    // FIX(review): removed 1000-entry cap — fetch all records so spend is never under-reported
-    const log = this.router.getCallLog(Number.MAX_SAFE_INTEGER);
-    return log
-      .filter(d => d.timestamp.toISOString().slice(0, 10) === today)
-      .reduce((sum, d) => sum + d.cost, 0);
+  /**
+   * FIX(T-B/T-D): Now async. Queries llm_usage table directly — persistent across
+   * restarts, accurate on high-volume days, correct field names.
+   * Falls back to in-memory router log on DB outage.
+   */
+  async getDailySpend(): Promise<number> {
+    try {
+      const { gte } = await import('drizzle-orm');
+      const db = getDb();
+      const todayStart = new Date();
+      todayStart.setUTCHours(0, 0, 0, 0);
+
+      // Import sql lazily to avoid circular import issues at module load time
+      const { sql } = await import('drizzle-orm');
+      const result = await db
+        .select({ totalCost: sql<number>`COALESCE(SUM(${schema.llmUsage.cost}), 0)` })
+        .from(schema.llmUsage)
+        .where(gte(schema.llmUsage.timestamp, todayStart));
+
+      return Number(result[0]?.totalCost ?? 0);
+    } catch (error: any) {
+      // Fallback: in-memory router log — survives DB outage but resets on process restart
+      logger.warn({ error: error.message }, 'getDailySpend DB query failed, falling back to in-memory log');
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const log = this.router.getCallLog(Number.MAX_SAFE_INTEGER);
+      return log
+        .filter(d => {
+          const ts = d.timestamp instanceof Date ? d.timestamp : new Date(d.timestamp as string);
+          return ts.toISOString().slice(0, 10) === todayStr;
+        })
+        .reduce((sum, d) => sum + ((d as any).actualCost ?? (d as any).cost ?? 0), 0);
+    }
   }
 
   getCallLog(limit: number = 100): RoutingDecision[] {
@@ -441,7 +412,6 @@ export class LlmService {
         cost: response.cost,
       });
     } catch (error: any) {
-      // Non-fatal — don't crash the bot over a logging failure
       logger.warn({ error: error.message }, 'Failed to log LLM usage to database');
     }
   }
@@ -472,6 +442,5 @@ export function getLlmService(): LlmService {
   return _llmService;
 }
 
-// Re-export router types for module convenience
 export { TaskType, TaskComplexity, BudgetExhaustedError } from '@l9/llm-router';
 export type { TaskDescriptor, LLMResponse, RoutingDecision } from '@l9/llm-router';
