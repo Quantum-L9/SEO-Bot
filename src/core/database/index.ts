@@ -7,7 +7,7 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════════
  * L9 SEO Bot - Database Connection
- * Drizzle ORM with PostgreSQL. Connection pooling via pg.
+ * PostgreSQL via Drizzle ORM with connection pooling
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -27,31 +27,20 @@ let _db: ReturnType<typeof drizzle> | null = null;
 let _pool: pg.Pool | null = null;
 
 export function getDb() {
-  if (_db) return _db;
-
-  const config = getConfig();
-
-  _pool = new pg.Pool({
-    connectionString: config.DATABASE_URL,
-    max: 10,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 5000,
-  });
-
-  _pool.on('error', (err) => {
-    logger.error({ err }, 'Unexpected database pool error');
-  });
-
-  _db = drizzle(_pool, { schema });
-  logger.info('Database connection pool initialized');
+  if (!_db) {
+    const config = getConfig();
+    _pool = new pg.Pool({ connectionString: config.DATABASE_URL, max: 10 });
+    _db = drizzle(_pool, { schema });
+    logger.info('Database connection pool initialized');
+  }
   return _db;
 }
 
 export async function closeDb(): Promise<void> {
   if (_pool) {
     await _pool.end();
-    _pool = null;
     _db = null;
+    _pool = null;
     logger.info('Database connection pool closed');
   }
 }
