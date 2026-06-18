@@ -10,6 +10,8 @@
  *
  * T2.2 FIX: Express server removed from src/index.ts.
  * All HTTP traffic now routes through this single Fastify instance.
+ *
+ * GAP-02 FIX: Added POST /api/clients/register for Website-Bot handoff.
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -23,6 +25,7 @@ import { createModuleLogger } from '../core/logger.js';
 import { getScheduler } from '../core/scheduler.js';
 import { getLlmService } from '../services/llm.js';
 import { registerDashboard } from './dashboard.js';
+import { WebsiteFactoryContractV2 } from '../types/contracts.js';
 
 const logger = createModuleLogger('api');
 
@@ -147,6 +150,78 @@ export async function startApiServer(port: number = 3100): Promise<void> {
     const today = new Date().toISOString().split('T')[0];
     const outcomes = await db.select().from(schema.actionOutcomes).where(gte(schema.actionOutcomes.executedAt, new Date(today))).orderBy(desc(schema.actionOutcomes.executedAt));
     return { date: today, month: today.slice(0, 7), todayActions: outcomes.length, message: 'Detailed token tracking available in logs' };
+  });
+
+  // ─── GAP-02: POST /api/clients/register ────────────────────────────────────
+  // Called by Website-Bot emit-handoff.yml after successful Vercel deploy.
+  // Accepts website_factory_integration.yaml v2.0.0 handoff payload.
+  // Zod validation via WebsiteFactoryContractV2 (GAP-01).
+  // No DB migration needed — clients.config is already jsonb default {}.
+
+  app.post('/api/clients/register', async (request, reply) => {
+    const parsed = WebsiteFactoryContractV2.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        error: 'Invalid handoff contract',
+        issues: parsed.error.issues.map(i => ({ path: i.path.join('.'), message: i.message })),
+      });
+    }
+
+    const body = parsed.data;
+    const db = getDb();
+
+    const normalizedDomain = body.domain
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .replace(/\/$/, '');
+
+    const existing = await db.select()
+      .from(schema.clients)
+      .where(eq(schema.clients.domain, normalizedDomain))
+      .limit(1);
+
+    const config = {
+      targetKeywords: body.seo.targetKeywords,
+      seoContract: body.seo.seo_contract ?? null,
+      baselineRanks: body.seo.baseline_ranks ?? {},
+      schemasGenerated: body.seo.schemas_generated ?? [],
+      pagesWithContent: body.seo.pages_with_content ?? 0,
+      vercelUrl: body.deployment?.vercel_url ?? null,
+      deploymentId: body.deployment?.deployment_id ?? null,
+      sourceRepo: body.deployment?.source_repo ?? null,
+      sourceBranch: body.deployment?.source_branch ?? null,
+      eventsInstrumented: body.analytics?.events_instrumented ?? [],
+    };
+
+    let clientId: string;
+
+    if (existing.length > 0) {
+      const [updated] = await db.update(schema.clients)
+        .set({
+          config: { ...(existing[0].config as object), ...config },
+          active: true,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.clients.domain, normalizedDomain))
+        .returning({ id: schema.clients.id });
+      clientId = updated.id;
+      logger.info({ clientId, domain: normalizedDomain }, 'Client re-registered via handoff');
+    } else {
+      const [inserted] = await db.insert(schema.clients).values({
+        name: body.business.name,
+        domain: normalizedDomain,
+        industry: body.business.industry,
+        city: body.business.city ?? null,
+        state: body.business.state ?? null,
+        posthogProjectId: body.analytics?.posthog_project_id ?? null,
+        posthogApiKey: body.analytics?.posthog_api_key ?? null,
+        config,
+      }).returning({ id: schema.clients.id });
+      clientId = inserted.id;
+      logger.info({ clientId, domain: normalizedDomain }, 'New client registered via handoff');
+    }
+
+    return reply.status(201).send({ registered: true, clientId, domain: normalizedDomain });
   });
 
   try {

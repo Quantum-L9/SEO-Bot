@@ -1,0 +1,81 @@
+# L9_META: layer=ci | role=quality_gate | status=active
+# GAP-03: SEO-Bot had no CI. Gates every PR and push on main.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    name: Type-check · Lint · Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: seobot_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://test:test@localhost:5432/seobot_test
+      REDIS_URL: redis://localhost:6379
+      OPENROUTER_API_KEY: sk-or-test-placeholder
+      PERPLEXITY_API_KEY: pplx-test-placeholder
+      POSTHOG_API_URL: http://localhost:8000
+      POSTHOG_PERSONAL_API_KEY: phx_test
+      DATAFORSEO_LOGIN: test
+      DATAFORSEO_PASSWORD: test
+      PAGESPEED_API_KEY: test
+      LOG_LEVEL: silent
+      BOT_PORT: '3100'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install root deps
+        run: npm ci
+
+      - name: Install llm-router deps
+        run: cd packages/llm-router && npm ci
+
+      - name: Build llm-router
+        run: npm run build:router
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test -- --reporter=verbose
+
+      - name: Check PostHog event constants drift
+        run: bash scripts/check-posthog-events-drift.sh || echo 'WARNING: posthog-events.ts drift detected — sync with Website-Bot'
