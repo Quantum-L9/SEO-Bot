@@ -223,9 +223,10 @@ export async function startApiServer(port: number = 3100): Promise<void> {
       const scheduler = getScheduler();
 
       const validModules = [
-        'serp:track-rankings',
-        'serp:analyze-competitor',
-        'vitals:check-all',
+        'serp:check-rankings',
+        'serp:competitor-analysis',
+        'serp:generate-surpass-plan',
+        'vitals:check-all-sources',
         'aeo:check-citations',
         'aeo:optimize-faqs',
         'links:discover-prospects',

@@ -1,10 +1,10 @@
 import type { Config } from 'drizzle-kit';
 
 export default {
-  schema: './src/core/database/schema.ts',
+  schema: ['./src/core/database/schema.ts', './src/core/database/schema-extensions.ts'],
   out: './drizzle',
   dialect: 'postgresql',
   dbCredentials: {
-    url: process.env.DATABASE_URL || 'postgresql://l9bot:l9bot_secure_password@localhost:5432/l9_seo_bot',
+    url: process.env.DATABASE_URL!,
   },
 } satisfies Config;

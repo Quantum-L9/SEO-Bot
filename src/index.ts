@@ -8,10 +8,10 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  * L9 SEO Bot - Main Entry Point
  * Version: 1.0.0
- * 
+ *
  * Autonomous, multi-tenant SEO optimization engine.
  * Runs 24/7 on Hetzner CX32 via Docker Compose.
- * 
+ *
  * Architecture:
  * - BullMQ scheduler dispatches cron jobs
  * - 5 modules execute independently
@@ -25,9 +25,10 @@ import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import { loadConfig } from './core/config.js';
-import { getLogger, createModuleLogger } from './core/logger.js';
+import { createModuleLogger } from './core/logger.js';
 import { getDb, closeDb } from './core/database/index.js';
-import { Scheduler } from './core/scheduler.js';
+import { getScheduler } from './core/scheduler.js';
+import { getLlmService } from './services/llm.js';
 
 // Module imports
 import { registerSerpHandlers } from './modules/serp-intelligence/index.js';
@@ -48,7 +49,7 @@ async function main() {
   logger.info('Database connected');
 
   // ─── Initialize Scheduler ────────────────────────────────────────────────
-  const scheduler = new Scheduler();
+  const scheduler = getScheduler();
 
   // Register all module handlers
   registerSerpHandlers(scheduler);
@@ -95,13 +96,18 @@ async function main() {
   });
 
   // LLM spend endpoint
+  // FIX(review): added try/catch — consistent error handling with all other async routes
   app.get('/api/llm-spend', async (req, res) => {
-    const { getLlmService } = await import('./services/llm.js');
-    const llm = getLlmService();
-    res.json({
-      dailySpend: llm.getDailySpend(),
-      timestamp: new Date().toISOString(),
-    });
+    try {
+      const llm = getLlmService();
+      res.json({
+        dailySpend: llm.getDailySpend(),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error: any) {
+      logger.error({ error: error.message }, 'Failed to retrieve LLM spend');
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // Start HTTP server

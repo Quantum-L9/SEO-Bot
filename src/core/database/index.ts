@@ -15,9 +15,24 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { getConfig } from '../config.js';
 import { createModuleLogger } from '../logger.js';
-import * as schema from './schema.js';
+import * as baseSchema from './schema.js';
+import * as extSchema from './schema-extensions.js';
 
 const logger = createModuleLogger('database');
+
+// FIX(review): guard against silent key overwrites when merging base + extension schemas
+const _duplicateKeys = Object.keys(baseSchema).filter(
+  (key) => Object.prototype.hasOwnProperty.call(extSchema, key)
+);
+if (_duplicateKeys.length > 0) {
+  throw new Error(
+    `Duplicate database schema keys detected between base schema and extensions: ${_duplicateKeys.join(', ')}. ` +
+    `Rename the conflicting export in schema-extensions.ts.`
+  );
+}
+
+/** Unified schema namespace — includes base tables + extensions */
+export const schema = { ...baseSchema, ...extSchema } as const;
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let _pool: pg.Pool | null = null;
@@ -51,5 +66,3 @@ export async function closeDb(): Promise<void> {
     logger.info('Database connection pool closed');
   }
 }
-
-export { schema };
