@@ -23,6 +23,8 @@
 
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import helmet from '@fastify/helmet';
+import formBody from '@fastify/formbody';
 import { eq, desc, and, gte, sql } from 'drizzle-orm';
 import { getDb, schema } from '../core/database/index.js';
 import { createModuleLogger } from '../core/logger.js';
@@ -35,9 +37,26 @@ const logger = createModuleLogger('api');
 export async function startApiServer(port: number = 3100): Promise<void> {
   const app = Fastify({ logger: false });
 
+  // ─── Security & Parsing Plugins ───────────────────────────────────────────
+  // FIX(T-F): Restore security headers removed when Express/helmet was dropped.
+  // Sets X-Frame-Options, X-Content-Type-Options, CSP, HSTS, etc.
+  await app.register(helmet);
+  // FIX(T-G): Parse application/x-www-form-urlencoded — required for dashboard
+  // approve/reject form buttons. Without this, Fastify rejects them before the
+  // route handler runs, making pending approvals un-actionable.
+  await app.register(formBody);
   await app.register(cors, { origin: true });
 
-  // ─── Operator Dashboard (HTML) ──────────────────────────────────────────
+  // ─── Global Error Handler ────────────────────────────────────────────────
+  // FIX(T-E): Log all unhandled route errors via module logger and return a
+  // consistent { error: message } shape matching the previous Express contract.
+  // Without this, Fastify silently swallows errors and returns its own 500 format.
+  app.setErrorHandler((error, request, reply) => {
+    logger.error({ err: error, url: request.url, method: request.method }, 'API route error');
+    reply.status(error.statusCode ?? 500).send({ error: error.message });
+  });
+
+  // ─── Operator Dashboard (HTML) ─────────────────────────────────────────
   await registerDashboard(app);
 
   // ─── Health Check ────────────────────────────────────────────────────────
@@ -65,7 +84,6 @@ export async function startApiServer(port: number = 3100): Promise<void> {
   });
 
   // ─── Status Overview (ported from Express src/index.ts) ─────────────────
-  // Returns active client list + uptime. Previously on Express /api/status.
   app.get('/api/status', async () => {
     const db = getDb();
     const clients = await db.select()
@@ -81,17 +99,17 @@ export async function startApiServer(port: number = 3100): Promise<void> {
     };
   });
 
-  // ─── LLM Spend (ported from Express src/index.ts) ───────────────────────
-  // Returns today's USD spend from LLM call log.
+  // ─── LLM Spend (ported from Express src/index.ts) ─────────────────────
+  // FIX(6): getDailySpend() is now async (queries DB). Must be awaited.
   app.get('/api/llm-spend', async () => {
     const llm = getLlmService();
     return {
-      dailySpend: llm.getDailySpend(),
+      dailySpend: await llm.getDailySpend(),
       timestamp: new Date().toISOString(),
     };
   });
 
-  // ─── Dashboard: All Clients Overview ─────────────────────────────────────
+  // ─── Dashboard: All Clients Overview ──────────────────────────────────
   app.get('/api/clients', async () => {
     const db = getDb();
     const clients = await db.select()
@@ -101,7 +119,7 @@ export async function startApiServer(port: number = 3100): Promise<void> {
     return { clients };
   });
 
-  // ─── Dashboard: Client Detail ────────────────────────────────────────────
+  // ─── Dashboard: Client Detail ─────────────────────────────────────────
   app.get<{ Params: { clientId: string } }>('/api/clients/:clientId', async (request) => {
     const db = getDb();
     const { clientId } = request.params;
@@ -150,7 +168,7 @@ export async function startApiServer(port: number = 3100): Promise<void> {
     return { client, rankings, vitals, engagement, prospects, citations };
   });
 
-  // ─── Dashboard: Weekly Report ────────────────────────────────────────────
+  // ─── Dashboard: Weekly Report ───────────────────────────────────────
   app.get<{ Params: { clientId: string } }>('/api/clients/:clientId/report', async (request) => {
     const db = getDb();
     const { clientId } = request.params;
@@ -222,7 +240,7 @@ export async function startApiServer(port: number = 3100): Promise<void> {
     };
   });
 
-  // ─── Manual Triggers ─────────────────────────────────────────────────────
+  // ─── Manual Triggers ────────────────────────────────────────────────
   app.post<{ Params: { clientId: string }; Body: { module: string } }>(
     '/api/clients/:clientId/trigger',
     async (request) => {
@@ -265,7 +283,7 @@ export async function startApiServer(port: number = 3100): Promise<void> {
     }
   );
 
-  // ─── Token Budget Status ─────────────────────────────────────────────────
+  // ─── Token Budget Status ─────────────────────────────────────────────
   app.get('/api/token-budget', async () => {
     const db = getDb();
     const today = new Date().toISOString().split('T')[0];
@@ -284,7 +302,7 @@ export async function startApiServer(port: number = 3100): Promise<void> {
     };
   });
 
-  // ─── Start Server ────────────────────────────────────────────────────────
+  // ─── Start Server ─────────────────────────────────────────────────────
   try {
     await app.listen({ port, host: '0.0.0.0' });
     logger.info({ port }, 'API server started (Fastify — sole HTTP server)');

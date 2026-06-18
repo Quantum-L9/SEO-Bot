@@ -23,6 +23,8 @@
   "dependencies": {
     "@l9/llm-router": "file:./packages/llm-router",
     "@fastify/cors": "^9.0.0",
+    "@fastify/helmet": "^11.1.1",
+    "@fastify/formbody": "^7.4.0",
     "bullmq": "^5.0.0",
     "cron": "^3.1.0",
     "dotenv": "^16.4.0",
