@@ -1,0 +1,56 @@
+# L9_META
+# layer: ci
+# role: seo_bot_engine
+# status: active
+
+name: Router Drift Check
+
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check router drift
+        id: drift
+        run: bash scripts/check-router-sync.sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Open drift issue
+        if: steps.drift.outcome == 'failure'
+        uses: actions/github-script@v7
+        env:
+          SEO_SHA: ${{ steps.drift.outputs.seo_sha }}
+          WEBSITE_SHA: ${{ steps.drift.outputs.website_sha }}
+          WEBSITE_REPO: ${{ steps.drift.outputs.website_repo }}
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '[DRIFT] @l9/llm-router has diverged between SEO-Bot and website-bot',
+              body: [
+                'Router drift was detected by the scheduled sync check.',
+                '',
+                `SEO-Bot SHA: ${process.env.SEO_SHA || 'unknown'}`,
+                `${process.env.WEBSITE_REPO || 'website-bot'} SHA: ${process.env.WEBSITE_SHA || 'unknown'}`,
+              ].join('\n'),
+            });
+
+      - name: Fail on drift
+        if: steps.drift.outcome == 'failure'
+        run: exit 1

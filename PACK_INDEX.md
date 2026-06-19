@@ -27,3 +27,16 @@ This index provides a navigational map to all documentation and modules within t
 - `docker-compose.yml` - The full deployment stack.
 - `client-snippets/posthog-tracking.html` - The tracking script to inject into client Astro sites.
 - 
+
+## Phase A — Cross-Repo Alignment (2026-06-19)
+- `src/api/clients/register.ts` - Fastify plugin for webhook-based client registration with contract validation and Drizzle upsert.
+- `src/api/index.ts` - Registers the new client registration route plugin in server startup.
+- `contracts/schema/website_factory_v2.ts` - Zod schema and type for Website Factory contract version 2.0 payloads.
+- `contracts/website_factory_integration.yaml` - Contract metadata updated for schema v2 and webhook handoff trigger.
+- `contracts/posthog_events.ts` - Canonical PostHog event name constants shared across integrations.
+- `.github/workflows/ci.yml` - Baseline CI workflow for build-router, typecheck, lint, and Vitest runs.
+- `tests/api/register.test.ts` - Route tests covering registration success and validation failures.
+- `tests/contracts/schema-v2.test.ts` - Contract schema tests for valid/invalid Website Factory v2 payloads.
+- `src/services/site-deployment.ts` - GitHub Contents + Vercel deploy service for SEO metadata and JSON-LD updates.
+- `scripts/check-router-sync.sh` - GitHub API drift checker comparing llm-router entrypoint SHAs across repos.
+- `.github/workflows/router-drift.yml` - Scheduled and PR drift detection workflow with automatic issue creation on divergence.
