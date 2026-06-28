@@ -1,11 +1,13 @@
 # Website Factory Integration Contract
 # Defines the handoff interface between the L9 Website Factory and the L9 SEO Bot.
 
-schema_version: "1.0"
+schema_version: "2.0"
 owner: "operator"
+contract_validator: "src/contracts/website_factory_v2.ts"
 
 handoff_trigger:
-  method: "manual_cli"
+  method: "webhook"
+  endpoint: "POST /api/clients/register"
   command: "pnpm run add-client <domain> <client_id>"
   future_state: "webhook_from_website_factory"
 

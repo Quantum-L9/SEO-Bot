@@ -20,7 +20,7 @@
  *   HIGH     → Auto-execute. (operator has backups, worst case = rollback)
  *   CRITICAL → ALWAYS queue for approval. (site redesign, strategy overhaul, bulk delete)
  *
- * Budget is handled by @l9/llm-router — this module only handles action approval.
+ * Budget is handled by @quantum-l9/llm-router — this module only handles action approval.
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -145,7 +145,7 @@ const ACTION_CLASSIFICATION: Record<string, { riskLevel: RiskLevel; reversible: 
  * - HIGH:    Always execute. (operator has daily backups — worst case is rollback)
  * - CRITICAL: Queue for approval. Always. (site redesign, strategy overhaul, bulk delete)
  *
- * This is the only gate. Budget throttling is handled by @l9/llm-router.
+ * This is the only gate. Budget throttling is handled by @quantum-l9/llm-router.
  */
 export function evaluateExecution(proposal: ActionProposal): ExecutionDecision {
   const { riskLevel } = proposal;

@@ -6,10 +6,10 @@
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════════
- * L9 SEO Bot - LLM Service (v2.0 — powered by @l9/llm-router)
+ * L9 SEO Bot - LLM Service (v2.0 — powered by @quantum-l9/llm-router)
  *
  * This module is a thin adapter between the SEO Bot's modules and the shared
- * @l9/llm-router package. It provides:
+ * @quantum-l9/llm-router package. It provides:
  *   1. Initialization with env-based config
  *   2. Convenience methods that map old tier-based calls to TaskDescriptor-based routing
  *   3. Budget reporting passthrough
@@ -17,7 +17,7 @@
  *   5. Search-grounded (Perplexity) passthrough
  *
  * NO LLM logic lives here. All routing, budget, and provider management is
- * delegated to @l9/llm-router.
+ * delegated to @quantum-l9/llm-router.
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -32,7 +32,7 @@ import {
   type FullSiteQAConfig,
   type VisualQATask,
   BudgetExhaustedError,
-} from '@l9/llm-router';
+} from '@quantum-l9/llm-router';
 import { getConfig } from '../core/config.js';
 import { createModuleLogger } from '../core/logger.js';
 import { getDb, schema } from '../core/database/index.js';
@@ -73,7 +73,7 @@ export class LlmService {
       },
     });
 
-    logger.info('LLM Service initialized with @l9/llm-router');
+    logger.info('LLM Service initialized with @quantum-l9/llm-router');
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -442,5 +442,5 @@ export function getLlmService(): LlmService {
   return _llmService;
 }
 
-export { TaskType, TaskComplexity, BudgetExhaustedError } from '@l9/llm-router';
-export type { TaskDescriptor, LLMResponse, RoutingDecision } from '@l9/llm-router';
+export { TaskType, TaskComplexity, BudgetExhaustedError } from '@quantum-l9/llm-router';
+export type { TaskDescriptor, LLMResponse, RoutingDecision } from '@quantum-l9/llm-router';

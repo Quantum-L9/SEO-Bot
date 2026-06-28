@@ -1,6 +1,6 @@
 # L9 SEO Bot — Deployment Guide
 
-This guide covers deploying the L9 SEO Bot v2.0.0, which now includes the embedded `@l9/llm-router` package.
+This guide covers deploying the L9 SEO Bot v2.0.0, which now includes the embedded `@quantum-l9/llm-router` package.
 
 ## Architecture
 
@@ -69,7 +69,7 @@ The operator dashboard is available at:
 
 ## Troubleshooting
 
-**Error: Cannot find module '@l9/llm-router'**
+**Error: Cannot find module '@quantum-l9/llm-router'**
 This means the router hasn't been built yet. Run `npm run build:router` from the root directory.
 
 **Error: BudgetExhaustedError**
