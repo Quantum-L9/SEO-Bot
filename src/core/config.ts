@@ -35,9 +35,15 @@ const envSchema = z.object({
   GOOGLE_SERVICE_ACCOUNT_JSON: z.string().optional(),
   GOOGLE_SEARCH_CONSOLE_SITE_URL: z.string().optional(),
 
-  // LLM — @l9/llm-router (replaces old tiered model)
+  // LLM — @quantum-l9/llm-router (replaces old tiered model)
   OPENROUTER_API_KEY: z.string().min(1),
   PERPLEXITY_API_KEY: z.string().min(1),
+
+  // Cross-repo handoff: shared secret presented by Website-Bot as a Bearer
+  // token to POST /api/clients/register. When unset, that route is open
+  // (backward compatible); set it to require auth. Must match Website-Bot's
+  // SEO_BOT_API_KEY secret.
+  SEO_BOT_API_KEY: z.string().optional(),
 
   // Email Outreach
   SMTP_HOST: z.string().default('smtp.sendgrid.net'),
@@ -64,7 +70,7 @@ const envSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
 
-  // Budget — @l9/llm-router surge-aware model
+  // Budget — @quantum-l9/llm-router surge-aware model
   DEFAULT_CLIENT_MONTHLY_BUDGET: z.coerce.number().default(200.00),
   DEFAULT_CLIENT_WEEKLY_TARGET: z.coerce.number().default(50.00),
   DEFAULT_CLIENT_WEEKLY_CEILING: z.coerce.number().default(100.00),

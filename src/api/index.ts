@@ -23,6 +23,7 @@ import { createModuleLogger } from '../core/logger.js';
 import { getScheduler } from '../core/scheduler.js';
 import { getLlmService } from '../services/llm.js';
 import { registerDashboard } from './dashboard.js';
+import { registerClientRoutes } from './clients/register.js';
 
 const logger = createModuleLogger('api');
 
@@ -39,6 +40,7 @@ export async function startApiServer(port: number = 3100): Promise<void> {
   });
 
   await registerDashboard(app);
+  await registerClientRoutes(app);
 
   app.get('/health', async () => {
     const db = getDb();

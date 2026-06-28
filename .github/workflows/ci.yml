@@ -1,0 +1,60 @@
+name: CI
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@quantum-l9'
+
+      # No committed lockfile yet, so use `npm install` (not `npm ci`) and skip
+      # setup-node's npm cache (which requires a lockfile). NODE_AUTH_TOKEN +
+      # the @quantum-l9 registry scope let `npm install` pull
+      # @quantum-l9/llm-router from GitHub Packages. This step (and the whole
+      # job) stays red until that package is published and granted read access.
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Typecheck is NON-BLOCKING: main carries pre-existing type debt out of
+      # scope here (drizzle insert-type mismatches, bullmq QueueScheduler
+      # removal, ioredis typings, missing ContentStrategyConfig). Surfaced as a
+      # warning so the test gate stays green; flip to blocking once cleared.
+      - name: Typecheck (non-blocking)
+        run: npx tsc --noEmit
+        continue-on-error: true
+
+      - name: Lint (if configured)
+        run: |
+          if ls eslint.config.* .eslintrc* >/dev/null 2>&1; then
+            npm run lint
+          else
+            echo "No ESLint config present — skipping lint"
+          fi
+
+      # Hard gate: the unit tests (register route + v2 contract schema).
+      - name: Test
+        run: npx vitest run
+        env:
+          NODE_ENV: test
