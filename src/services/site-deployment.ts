@@ -17,7 +17,8 @@
  *   2. Apply targeted mutation (regex/AST-lite for frontmatter/JSON-LD)
  *   3. Write updated file back via PUT /repos/{owner}/{repo}/contents/{path}
  *   4. Trigger Vercel deploy hook
- *   5. Record outcome in actionOutcomes table
+ *   5. (The caller — plan-executor — records the outcome via
+ *      execution-policy.logAction → actionOutcomes; this module does not.)
  *
  * Env vars required (add to .env and GitHub Actions secrets):
  *   GITHUB_TOKEN          — PAT with repo:write on the Website-Bot source repo
@@ -99,6 +100,10 @@ class GitHubContentClient {
       logger.info('[DRY-RUN] Would trigger Vercel deploy hook');
       return;
     }
+    if (!this.config.vercelDeployHook) {
+      logger.warn('VERCEL_DEPLOY_HOOK not set — skipping Vercel deploy trigger');
+      return;
+    }
     await axios.post(this.config.vercelDeployHook, {});
     logger.info('Vercel deploy hook triggered');
   }
@@ -107,28 +112,42 @@ class GitHubContentClient {
 // ─── Public Actions ──────────────────────────────────────────────────────────
 // Each function maps 1:1 to an action in execution-policy.ts ACTION_TAXONOMY.
 
-let _client: GitHubContentClient | null = null;
-
-export function getSiteDeploymentService(): GitHubContentClient {
-  if (_client) return _client;
+/** Build the single-tenant transport config from environment variables. */
+export function siteConfigFromEnv(): SiteDeploymentConfig {
   const githubToken = process.env.GITHUB_TOKEN ?? '';
-  const vercelDeployHook = process.env.VERCEL_DEPLOY_HOOK ?? '';
   const websiteBotRepo = process.env.WEBSITE_BOT_REPO ?? '';
-  const sourceBranch = process.env.SITE_SOURCE_BRANCH ?? 'main';
-  const dryRun = process.env.NODE_ENV === 'test' || process.env.SITE_DEPLOY_DRY_RUN === 'true';
-
   if (!githubToken || !websiteBotRepo) {
-    logger.warn('GITHUB_TOKEN or WEBSITE_BOT_REPO not set — site-deployment running in dry-run mode');
+    logger.warn('GITHUB_TOKEN or WEBSITE_BOT_REPO not set — site-deployment forced to dry-run');
   }
-
-  _client = new GitHubContentClient({
+  return {
     githubToken,
-    vercelDeployHook,
+    vercelDeployHook: process.env.VERCEL_DEPLOY_HOOK ?? '',
     websiteBotRepo,
-    sourceBranch,
-    dryRun: dryRun || !githubToken || !websiteBotRepo,
-  });
-  return _client;
+    sourceBranch: process.env.SITE_SOURCE_BRANCH ?? 'main',
+    dryRun:
+      process.env.NODE_ENV === 'test' ||
+      process.env.SITE_DEPLOY_DRY_RUN === 'true' ||
+      !githubToken ||
+      !websiteBotRepo,
+  };
+}
+
+/**
+ * Get a GitHub content client.
+ *
+ * Pass an explicit `SiteDeploymentConfig` for multi-tenant use so each client
+ * writes to its OWN source repo / deploy hook. With no argument it falls back
+ * to the single-tenant env config — correct only while one client is onboarded.
+ * There is intentionally NO module-level singleton, so an injected per-client
+ * config always takes effect.
+ *
+ * TODO(multi-tenant): resolve config from the client's stored config
+ * (clients.config.site_deployment) before enabling serp:execute-surpass-plans
+ * for more than one client — otherwise every client would write to the same
+ * WEBSITE_BOT_REPO. This is why that job ships `enabled: false`.
+ */
+export function getSiteDeploymentService(config?: SiteDeploymentConfig): GitHubContentClient {
+  return new GitHubContentClient(config ?? siteConfigFromEnv());
 }
 
 /**
@@ -193,8 +212,11 @@ export async function injectSchema(
 ${JSON.stringify(schemaJson, null, 2)}
 </script>`;
 
+  // Match the whole JSON-LD <script> block for this @type. Use [\s\S]*? (not
+  // \{[^}]*) so nested objects/arrays in real-world schema don't cut the match
+  // short and cause a duplicate block to be injected instead of replaced.
   const existingPattern = new RegExp(
-    `<script type="application/ld\\+json">\\s*\\{[^}]*"@type":\\s*"${schemaType}"[\\s\\S]*?</script>`,
+    `<script type="application/ld\\+json">[\\s\\S]*?"@type":\\s*"${schemaType}"[\\s\\S]*?</script>`,
     'g',
   );
 

@@ -32,8 +32,6 @@ import {
   updateMetaDescription,
   injectSchema,
   updateHeading,
-  rewritePageContent,
-  updateFaq,
   triggerVercelDeploy,
 } from './site-deployment.js';
 import type { SurpassAction } from '../types/index.js';
@@ -63,21 +61,24 @@ const ACTION_DISPATCH_MAP: Record<string, ActionDispatcher> = {
     const newHeading = extractValue(action.action, 'heading');
     if (filePath && newHeading) await updateHeading(filePath, newHeading, clientDomain);
   },
-  faq_content_update: async (action, clientDomain, clientUrl) => {
-    if (!clientUrl) return;
-    const filePath = urlToFilePath(clientUrl);
-    // FAQ actions are dispatched to site-deployment; actual FAQ content
-    // generation happens in aeo-geo module and is passed via action.metadata.
-    if (filePath) {
-      await updateFaq(filePath, [], clientDomain); // executor passes empty; aeo-geo fills later
-    }
+  faq_content_update: async (_action, clientDomain, _clientUrl) => {
+    // SurpassAction carries no FAQ payload (no metadata field), and deploying an
+    // empty FAQPage is a no-op at best / overwrites real schema at worst. Skip
+    // until FAQ content is threaded in (aeo-geo owns FAQ generation).
+    logger.warn({ clientDomain }, 'faq_content_update skipped — no FAQ payload on SurpassAction');
   },
-  schema_markup_injection: async (action, clientDomain, clientUrl) => {
+  schema_markup_injection: async (_action, clientDomain, clientUrl) => {
     if (!clientUrl) return;
     const filePath = urlToFilePath(clientUrl);
-    if (filePath) {
-      await injectSchema(filePath, 'LocalBusiness', {}, clientDomain);
-    }
+    if (!filePath) return;
+    // Inject a minimal but VALID LocalBusiness object — never empty `{}`, which
+    // would write invalid JSON-LD (no @context/@type). aeo-geo enriches later.
+    await injectSchema(
+      filePath,
+      'LocalBusiness',
+      { '@context': 'https://schema.org', '@type': 'LocalBusiness', name: clientDomain, url: clientUrl },
+      clientDomain,
+    );
   },
 };
 

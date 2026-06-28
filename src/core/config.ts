@@ -80,6 +80,15 @@ const envSchema = z.object({
   // Execution Policy
   AUTO_EXECUTE_THRESHOLD: z.enum(['low', 'medium', 'high']).default('high'),
   REQUIRE_APPROVAL_ONLY_FOR: z.string().default('critical'),
+
+  // Site Deployment Transport (C-01 / GAP-08) — only used when the
+  // serp:execute-surpass-plans job is enabled. All optional so startup never
+  // fails when the feature is off; validated here so typos surface clearly.
+  GITHUB_TOKEN: z.string().optional(),
+  VERCEL_DEPLOY_HOOK: z.string().optional(),
+  WEBSITE_BOT_REPO: z.string().optional(),
+  SITE_SOURCE_BRANCH: z.string().default('main'),
+  SITE_DEPLOY_DRY_RUN: z.string().optional(),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;
