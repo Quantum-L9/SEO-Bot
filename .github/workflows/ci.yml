@@ -28,26 +28,19 @@ jobs:
           scope: '@quantum-l9'
 
       # No committed lockfile yet, so use `npm install` (not `npm ci`) and skip
-      # setup-node's npm cache (which requires a lockfile). NODE_AUTH_TOKEN is
-      # wired for when @quantum-l9/llm-router is pulled from GitHub Packages; the
-      # router is currently the vendored file: copy, so install also works
-      # without the registry being reachable.
+      # setup-node's npm cache (which requires a lockfile). NODE_AUTH_TOKEN +
+      # the @quantum-l9 registry scope let `npm install` pull
+      # @quantum-l9/llm-router from GitHub Packages. This step (and the whole
+      # job) stays red until that package is published and granted read access.
       - name: Install dependencies
         run: npm install --no-audit --no-fund
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build + typecheck are currently NON-BLOCKING. The repo carries
-      # pre-existing type debt on main that is out of scope for this change:
-      #  - vendored router: TS1117 duplicate GeneralModel vision values
-      #  - src: drizzle insert-type mismatches, bullmq QueueScheduler removal,
-      #    ioredis typings, missing ContentStrategyConfig
-      # They are surfaced as warnings here so the new test gate stays green;
-      # flip these to blocking once the debt is cleared.
-      - name: Build vendored router (non-blocking)
-        run: npm run build:router
-        continue-on-error: true
-
+      # Typecheck is NON-BLOCKING: main carries pre-existing type debt out of
+      # scope here (drizzle insert-type mismatches, bullmq QueueScheduler
+      # removal, ioredis typings, missing ContentStrategyConfig). Surfaced as a
+      # warning so the test gate stays green; flip to blocking once cleared.
       - name: Typecheck (non-blocking)
         run: npx tsc --noEmit
         continue-on-error: true
