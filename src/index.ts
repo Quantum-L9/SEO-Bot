@@ -21,6 +21,7 @@ import { registerVitalsHandlers } from './modules/web-vitals/index.js';
 import { registerAeoHandlers } from './modules/aeo-geo/index.js';
 import { registerLinkHandlers } from './modules/link-building/index.js';
 import { registerBehaviorHandlers } from './modules/behavior-intelligence/index.js';
+import { registerPlanExecutorHandlers } from './services/plan-executor.js';
 
 const logger = createModuleLogger('main');
 
@@ -34,6 +35,7 @@ async function main() {
   registerAeoHandlers(scheduler);
   registerLinkHandlers(scheduler);
   registerBehaviorHandlers(scheduler);
+  registerPlanExecutorHandlers(scheduler); // GAP-07 (C-02); job disabled by default
   await scheduler.start();
   logger.info('All modules registered and scheduler started');
 

@@ -57,6 +57,20 @@ const JOB_DEFINITIONS: JobDefinition[] = [
     enabled: true,
   },
   {
+    // GAP-07 (C-02): executes status='planned' surpass plans via site-deployment.
+    // DISABLED by default — it mutates the live site, so the operator must first
+    // configure the site-write env vars (GITHUB_TOKEN with repo:write,
+    // VERCEL_DEPLOY_HOOK, WEBSITE_BOT_REPO, SITE_SOURCE_BRANCH) and then flip
+    // `enabled: true`. Handler is registered via registerPlanExecutorHandlers.
+    name: 'serp:execute-surpass-plans',
+    module: 'serp-intelligence',
+    cron: '0 9 * * 1',
+    handler: 'executeSurpassPlans',
+    clientScoped: true,
+    tokenBudget: { maxFastTokensPerRun: 0, maxStrategicTokensPerRun: 0, cooldownMinutes: 60 },
+    enabled: false,
+  },
+  {
     name: 'vitals:check-all-sources',
     module: 'web-vitals',
     cron: '0 */6 * * *',
