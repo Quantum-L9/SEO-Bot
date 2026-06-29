@@ -160,6 +160,12 @@ export interface FaqItem {
 
 // ─── Link Building ───────────────────────────────────────────────────────────
 
+export interface ContentStrategyConfig {
+  postsPerMonth: number;
+  pillarTopics: string[];
+  toneOfVoice?: string;
+}
+
 export interface LinkVelocityConfig {
   domainAgeMonths: number;
   maxLinksPerMonth: number;

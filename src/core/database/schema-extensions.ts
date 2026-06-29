@@ -53,6 +53,8 @@ export const actionLog = pgTable('action_log', {
   // Execution tracking
   executedAt: timestamp('executed_at'),
   executionResult: text('execution_result'),
+  estimatedImpact: varchar('estimated_impact', { length: 20 }),
+  resolvedAt: timestamp('resolved_at'), // when an action was approved/rejected
   metadata: jsonb('metadata').default({}),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   expiresAt: timestamp('expires_at'), // auto-expire pending approvals after 7 days

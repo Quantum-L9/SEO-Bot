@@ -380,7 +380,8 @@ export class LlmService {
       const log = this.router.getCallLog(Number.MAX_SAFE_INTEGER);
       return log
         .filter(d => {
-          const ts = d.timestamp instanceof Date ? d.timestamp : new Date(d.timestamp as string);
+          const raw = (d as { timestamp?: unknown }).timestamp;
+          const ts = raw instanceof Date ? raw : new Date(raw as string);
           return ts.toISOString().slice(0, 10) === todayStr;
         })
         .reduce((sum, d) => sum + ((d as any).actualCost ?? (d as any).cost ?? 0), 0);
