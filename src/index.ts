@@ -11,6 +11,7 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
+import { loadSecrets } from './core/secrets.js';
 import { loadConfig } from './core/config.js';
 import { createModuleLogger } from './core/logger.js';
 import { closeDb } from './core/database/index.js';
@@ -26,6 +27,10 @@ import { registerPlanExecutorHandlers } from './services/plan-executor.js';
 const logger = createModuleLogger('main');
 
 async function main() {
+  // Hydrate process.env from Infisical before any config is read (no-op when
+  // Infisical isn't configured; never overrides vars already set in the env).
+  await loadSecrets();
+
   const config = loadConfig();
   logger.info('Configuration validated');
 
