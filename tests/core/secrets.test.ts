@@ -66,6 +66,15 @@ describe('loadSecrets', () => {
     expect(ctorMock).not.toHaveBeenCalled();
   });
 
+  it('no-ops (does not call the SDK) when only some bootstrap vars are set', async () => {
+    process.env.INFISICAL_CLIENT_ID = 'cid';
+    // INFISICAL_CLIENT_SECRET and INFISICAL_PROJECT_ID intentionally missing
+    const result = await loadSecrets();
+    expect(result).toEqual({ loaded: false, injected: 0, source: 'env' });
+    expect(ctorMock).not.toHaveBeenCalled();
+    expect(loginMock).not.toHaveBeenCalled();
+  });
+
   it('authenticates and backfills only missing keys into process.env', async () => {
     configure();
     process.env.ALREADY_SET = 'from-env'; // must NOT be overwritten

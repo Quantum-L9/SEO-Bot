@@ -74,7 +74,23 @@ export async function loadSecrets(): Promise<LoadSecretsResult> {
           'and INFISICAL_PROJECT_ID are not all set.',
       );
     }
-    logger.debug('Infisical not configured — using .env / process.env only');
+    // Surface a partial config: if SOME (but not all) bootstrap vars are set,
+    // Infisical is silently skipped — almost always a deploy misconfiguration,
+    // so warn rather than swallow it at debug level.
+    if (clientId || clientSecret || projectId) {
+      logger.warn(
+        {
+          hasClientId: Boolean(clientId),
+          hasClientSecret: Boolean(clientSecret),
+          hasProjectId: Boolean(projectId),
+        },
+        'Infisical partially configured — need INFISICAL_CLIENT_ID, ' +
+          'INFISICAL_CLIENT_SECRET and INFISICAL_PROJECT_ID; skipping Infisical ' +
+          'and using .env / process.env',
+      );
+    } else {
+      logger.debug('Infisical not configured — using .env / process.env only');
+    }
     return { loaded: false, injected: 0, source: 'env' };
   }
 
