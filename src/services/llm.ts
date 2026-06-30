@@ -382,6 +382,10 @@ export class LlmService {
         .filter(d => {
           const raw = (d as { timestamp?: unknown }).timestamp;
           const ts = raw instanceof Date ? raw : new Date(raw as string);
+          // Skip entries with an unparseable timestamp: an Invalid Date would
+          // throw a RangeError on toISOString(), breaking /api/llm-spend during
+          // the very DB outage this in-memory fallback exists to survive.
+          if (Number.isNaN(ts.getTime())) return false;
           return ts.toISOString().slice(0, 10) === todayStr;
         })
         .reduce((sum, d) => sum + ((d as any).actualCost ?? (d as any).cost ?? 0), 0);
