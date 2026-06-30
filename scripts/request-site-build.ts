@@ -11,7 +11,8 @@
  * Fires a `build-site` repository_dispatch at the Website-Bot repo so its
  * factory pipeline builds + deploys + registers a client's site on demand.
  *
- * Usage:  tsx scripts/request-site-build.ts <clientId> [specPath]
+ * Usage:  npm run request-site-build -- <clientId> [specPath]
+ *    or:  tsx scripts/request-site-build.ts <clientId> [specPath]
  *   <clientId>  becomes CLIENT_ID in the Website-Bot pipeline
  *   [specPath]  path to the client's normalized domain spec ALREADY committed in
  *               the Website-Bot repo (default: domain_spec/domain_spec.normalized.yaml)
@@ -25,15 +26,18 @@ import { loadSecrets } from '../src/core/secrets.js';
 import { requestSiteBuild } from '../src/services/site-deployment.js';
 
 async function main() {
-  await loadSecrets();
-
+  // Validate args before any secret loading — a bad invocation should print
+  // usage immediately and do no Infisical/.env work.
   const clientId = process.argv[2];
   const specPath = process.argv[3];
 
   if (!clientId) {
-    console.error('Usage: tsx scripts/request-site-build.ts <clientId> [specPath]');
+    console.error('Usage: npm run request-site-build -- <clientId> [specPath]');
+    console.error('   or: tsx scripts/request-site-build.ts <clientId> [specPath]');
     process.exit(1);
   }
+
+  await loadSecrets();
 
   const result = await requestSiteBuild({ clientId, specPath });
 
