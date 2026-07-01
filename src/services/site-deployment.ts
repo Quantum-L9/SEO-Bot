@@ -67,6 +67,16 @@ class GitHubContentClient {
   }
 
   async readFile(filePath: string): Promise<{ content: string; sha: string }> {
+    // Dry-run (test env, kill-switch, or an unconfigured/blank tenant) must make
+    // NO outbound call. Without this, a dry-run client would still hit the GitHub
+    // API with an empty token and 401 on every mutation — noisy and pointless for
+    // the many multi-tenant clients that run in dry-run until configured. Returning
+    // an empty sentinel lets the mutation run harmlessly and writeFile (already
+    // dry-run guarded) return the dry-run result.
+    if (this.config.dryRun) {
+      logger.info({ filePath }, '[DRY-RUN] Would read file');
+      return { content: '', sha: '' };
+    }
     const url = `${this.baseUrl}/repos/${this.config.websiteBotRepo}/contents/${filePath}?ref=${this.config.sourceBranch}`;
     const response = await axios.get(url, { headers: this.headers });
     const content = Buffer.from(response.data.content, 'base64').toString('utf-8');
@@ -143,8 +153,8 @@ export function siteConfigFromEnv(): SiteDeploymentConfig {
  * treated the same as an absent key, so a half-populated `site_deployment`
  * never performs a live write. Also honors the global test / dry-run env kills.
  */
-export function siteConfigFromClient(clientConfig: ClientConfig): SiteDeploymentConfig {
-  const sd = clientConfig.site_deployment;
+export function siteConfigFromClient(clientConfig?: Partial<ClientConfig>): SiteDeploymentConfig {
+  const sd = clientConfig?.site_deployment;
   const githubToken = sd?.githubToken ?? '';
   const websiteBotRepo = sd?.websiteBotRepo ?? '';
   if (!githubToken || !websiteBotRepo) {

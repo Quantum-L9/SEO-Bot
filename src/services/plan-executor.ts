@@ -36,7 +36,7 @@ import {
   siteConfigFromClient,
   type SiteDeploymentConfig,
 } from './site-deployment.js';
-import type { SurpassAction, ClientConfig } from '../types/index.js';
+import type { SurpassAction } from '../types/index.js';
 
 const logger = createModuleLogger('plan-executor');
 
@@ -133,7 +133,7 @@ export async function executeSurpassPlans(job: Job): Promise<void> {
   // attaches the full `clients.config` jsonb as `job.data.clientConfig`; never
   // assume it's present. `siteConfigFromClient` forces dry-run when the target
   // repo/token is absent or blank, so an unconfigured client never writes live.
-  const siteConfig = siteConfigFromClient((job.data.clientConfig ?? {}) as ClientConfig);
+  const siteConfig = siteConfigFromClient(job.data.clientConfig);
 
   const db = getDb();
 

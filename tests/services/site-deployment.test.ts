@@ -20,16 +20,11 @@ import {
 } from '../../src/services/site-deployment.js';
 import type { ClientConfig } from '../../src/types/index.js';
 
-/** Build a minimal ClientConfig carrying only a site_deployment block. */
-function clientWithDeployment(sd?: Partial<ClientConfig['site_deployment']>): ClientConfig {
-  return {
-    targetKeywords: [],
-    competitors: [],
-    linkVelocity: {} as any,
-    contentStrategy: {} as any,
-    notifications: {} as any,
-    ...(sd ? { site_deployment: sd as any } : {}),
-  } as ClientConfig;
+/** A partial ClientConfig carrying only a site_deployment block — mirrors the
+ *  JSONB reality where existing clients may omit it. `siteConfigFromClient`
+ *  accepts `Partial<ClientConfig>`, so no cast is required. */
+function clientWithDeployment(sd?: ClientConfig['site_deployment']): Partial<ClientConfig> {
+  return sd ? { site_deployment: sd } : {};
 }
 
 const liveConfig: SiteDeploymentConfig = {
@@ -164,5 +159,23 @@ describe('updateMetaTitle — explicit config overrides env', () => {
     expect(getMock.mock.calls[0][1].headers.Authorization).toBe('Bearer ghp_explicit');
     expect(putMock).toHaveBeenCalledTimes(1);
     expect(putMock.mock.calls[0][0]).toContain('Quantum-L9/explicit-repo');
+  });
+
+  it('makes NO outbound call (no GET/PUT) when the config is dry-run', async () => {
+    const dryRun: SiteDeploymentConfig = {
+      githubToken: '',
+      vercelDeployHook: '',
+      websiteBotRepo: '',
+      sourceBranch: 'main',
+      dryRun: true,
+    };
+
+    const result = await updateMetaTitle('src/pages/index.astro', 'New Title', 'tenant.com', dryRun);
+
+    // An unconfigured multi-tenant client must be a true no-op — no GitHub read
+    // (which would 401 on the empty token) and no write.
+    expect(getMock).not.toHaveBeenCalled();
+    expect(putMock).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ dryRun: true, success: true });
   });
 });

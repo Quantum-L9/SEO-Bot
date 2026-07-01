@@ -46,10 +46,13 @@ export interface ClientConfig {
 }
 
 export interface ClientSiteDeploymentConfig {
-  githubToken: string;
-  vercelDeployHook: string;
-  websiteBotRepo: string;
-  sourceBranch: string;
+  // All optional: this is persisted in the `clients.config` JSONB, so existing
+  // clients may have the block absent or partially filled. `siteConfigFromClient`
+  // treats any missing/blank token or repo as a forced dry-run.
+  githubToken?: string;
+  vercelDeployHook?: string;
+  websiteBotRepo?: string;
+  sourceBranch?: string;
 }
 
 export interface TargetKeyword {
