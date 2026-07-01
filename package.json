@@ -13,6 +13,7 @@
     "migrate": "tsx src/core/database/migrate.ts",
     "seed": "tsx src/core/database/seed.ts",
     "add-client": "tsx scripts/add-client.ts",
+    "request-site-build": "tsx scripts/request-site-build.ts",
     "verify:preflight": "tsx -e \"require('./src/core/config.ts')\"",
     "verify:source": "test -f src/index.ts && test -f src/core/config.ts",
     "verify:build": "npm run build && test -f dist/index.js",

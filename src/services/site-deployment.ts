@@ -304,3 +304,63 @@ export async function triggerVercelDeploy(): Promise<void> {
   const client = getSiteDeploymentService();
   await client.triggerVercelDeploy();
 }
+
+// ─── Initial Site Build Dispatch (Pillar 5) ──────────────────────────────────
+// Programmatic "build a site for this client" trigger: fires a `build-site`
+// repository_dispatch at the Website-Bot repo, whose build-site.yml workflow
+// runs the factory pipeline (build → Vercel deploy → register back here).
+
+const DEFAULT_SPEC_PATH = 'domain_spec/domain_spec.normalized.yaml';
+
+export interface SiteBuildRequest {
+  /** Client to build for; becomes CLIENT_ID in the Website-Bot pipeline. */
+  clientId: string;
+  /** Path to the normalized domain spec already committed in the Website-Bot repo. */
+  specPath?: string;
+}
+
+export interface SiteBuildDispatchResult {
+  dispatched: boolean;
+  dryRun: boolean;
+  clientId: string;
+  specPath: string;
+}
+
+/**
+ * Request an on-demand initial site build by firing a `build-site`
+ * repository_dispatch at WEBSITE_BOT_REPO. The normalized domain spec must
+ * already exist in that repo at `specPath` (authored during onboarding — this
+ * only triggers a build for it; it does not carry or synthesize the spec).
+ * Honors the same dry-run guard as the rest of site-deployment (no token/repo
+ * configured → no-op).
+ */
+export async function requestSiteBuild(
+  req: SiteBuildRequest,
+  config: SiteDeploymentConfig = siteConfigFromEnv(),
+): Promise<SiteBuildDispatchResult> {
+  const specPath = req.specPath ?? DEFAULT_SPEC_PATH;
+
+  if (config.dryRun) {
+    logger.info({ clientId: req.clientId, specPath }, '[DRY-RUN] Would dispatch build-site');
+    return { dispatched: false, dryRun: true, clientId: req.clientId, specPath };
+  }
+
+  const url = `https://api.github.com/repos/${config.websiteBotRepo}/dispatches`;
+  await axios.post(
+    url,
+    { event_type: 'build-site', client_payload: { client_id: req.clientId, spec_path: specPath } },
+    {
+      headers: {
+        Authorization: `Bearer ${config.githubToken}`,
+        Accept: 'application/vnd.github.v3+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+    },
+  );
+
+  logger.info(
+    { clientId: req.clientId, specPath, repo: config.websiteBotRepo },
+    'Dispatched build-site to Website-Bot',
+  );
+  return { dispatched: true, dryRun: false, clientId: req.clientId, specPath };
+}
