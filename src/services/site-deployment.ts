@@ -30,6 +30,7 @@
 
 import axios from 'axios';
 import { createModuleLogger } from '../core/logger.js';
+import type { ClientConfig } from '../types/index.js';
 
 const logger = createModuleLogger('site-deployment');
 
@@ -133,6 +134,38 @@ export function siteConfigFromEnv(): SiteDeploymentConfig {
 }
 
 /**
+ * Build a per-client transport config from a client's stored `clients.config`
+ * (multi-tenant). Each client's autonomous edits then write to THAT client's
+ * repo / deploy hook instead of the single shared `WEBSITE_BOT_REPO`.
+ *
+ * Safety invariant (mirrors `siteConfigFromEnv`): force `dryRun: true` whenever
+ * the github token OR the target repo is missing OR blank — an EMPTY STRING is
+ * treated the same as an absent key, so a half-populated `site_deployment`
+ * never performs a live write. Also honors the global test / dry-run env kills.
+ */
+export function siteConfigFromClient(clientConfig: ClientConfig): SiteDeploymentConfig {
+  const sd = clientConfig.site_deployment;
+  const githubToken = sd?.githubToken ?? '';
+  const websiteBotRepo = sd?.websiteBotRepo ?? '';
+  if (!githubToken || !websiteBotRepo) {
+    logger.warn(
+      'client site_deployment missing githubToken or websiteBotRepo — forced to dry-run',
+    );
+  }
+  return {
+    githubToken,
+    vercelDeployHook: sd?.vercelDeployHook ?? '',
+    websiteBotRepo,
+    sourceBranch: sd?.sourceBranch || 'main',
+    dryRun:
+      process.env.NODE_ENV === 'test' ||
+      process.env.SITE_DEPLOY_DRY_RUN === 'true' ||
+      !githubToken ||
+      !websiteBotRepo,
+  };
+}
+
+/**
  * Get a GitHub content client.
  *
  * Pass an explicit `SiteDeploymentConfig` for multi-tenant use so each client
@@ -158,8 +191,9 @@ export async function updateMetaTitle(
   filePath: string,
   newTitle: string,
   clientDomain: string,
+  config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
-  const client = getSiteDeploymentService();
+  const client = getSiteDeploymentService(config);
   const { content, sha } = await client.readFile(filePath);
 
   const updated = content
@@ -181,8 +215,9 @@ export async function updateMetaDescription(
   filePath: string,
   newDescription: string,
   clientDomain: string,
+  config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
-  const client = getSiteDeploymentService();
+  const client = getSiteDeploymentService(config);
   const { content, sha } = await client.readFile(filePath);
 
   const updated = content
@@ -204,8 +239,9 @@ export async function injectSchema(
   schemaType: string,
   schemaJson: Record<string, unknown>,
   clientDomain: string,
+  config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
-  const client = getSiteDeploymentService();
+  const client = getSiteDeploymentService(config);
   const { content, sha } = await client.readFile(filePath);
 
   const scriptBlock = `<script type="application/ld+json">
@@ -239,8 +275,9 @@ export async function updateHeading(
   filePath: string,
   newHeading: string,
   clientDomain: string,
+  config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
-  const client = getSiteDeploymentService();
+  const client = getSiteDeploymentService(config);
   const { content, sha } = await client.readFile(filePath);
 
   const updated = content.replace(/^# .+$/m, `# ${newHeading}`);
@@ -260,8 +297,9 @@ export async function rewritePageContent(
   filePath: string,
   newBodyMarkdown: string,
   clientDomain: string,
+  config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
-  const client = getSiteDeploymentService();
+  const client = getSiteDeploymentService(config);
   const { content, sha } = await client.readFile(filePath);
 
   // Preserve frontmatter (everything between --- delimiters), replace body
@@ -284,6 +322,7 @@ export async function updateFaq(
   filePath: string,
   faqs: Array<{ question: string; answer: string }>,
   clientDomain: string,
+  config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
   const faqSchema = {
     '@context': 'https://schema.org',
@@ -294,14 +333,14 @@ export async function updateFaq(
       acceptedAnswer: { '@type': 'Answer', text: f.answer },
     })),
   };
-  return injectSchema(filePath, 'FAQPage', faqSchema, clientDomain);
+  return injectSchema(filePath, 'FAQPage', faqSchema, clientDomain, config);
 }
 
 /**
  * Trigger Vercel deploy after one or more file mutations.
  */
-export async function triggerVercelDeploy(): Promise<void> {
-  const client = getSiteDeploymentService();
+export async function triggerVercelDeploy(config?: SiteDeploymentConfig): Promise<void> {
+  const client = getSiteDeploymentService(config);
   await client.triggerVercelDeploy();
 }
 

@@ -33,41 +33,51 @@ import {
   injectSchema,
   updateHeading,
   triggerVercelDeploy,
+  siteConfigFromClient,
+  type SiteDeploymentConfig,
 } from './site-deployment.js';
-import type { SurpassAction } from '../types/index.js';
+import type { SurpassAction, ClientConfig } from '../types/index.js';
 
 const logger = createModuleLogger('plan-executor');
 
 // Maps action strings from surpass plan to deployment functions.
 // Covers the most common autonomous actions from execution-policy taxonomy.
-type ActionDispatcher = (action: SurpassAction, clientDomain: string, clientUrl: string | null) => Promise<void>;
+// 4th arg `siteConfig` carries the per-client transport target (multi-tenant),
+// so each client's edits write to THAT client's repo/hook. Dispatchers that
+// perform no write ignore it (`_siteConfig`).
+type ActionDispatcher = (
+  action: SurpassAction,
+  clientDomain: string,
+  clientUrl: string | null,
+  siteConfig: SiteDeploymentConfig,
+) => Promise<void>;
 
 const ACTION_DISPATCH_MAP: Record<string, ActionDispatcher> = {
-  meta_title_update: async (action, clientDomain, clientUrl) => {
+  meta_title_update: async (action, clientDomain, clientUrl, siteConfig) => {
     if (!clientUrl) return;
     const filePath = urlToFilePath(clientUrl);
     const newTitle = extractValue(action.action, 'title');
-    if (filePath && newTitle) await updateMetaTitle(filePath, newTitle, clientDomain);
+    if (filePath && newTitle) await updateMetaTitle(filePath, newTitle, clientDomain, siteConfig);
   },
-  meta_description_update: async (action, clientDomain, clientUrl) => {
+  meta_description_update: async (action, clientDomain, clientUrl, siteConfig) => {
     if (!clientUrl) return;
     const filePath = urlToFilePath(clientUrl);
     const newDesc = extractValue(action.action, 'description');
-    if (filePath && newDesc) await updateMetaDescription(filePath, newDesc, clientDomain);
+    if (filePath && newDesc) await updateMetaDescription(filePath, newDesc, clientDomain, siteConfig);
   },
-  heading_optimization: async (action, clientDomain, clientUrl) => {
+  heading_optimization: async (action, clientDomain, clientUrl, siteConfig) => {
     if (!clientUrl) return;
     const filePath = urlToFilePath(clientUrl);
     const newHeading = extractValue(action.action, 'heading');
-    if (filePath && newHeading) await updateHeading(filePath, newHeading, clientDomain);
+    if (filePath && newHeading) await updateHeading(filePath, newHeading, clientDomain, siteConfig);
   },
-  faq_content_update: async (_action, clientDomain, _clientUrl) => {
+  faq_content_update: async (_action, clientDomain, _clientUrl, _siteConfig) => {
     // SurpassAction carries no FAQ payload (no metadata field), and deploying an
     // empty FAQPage is a no-op at best / overwrites real schema at worst. Skip
     // until FAQ content is threaded in (aeo-geo owns FAQ generation).
     logger.warn({ clientDomain }, 'faq_content_update skipped — no FAQ payload on SurpassAction');
   },
-  schema_markup_injection: async (_action, clientDomain, clientUrl) => {
+  schema_markup_injection: async (_action, clientDomain, clientUrl, siteConfig) => {
     if (!clientUrl) return;
     const filePath = urlToFilePath(clientUrl);
     if (!filePath) return;
@@ -78,6 +88,7 @@ const ACTION_DISPATCH_MAP: Record<string, ActionDispatcher> = {
       'LocalBusiness',
       { '@context': 'https://schema.org', '@type': 'LocalBusiness', name: clientDomain, url: clientUrl },
       clientDomain,
+      siteConfig,
     );
   },
 };
@@ -117,6 +128,12 @@ function extractValue(actionText: string, _key: string): string | null {
 export async function executeSurpassPlans(job: Job): Promise<void> {
   const { clientId, clientDomain } = job.data;
   if (!clientId) return;
+
+  // Resolve this client's per-tenant deploy target. The scheduler fan-out
+  // attaches the full `clients.config` jsonb as `job.data.clientConfig`; never
+  // assume it's present. `siteConfigFromClient` forces dry-run when the target
+  // repo/token is absent or blank, so an unconfigured client never writes live.
+  const siteConfig = siteConfigFromClient((job.data.clientConfig ?? {}) as ClientConfig);
 
   const db = getDb();
 
@@ -172,7 +189,7 @@ export async function executeSurpassPlans(job: Job): Promise<void> {
       try {
         const dispatcher = ACTION_DISPATCH_MAP[actionType];
         if (dispatcher) {
-          await dispatcher(action, clientDomain, gap.clientUrl);
+          await dispatcher(action, clientDomain, gap.clientUrl, siteConfig);
           anyDeployed = true;
           logger.info({ actionType, keyword: gap.keyword }, 'Action dispatched to site-deployment');
         } else {
@@ -189,7 +206,7 @@ export async function executeSurpassPlans(job: Job): Promise<void> {
   }
 
   if (anyDeployed) {
-    await triggerVercelDeploy();
+    await triggerVercelDeploy(siteConfig);
     logger.info({ clientDomain }, 'Vercel deploy triggered after surpass plan execution');
   }
 }

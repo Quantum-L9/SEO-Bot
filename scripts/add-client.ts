@@ -53,6 +53,26 @@ async function main() {
     services.push(svc);
   }
 
+  // Per-client site-deployment target (multi-tenant). Leave any field blank to
+  // operate this client in dry-run — the executor logs mutations but writes
+  // nothing until both a GitHub token and target repo are present.
+  console.log('\nSite deployment target (press Enter on any field to keep this client dry-run):');
+  const sdGithubToken = await ask('  GitHub token (repo:write on the site repo): ');
+  const sdWebsiteBotRepo = await ask('  Website repo (e.g. Quantum-L9/Website-Bot): ');
+  const sdVercelDeployHook = await ask('  Vercel deploy hook URL: ');
+  const sdSourceBranch = (await ask('  Source branch [main]: ')) || 'main';
+
+  const siteDeployment = {
+    githubToken: sdGithubToken,
+    websiteBotRepo: sdWebsiteBotRepo,
+    vercelDeployHook: sdVercelDeployHook,
+    sourceBranch: sdSourceBranch,
+  };
+  const siteDeployDryRun = !sdGithubToken || !sdWebsiteBotRepo;
+  if (siteDeployDryRun) {
+    console.log('  ⚠️  site_deployment incomplete — this client operates in DRY-RUN (no live writes).');
+  }
+
   // Insert client
   const [client] = await db.insert(schema.clients).values({
     name,
@@ -68,6 +88,7 @@ async function main() {
       industry,
       city,
       state,
+      site_deployment: siteDeployment,
     },
   }).returning();
 
@@ -76,6 +97,7 @@ async function main() {
   console.log(`   Domain: ${client.domain}`);
   console.log(`   Keywords: ${keywords.length}`);
   console.log(`   Services: ${services.length}`);
+  console.log(`   Site deployment: ${siteDeployDryRun ? 'DRY-RUN (incomplete)' : sdWebsiteBotRepo}`);
   console.log(`\nThe Bot will begin monitoring on the next scheduled cycle.`);
 
   rl.close();
