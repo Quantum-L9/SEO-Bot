@@ -1,0 +1,31 @@
+# technical debt (json is valid yaml)
+{
+  "count": 3,
+  "findings": [
+    {
+      "blocking": false,
+      "category": "TODO_FIXME_HACK_markers",
+      "evidence": "* TODO(multi-tenant): resolve config from the client's stored config",
+      "line": 144,
+      "path": "src/services/site-deployment.ts"
+    },
+    {
+      "blocking": false,
+      "category": "unpinned_actions",
+      "evidence": "- uses: actions/checkout@v4",
+      "line": 20,
+      "path": ".github/workflows/ci.yml"
+    },
+    {
+      "blocking": false,
+      "category": "unpinned_actions",
+      "evidence": "- uses: actions/setup-node@v4",
+      "line": 24,
+      "path": ".github/workflows/ci.yml"
+    }
+  ],
+  "run_id": "1862d08dd76f",
+  "source_commit": "1862d08dd76f20b450de723d4a928e311378f469",
+  "timestamp": "2026-07-16T01:43:31Z",
+  "tool_version": "2.1.0"
+}

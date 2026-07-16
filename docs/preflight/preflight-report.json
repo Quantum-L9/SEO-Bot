@@ -1,0 +1,198 @@
+{
+  "accounting": {
+    "blocker_count": 1,
+    "not_applicable": [],
+    "overall_status": "blocked",
+    "resolved": [],
+    "unresolved_blockers": [
+      {
+        "class": "inaccessible_private_dependency",
+        "evidence": {
+          "action": "npm_install",
+          "command": "npm install",
+          "error": "npm error code E401\nnpm error 401 Unauthorized - GET https://npm.pkg.github.com/@quantum-l9%2fllm-router - unauthenticated: User cannot be authenticated with the token provided.\nnpm notice\nnpm notice New major version of npm available! 10.9.7 -> 12.0.1\nnpm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.1\nnpm notice To update run: npm install -g npm@12.0.1\nnpm notice\nnpm error A complete log of this run can be found in: /root/.npm/_logs/2026-07-16T01_43_32_973Z-debug-0.log\n"
+        },
+        "gate": 6,
+        "gate_name": "npm_install",
+        "id": "BLK-6-inaccessible_private_dependency-npm_install",
+        "remediation": {
+          "auto_option": null,
+          "commands": [],
+          "owner": "human",
+          "steps": [
+            "grant access to the private dependency / registry",
+            "re-run preflight after resolving"
+          ]
+        },
+        "severity": "high",
+        "why_not_autofixable": "autofix 'npm_install' was applicable but failed: inaccessible_private_dependency"
+      }
+    ]
+  },
+  "autofix_plans": [
+    {
+      "action": "npm_install",
+      "command": "npm ci",
+      "description": "install node dependencies so the project builds",
+      "gate": 6,
+      "gate_name": "install-succeeded",
+      "reversible": true,
+      "targets": [
+        "node_modules"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "evidence": {
+        "command_failures": 2,
+        "sections": 25
+      },
+      "id": 1,
+      "name": "probe-completed",
+      "question": "did the probe complete successfully?",
+      "verdict": "clear"
+    },
+    {
+      "evidence": {
+        "branch": "claude/install-and-run-ysw9yh",
+        "head": "1862d08dd76f",
+        "note": "no expected contract; identity accepted as observed",
+        "root": "/home/user/SEO-Bot"
+      },
+      "id": 2,
+      "name": "correct-identity",
+      "question": "correct repository / branch / commit?",
+      "verdict": "clear"
+    },
+    {
+      "evidence": {
+        "auto_formatted": [],
+        "generated": [],
+        "staged": [],
+        "tracked_modified": [],
+        "unknown": []
+      },
+      "id": 3,
+      "name": "worktree-clean",
+      "question": "worktree clean?",
+      "verdict": "clear"
+    },
+    {
+      "evidence": {
+        "expected": [
+          "package.json",
+          "tests"
+        ],
+        "missing": []
+      },
+      "id": 4,
+      "name": "foundations-present",
+      "question": "required foundations present?",
+      "verdict": "clear"
+    },
+    {
+      "evidence": {
+        "ecosystems": [
+          "node"
+        ],
+        "installed": [
+          "black",
+          "eslint",
+          "mypy",
+          "node",
+          "npm",
+          "npx",
+          "pnpm",
+          "prettier",
+          "pyright",
+          "pytest",
+          "ruff",
+          "tsc",
+          "yarn"
+        ],
+        "note": "no contract; repo tools accepted as the toolchain",
+        "repo_tools": [
+          "black",
+          "eslint",
+          "mypy",
+          "node",
+          "npm",
+          "npx",
+          "pnpm",
+          "prettier",
+          "pyright",
+          "pytest",
+          "ruff",
+          "tsc",
+          "yarn"
+        ],
+        "wanted": []
+      },
+      "id": 5,
+      "name": "toolchain-matches",
+      "question": "toolchain matches execution contract?",
+      "verdict": "clear"
+    },
+    {
+      "autofix_plan": {
+        "action": "npm_install",
+        "command": "npm ci",
+        "description": "install node dependencies so the project builds",
+        "reversible": true,
+        "targets": [
+          "node_modules"
+        ]
+      },
+      "evidence": {
+        "ecosystems": [
+          "node"
+        ]
+      },
+      "id": 6,
+      "name": "install-succeeded",
+      "question": "installation succeeded?",
+      "taxonomy": "node-modules-missing",
+      "verdict": "autofixable"
+    },
+    {
+      "evidence": {
+        "note": "failures (if any) are the existing baseline",
+        "results": {
+          "mypy": {
+            "failed": 1
+          },
+          "pytest": {
+            "failed": 1
+          },
+          "ruff": {
+            "failed": 0
+          },
+          "ruff_format": {
+            "failed": 0
+          }
+        }
+      },
+      "id": 7,
+      "name": "baseline-reproduces",
+      "question": "baseline validation reproduces?",
+      "verdict": "clear"
+    },
+    {
+      "evidence": {
+        "genuine_blockers": 0,
+        "pending_autofixes": 1
+      },
+      "id": 8,
+      "name": "implementation-ready",
+      "question": "implementation ready after remediation?",
+      "verdict": "clear"
+    }
+  ],
+  "iterations": 1,
+  "mode": "applied",
+  "run_id": "1862d08dd76f",
+  "source_commit": "1862d08dd76f20b450de723d4a928e311378f469",
+  "timestamp": "2026-07-16T01:43:31Z",
+  "tool_version": "2.1.0"
+}

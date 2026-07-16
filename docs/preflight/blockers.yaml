@@ -1,0 +1,32 @@
+# preflight blockers (json is valid yaml)
+{
+  "blocker_count": 1,
+  "blockers": [
+    {
+      "class": "inaccessible_private_dependency",
+      "evidence": {
+        "action": "npm_install",
+        "command": "npm install",
+        "error": "npm error code E401\nnpm error 401 Unauthorized - GET https://npm.pkg.github.com/@quantum-l9%2fllm-router - unauthenticated: User cannot be authenticated with the token provided.\nnpm notice\nnpm notice New major version of npm available! 10.9.7 -> 12.0.1\nnpm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.1\nnpm notice To update run: npm install -g npm@12.0.1\nnpm notice\nnpm error A complete log of this run can be found in: /root/.npm/_logs/2026-07-16T01_43_32_973Z-debug-0.log\n"
+      },
+      "gate": 6,
+      "gate_name": "npm_install",
+      "id": "BLK-6-inaccessible_private_dependency-npm_install",
+      "remediation": {
+        "auto_option": null,
+        "commands": [],
+        "owner": "human",
+        "steps": [
+          "grant access to the private dependency / registry",
+          "re-run preflight after resolving"
+        ]
+      },
+      "severity": "high",
+      "why_not_autofixable": "autofix 'npm_install' was applicable but failed: inaccessible_private_dependency"
+    }
+  ],
+  "run_id": "1862d08dd76f",
+  "source_commit": "1862d08dd76f20b450de723d4a928e311378f469",
+  "timestamp": "2026-07-16T01:43:31Z",
+  "tool_version": "2.1.0"
+}
