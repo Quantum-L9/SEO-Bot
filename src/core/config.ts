@@ -76,6 +76,10 @@ const envSchema = z.object({
   DEFAULT_CLIENT_WEEKLY_CEILING: z.coerce.number().default(100.00),
   GLOBAL_MONTHLY_HARD_CEILING: z.coerce.number().default(2000.00),
   SURGE_THRESHOLD: z.coerce.number().default(0.6),
+  // Optional hard daily LLM spend cap (USD). When set, execute() defers tasks
+  // once the day's recorded spend reaches this value. Unset = no daily cap
+  // (the router's weekly/monthly/global ceilings still apply).
+  DAILY_SPEND_CAP: z.coerce.number().optional(),
 
   // Execution Policy
   AUTO_EXECUTE_THRESHOLD: z.enum(['low', 'medium', 'high']).default('high'),
