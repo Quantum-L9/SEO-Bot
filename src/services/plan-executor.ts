@@ -189,10 +189,9 @@ export async function executeSurpassPlans(job: Job): Promise<void> {
       }
     }
 
-    // Only advance to 'executing' if we did NOT attempt real dispatches and fail
-    // every one. Advancing on total failure silently loses the planned work,
-    // because the next run only re-selects status='planned'. Leave it 'planned'
-    // so it is retried on the next cycle.
+    // If we attempted real dispatches and every one failed, do NOT advance to
+    // 'executing' — that would silently lose the planned work, since the next
+    // run only re-selects status='planned'. Leave it 'planned' so it is retried.
     if (dispatchAttempts > 0 && dispatchSuccesses === 0) {
       logger.error(
         { gapId: gap.id, keyword: gap.keyword, attempts: dispatchAttempts },

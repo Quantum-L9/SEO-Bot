@@ -67,5 +67,7 @@ describe('yamlDoubleQuoted', () => {
   it('escapes backslashes and tolerates empty/nullish input', () => {
     expect(yamlDoubleQuoted('a\\b')).toBe('"a\\\\b"');
     expect(yamlDoubleQuoted('')).toBe('""');
+    expect(yamlDoubleQuoted(null)).toBe('""');
+    expect(yamlDoubleQuoted(undefined)).toBe('""');
   });
 });

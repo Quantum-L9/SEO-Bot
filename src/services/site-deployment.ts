@@ -43,7 +43,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
  * unescaped `"` breaks the YAML (fails the site build) and a newline can inject
  * an arbitrary extra frontmatter key. Collapse newlines and escape `\` and `"`.
  */
-export function yamlDoubleQuoted(value: string): string {
+export function yamlDoubleQuoted(value: string | null | undefined): string {
   const oneLine = String(value ?? '').replace(/[\r\n]+/g, ' ').trim();
   const escaped = oneLine.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return `"${escaped}"`;
