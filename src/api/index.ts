@@ -30,7 +30,9 @@ import { getConfig } from '../core/config.js';
 const logger = createModuleLogger('api');
 
 export async function startApiServer(port: number = 3100): Promise<void> {
-  const app = Fastify({ logger: false });
+  // trustProxy so request.ip (and the per-IP rate limiter) use X-Forwarded-For
+  // when deployed behind a reverse proxy / tunnel. Explicit + configurable.
+  const app = Fastify({ logger: false, trustProxy: getConfig().TRUST_PROXY });
 
   await app.register(helmet);
   await app.register(formBody);

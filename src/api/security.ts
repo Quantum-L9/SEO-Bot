@@ -89,9 +89,17 @@ export function registerApiSecurity(app: FastifyInstance): void {
   // ── 1. Rate limiter (runs first, so unauthenticated floods are also capped) ──
   app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
     const now = Date.now();
-    // Lazy prune to bound memory under IP churn.
+    // Bound memory under IP churn: prune expired buckets, then hard-evict the
+    // oldest-inserted entries if we're still over the cap (a burst of unique IPs
+    // within a single window won't have expired yet). Map preserves insertion
+    // order, so the first keys are the oldest.
     if (buckets.size > RATE_MAX_BUCKETS) {
       for (const [k, b] of buckets) if (b.resetAt <= now) buckets.delete(k);
+      while (buckets.size > RATE_MAX_BUCKETS) {
+        const oldest = buckets.keys().next().value;
+        if (oldest === undefined) break;
+        buckets.delete(oldest);
+      }
     }
     const path = pathname(request.url);
     const strict = isStrictRateLimited(path);

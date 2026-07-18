@@ -73,6 +73,11 @@ const envSchema = z.object({
   BOT_PORT: z.coerce.number().default(3100),
   BOT_LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   BOT_TIMEZONE: z.string().default('America/New_York'),
+  // Trust X-Forwarded-For. Set true when the API runs behind a reverse proxy /
+  // tunnel (Caddy/nginx/Cloudflare) so request.ip — and the per-IP rate limiter
+  // — reflect the real client IP rather than the proxy's. Default false (do not
+  // trust XFF) to avoid IP spoofing when not behind a trusted proxy.
+  TRUST_PROXY: z.string().optional().transform((v) => v === 'true' || v === '1'),
 
   // Notifications
   OPERATOR_EMAIL: z.string().email().optional(),
