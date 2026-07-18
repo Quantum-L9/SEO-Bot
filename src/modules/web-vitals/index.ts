@@ -132,7 +132,10 @@ async function fetchCruxData(origin: string, device: 'PHONE' | 'DESKTOP'): Promi
     return {
       lcp: getP75(record.largest_contentful_paint),
       inp: getP75(record.interaction_to_next_paint),
-      cls: getP75(record.cumulative_layout_shift) ? getP75(record.cumulative_layout_shift) / 100 : null,
+      // CrUX returns CLS as an unscaled fraction (e.g. 0.12) — same units as the
+      // PSI path. Do NOT divide by 100 (that turned a "poor" 0.30 into 0.003,
+      // which rates "good" and suppresses the alert).
+      cls: getP75(record.cumulative_layout_shift),
       fcp: getP75(record.first_contentful_paint),
       ttfb: getP75(record.experimental_time_to_first_byte),
     };
@@ -191,7 +194,9 @@ async function fetchRumFromPosthog(clientId: string, domain: string): Promise<{
         },
       },
       {
-        headers: { Authorization: `Bearer ${config.POSTHOG_PERSONAL_API_KEY}` },
+        // Use the client's own PostHog key — its events live in the client's
+        // project, which the global personal key may not have access to.
+        headers: { Authorization: `Bearer ${client.posthogApiKey}` },
         timeout: 30000,
       }
     );

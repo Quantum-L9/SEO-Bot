@@ -116,7 +116,9 @@ async function pullEngagementData(job: Job): Promise<void> {
     return;
   }
 
-  const posthog = new PostHogClient(config.POSTHOG_API_URL, config.POSTHOG_PERSONAL_API_KEY);
+  // Use the client's own PostHog key — its events live in the client's project,
+  // which the global personal key may not be able to read.
+  const posthog = new PostHogClient(config.POSTHOG_API_URL, client.posthogApiKey);
   const today = new Date().toISOString().split('T')[0];
 
   logger.info({ clientDomain }, 'Pulling engagement data from PostHog');
