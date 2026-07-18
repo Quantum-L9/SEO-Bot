@@ -27,6 +27,23 @@ import type { JobDefinition, ModuleName } from '../types/index.js';
 
 const logger = createModuleLogger('scheduler');
 
+/**
+ * Deterministic BullMQ job id for a per-client fan-out child.
+ *
+ * BullMQ is at-least-once: if the parent fan-out job's worker crashes (or stalls
+ * past its lock) after enqueuing some/all children but before the job is marked
+ * completed, BullMQ re-runs the parent — which would fan out a SECOND full set of
+ * child jobs. Children auto-execute real, irreversible per-client actions
+ * (outreach emails, directory submissions), so duplicates are harmful. Giving
+ * each child a deterministic id makes BullMQ ignore a re-add of an id that
+ * already exists, so a retried fan-out is idempotent. Scoped to the UTC day so a
+ * legitimately re-scheduled daily job on a later day still runs.
+ */
+export function fanoutChildJobId(jobName: string, clientId: string, date: Date = new Date()): string {
+  const day = date.toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+  return `${jobName}:${clientId}:${day}`;
+}
+
 // ─── Job Registry ────────────────────────────────────────────────────────────
 
 const JOB_DEFINITIONS: JobDefinition[] = [
@@ -269,6 +286,9 @@ export class Scheduler {
             clientDomain: client.domain,
             clientConfig: client.config,
           }, {
+            // Deterministic id → a retried parent fan-out does not double-enqueue
+            // this client's child job (idempotency; prevents duplicate outreach).
+            jobId: fanoutChildJobId(definition.name, client.id),
             removeOnComplete: { count: 100 },
             removeOnFail: { count: 50 },
           });
