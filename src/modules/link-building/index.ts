@@ -32,7 +32,7 @@
 
 import axios from 'axios';
 import { Job } from 'bullmq';
-import { eq, and, desc, lt, gte, inArray, sql } from 'drizzle-orm';
+import { eq, and, desc, gte, sql } from 'drizzle-orm';
 import { velocityRunLimit } from './velocity.js';
 import { Scheduler } from '../../core/scheduler.js';
 import { getConfig } from '../../core/config.js';
