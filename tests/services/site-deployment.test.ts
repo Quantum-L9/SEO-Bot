@@ -8,7 +8,7 @@ vi.mock('../../src/core/logger.js', () => ({
   createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
-import { requestSiteBuild, type SiteDeploymentConfig } from '../../src/services/site-deployment.js';
+import { requestSiteBuild, yamlDoubleQuoted, type SiteDeploymentConfig } from '../../src/services/site-deployment.js';
 
 const liveConfig: SiteDeploymentConfig = {
   githubToken: 'tok',
@@ -52,5 +52,20 @@ describe('requestSiteBuild', () => {
       clientId: 'c3',
       specPath: 'domain_spec/domain_spec.normalized.yaml',
     });
+  });
+});
+
+describe('yamlDoubleQuoted', () => {
+  it('escapes embedded double-quotes so frontmatter stays valid YAML', () => {
+    expect(yamlDoubleQuoted('Best "Roofer" in Austin')).toBe('"Best \\"Roofer\\" in Austin"');
+  });
+
+  it('collapses newlines so a value cannot inject an extra frontmatter key', () => {
+    expect(yamlDoubleQuoted('Title\nmalicious: true')).toBe('"Title malicious: true"');
+  });
+
+  it('escapes backslashes and tolerates empty/nullish input', () => {
+    expect(yamlDoubleQuoted('a\\b')).toBe('"a\\\\b"');
+    expect(yamlDoubleQuoted('')).toBe('""');
   });
 });

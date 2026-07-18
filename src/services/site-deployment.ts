@@ -33,6 +33,22 @@ import { createModuleLogger } from '../core/logger.js';
 
 const logger = createModuleLogger('site-deployment');
 
+// Every outbound call gets a bounded timeout so a hung GitHub/Vercel endpoint
+// can't stall a BullMQ worker slot indefinitely.
+const REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * Render a value as a safe double-quoted YAML scalar (including the quotes).
+ * LLM-generated titles/descriptions are written into Astro frontmatter; an
+ * unescaped `"` breaks the YAML (fails the site build) and a newline can inject
+ * an arbitrary extra frontmatter key. Collapse newlines and escape `\` and `"`.
+ */
+export function yamlDoubleQuoted(value: string): string {
+  const oneLine = String(value ?? '').replace(/[\r\n]+/g, ' ').trim();
+  const escaped = oneLine.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `"${escaped}"`;
+}
+
 export interface SiteDeploymentConfig {
   githubToken: string;
   vercelDeployHook: string;
@@ -67,7 +83,7 @@ class GitHubContentClient {
 
   async readFile(filePath: string): Promise<{ content: string; sha: string }> {
     const url = `${this.baseUrl}/repos/${this.config.websiteBotRepo}/contents/${filePath}?ref=${this.config.sourceBranch}`;
-    const response = await axios.get(url, { headers: this.headers });
+    const response = await axios.get(url, { headers: this.headers, timeout: REQUEST_TIMEOUT_MS });
     const content = Buffer.from(response.data.content, 'base64').toString('utf-8');
     return { content, sha: response.data.sha };
   }
@@ -84,7 +100,7 @@ class GitHubContentClient {
       content: Buffer.from(content, 'utf-8').toString('base64'),
       sha,
       branch: this.config.sourceBranch,
-    }, { headers: this.headers });
+    }, { headers: this.headers, timeout: REQUEST_TIMEOUT_MS });
 
     return {
       success: true,
@@ -104,7 +120,7 @@ class GitHubContentClient {
       logger.warn('VERCEL_DEPLOY_HOOK not set — skipping Vercel deploy trigger');
       return;
     }
-    await axios.post(this.config.vercelDeployHook, {});
+    await axios.post(this.config.vercelDeployHook, {}, { timeout: REQUEST_TIMEOUT_MS });
     logger.info('Vercel deploy hook triggered');
   }
 }
@@ -162,9 +178,10 @@ export async function updateMetaTitle(
   const client = getSiteDeploymentService();
   const { content, sha } = await client.readFile(filePath);
 
+  const safeTitle = yamlDoubleQuoted(newTitle);
   const updated = content
-    .replace(/^title:.*$/m, `title: "${newTitle}"`)
-    .replace(/^og_title:.*$/m, `og_title: "${newTitle}"`);
+    .replace(/^title:.*$/m, `title: ${safeTitle}`)
+    .replace(/^og_title:.*$/m, `og_title: ${safeTitle}`);
 
   return client.writeFile(
     filePath,
@@ -186,7 +203,7 @@ export async function updateMetaDescription(
   const { content, sha } = await client.readFile(filePath);
 
   const updated = content
-    .replace(/^description:.*$/m, `description: "${newDescription}"`);
+    .replace(/^description:.*$/m, `description: ${yamlDoubleQuoted(newDescription)}`);
 
   return client.writeFile(
     filePath,
@@ -243,7 +260,9 @@ export async function updateHeading(
   const client = getSiteDeploymentService();
   const { content, sha } = await client.readFile(filePath);
 
-  const updated = content.replace(/^# .+$/m, `# ${newHeading}`);
+  // Collapse newlines so a multi-line value can't inject extra markdown lines.
+  const safeHeading = String(newHeading ?? '').replace(/[\r\n]+/g, ' ').trim();
+  const updated = content.replace(/^# .+$/m, `# ${safeHeading}`);
 
   return client.writeFile(
     filePath,
@@ -355,6 +374,7 @@ export async function requestSiteBuild(
         Accept: 'application/vnd.github.v3+json',
         'X-GitHub-Api-Version': '2022-11-28',
       },
+      timeout: REQUEST_TIMEOUT_MS,
     },
   );
 
