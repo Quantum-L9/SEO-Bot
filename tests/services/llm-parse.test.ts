@@ -15,8 +15,30 @@ describe('parseJsonFromLlm', () => {
     expect(parseJsonFromLlm('Sure! Here you go: {"ok":true} — hope that helps')).toEqual({ ok: true });
   });
 
+  it('extracts the FIRST balanced JSON value when multiple blocks are present', () => {
+    // A greedy first-open-to-last-close match would capture `{"a":1} ... {"b":2}`
+    // and fail to parse; the balanced scan returns just the first value.
+    expect(parseJsonFromLlm('{"a":1} and then {"b":2}')).toEqual({ a: 1 });
+    expect(parseJsonFromLlm('[1,2] then [3,4]')).toEqual([1, 2]);
+  });
+
+  it('is not fooled by brackets inside string values', () => {
+    expect(parseJsonFromLlm('{"note":"a } b ] c"} trailing')).toEqual({ note: 'a } b ] c' });
+  });
+
   it('throws a clear error (never a raw SyntaxError) on non-JSON', () => {
     expect(() => parseJsonFromLlm('I could not complete that request.')).toThrow(/did not return valid JSON/);
+  });
+
+  it('does not echo raw model output in the error message', () => {
+    const secret = 'client PII: john@example.com ssn 123-45-6789';
+    try {
+      parseJsonFromLlm(secret);
+      throw new Error('expected parseJsonFromLlm to throw');
+    } catch (e: any) {
+      expect(e.message).not.toContain('john@example.com');
+      expect(e.message).not.toContain('123-45-6789');
+    }
   });
 });
 
