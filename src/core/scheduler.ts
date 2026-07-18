@@ -31,17 +31,19 @@ const logger = createModuleLogger('scheduler');
  * Deterministic BullMQ job id for a per-client fan-out child.
  *
  * BullMQ is at-least-once: if the parent fan-out job's worker crashes (or stalls
- * past its lock) after enqueuing some/all children but before the job is marked
- * completed, BullMQ re-runs the parent — which would fan out a SECOND full set of
- * child jobs. Children auto-execute real, irreversible per-client actions
- * (outreach emails, directory submissions), so duplicates are harmful. Giving
- * each child a deterministic id makes BullMQ ignore a re-add of an id that
- * already exists, so a retried fan-out is idempotent. Scoped to the UTC day so a
- * legitimately re-scheduled daily job on a later day still runs.
+ * past its lock) after enqueuing some/all children but before it is marked
+ * completed, BullMQ re-runs the SAME parent job instance — which would fan out a
+ * second full set of children. Children auto-execute irreversible per-client
+ * actions (outreach emails, directory submissions), so duplicates are harmful.
+ *
+ * Keying the child id on the PARENT job's instance id makes BullMQ ignore the
+ * re-add on a retry (same parent id) while still letting every distinct
+ * scheduled occurrence run: a job scheduled every 6 hours gets a NEW parent id
+ * per fire, so its fan-out is not wrongly deduped across the day (a day-scoped
+ * key would suppress all-but-the-first run).
  */
-export function fanoutChildJobId(jobName: string, clientId: string, date: Date = new Date()): string {
-  const day = date.toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
-  return `${jobName}:${clientId}:${day}`;
+export function fanoutChildJobId(parentJobId: string, clientId: string): string {
+  return `child:${parentJobId}:${clientId}`;
 }
 
 // ─── Job Registry ────────────────────────────────────────────────────────────
@@ -278,6 +280,11 @@ export class Scheduler {
         const activeClients = await db.select().from(schema.clients)
           .where(eq(schema.clients.active, true));
 
+        // Parent job instance id — stable across retries of THIS fire, unique
+        // per scheduled occurrence, so the child dedup below is idempotent on
+        // retry without suppressing later scheduled runs.
+        const parentJobId = job.id ?? definition.name;
+
         for (const client of activeClients) {
           const queue = this.queues.get(`l9-${definition.module}`)!;
           await queue.add(definition.name, {
@@ -288,7 +295,7 @@ export class Scheduler {
           }, {
             // Deterministic id → a retried parent fan-out does not double-enqueue
             // this client's child job (idempotency; prevents duplicate outreach).
-            jobId: fanoutChildJobId(definition.name, client.id),
+            jobId: fanoutChildJobId(parentJobId, client.id),
             removeOnComplete: { count: 100 },
             removeOnFail: { count: 50 },
           });

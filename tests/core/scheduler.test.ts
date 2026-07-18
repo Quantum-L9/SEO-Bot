@@ -15,23 +15,25 @@ vi.mock('ioredis', () => ({ Redis: class {} }));
 import { fanoutChildJobId } from '../../src/core/scheduler.js';
 
 describe('fanoutChildJobId', () => {
-  it('is deterministic per job/client/day regardless of time of day', () => {
-    const morning = new Date('2026-07-18T09:00:00Z');
-    const night = new Date('2026-07-18T23:59:59Z');
-    expect(fanoutChildJobId('serp:check-rankings', 'client-1', morning)).toBe(
-      'serp:check-rankings:client-1:2026-07-18',
+  it('is stable for the same parent job id + client (retry dedup)', () => {
+    // Same parent instance id (a retry of the same fire) → same child id, so
+    // BullMQ ignores the re-add and the child is not run twice.
+    expect(fanoutChildJobId('repeat:vitals:1750000000000', 'client-1')).toBe(
+      'child:repeat:vitals:1750000000000:client-1',
     );
-    // Same id later the same UTC day → a retried fan-out is deduped by BullMQ.
-    expect(fanoutChildJobId('serp:check-rankings', 'client-1', night)).toBe(
-      'serp:check-rankings:client-1:2026-07-18',
+    expect(fanoutChildJobId('repeat:vitals:1750000000000', 'client-1')).toBe(
+      'child:repeat:vitals:1750000000000:client-1',
     );
   });
 
-  it('differs by client and by day', () => {
-    const d = new Date('2026-07-18T09:00:00Z');
-    expect(fanoutChildJobId('j', 'a', d)).not.toBe(fanoutChildJobId('j', 'b', d));
-    expect(fanoutChildJobId('j', 'a', d)).not.toBe(
-      fanoutChildJobId('j', 'a', new Date('2026-07-19T09:00:00Z')),
-    );
+  it('differs across scheduled occurrences so every fire still runs', () => {
+    // Every-6-hours job → distinct parent ids per fire → distinct child ids,
+    // so later runs the same day are NOT wrongly deduped.
+    expect(fanoutChildJobId('repeat:vitals:1750000000000', 'c1'))
+      .not.toBe(fanoutChildJobId('repeat:vitals:1750021600000', 'c1'));
+  });
+
+  it('differs by client', () => {
+    expect(fanoutChildJobId('p1', 'a')).not.toBe(fanoutChildJobId('p1', 'b'));
   });
 });
