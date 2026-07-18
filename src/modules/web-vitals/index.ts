@@ -194,9 +194,11 @@ async function fetchRumFromPosthog(clientId: string, domain: string): Promise<{
         },
       },
       {
-        // Use the client's own PostHog key — its events live in the client's
-        // project, which the global personal key may not have access to.
-        headers: { Authorization: `Bearer ${client.posthogApiKey}` },
+        // Query API needs a PostHog PERSONAL API key. client.posthogApiKey is
+        // the per-project ingestion key (used client-side in the tracking
+        // snippet) and would 401 here. All clients share one PostHog instance
+        // (per-client projects), so the global personal key can read any project.
+        headers: { Authorization: `Bearer ${config.POSTHOG_PERSONAL_API_KEY}` },
         timeout: 30000,
       }
     );
