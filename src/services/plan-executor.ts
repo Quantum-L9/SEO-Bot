@@ -149,6 +149,9 @@ export async function executeSurpassPlans(job: Job): Promise<void> {
       continue;
     }
 
+    let dispatchAttempts = 0;
+    let dispatchSuccesses = 0;
+
     for (const action of autonomousActions) {
       const actionType = inferActionType(action.action);
       const proposal = createProposal({
@@ -169,18 +172,32 @@ export async function executeSurpassPlans(job: Job): Promise<void> {
         continue;
       }
 
+      const dispatcher = ACTION_DISPATCH_MAP[actionType];
+      if (!dispatcher) {
+        logger.warn({ actionType }, 'No dispatcher for action type — skipping');
+        continue;
+      }
+
+      dispatchAttempts += 1;
       try {
-        const dispatcher = ACTION_DISPATCH_MAP[actionType];
-        if (dispatcher) {
-          await dispatcher(action, clientDomain, gap.clientUrl);
-          anyDeployed = true;
-          logger.info({ actionType, keyword: gap.keyword }, 'Action dispatched to site-deployment');
-        } else {
-          logger.warn({ actionType }, 'No dispatcher for action type — skipping');
-        }
+        await dispatcher(action, clientDomain, gap.clientUrl);
+        dispatchSuccesses += 1;
+        anyDeployed = true;
+        logger.info({ actionType, keyword: gap.keyword }, 'Action dispatched to site-deployment');
       } catch (err: any) {
         logger.error({ actionType, keyword: gap.keyword, error: err.message }, 'Dispatch failed');
       }
+    }
+
+    // If we attempted real dispatches and every one failed, do NOT advance to
+    // 'executing' — that would silently lose the planned work, since the next
+    // run only re-selects status='planned'. Leave it 'planned' so it is retried.
+    if (dispatchAttempts > 0 && dispatchSuccesses === 0) {
+      logger.error(
+        { gapId: gap.id, keyword: gap.keyword, attempts: dispatchAttempts },
+        'All dispatches failed for gap — leaving status=planned for retry',
+      );
+      continue;
     }
 
     await db.update(schema.gapAnalyses)

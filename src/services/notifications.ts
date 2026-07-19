@@ -113,7 +113,7 @@ export class NotificationService {
         chat_id: config.TELEGRAM_CHAT_ID,
         text,
         parse_mode: 'Markdown',
-      });
+      }, { timeout: 15_000 });
       logger.debug('Telegram alert sent');
     } catch (error: any) {
       logger.error({ error: error.message }, 'Failed to send Telegram alert');
