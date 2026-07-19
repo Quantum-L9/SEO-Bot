@@ -1,0 +1,59 @@
+# TODO — Deferred / externally-gated work
+
+Tracked items that are intentionally **not** done yet because they depend on an
+operational or external precondition (not on more code). Each lists the exact
+trigger that unblocks it.
+
+---
+
+## 1. Enable multi-tenant `serp:execute-surpass-plans` (the enable-flip)
+
+**Status:** deferred — code merged, job still `enabled: false`.
+**Where:** `src/core/scheduler.ts` (the `serp:execute-surpass-plans` job definition).
+
+The multi-tenant `site_deployment` wiring is fully merged: each client's
+autonomous surpass-plan edits resolve their own repo / deploy hook via
+`siteConfigFromClient(job.data.clientConfig)`, and safety is enforced at that
+boundary — any absent or blank github token / target repo (plus the
+`NODE_ENV`/`SITE_DEPLOY_DRY_RUN` kills) forces `dryRun: true`, so an
+unconfigured client is a true no-op (no outbound GitHub call).
+
+**Deliberately NOT flipped.** The plan gates the `enabled: false → true` flip
+behind an operational precondition, not code: **real per-client
+`config.site_deployment` must exist in the DB** (set via `scripts/add-client.ts`).
+Because safety is enforced at the `siteConfigFromClient` boundary, flipping it
+later is safe-by-construction once that config exists.
+
+**Unblock trigger:** real per-client `site_deployment` config is populated in
+`clients.config` for the tenants that should write live → then flip
+`enabled: false → true` (its own small PR, separate from the code merge) and
+redeploy.
+
+**Rollback:** flip `enabled: true → false`, redeploy, confirm no job re-enqueues
+next cycle, and audit recent `gapAnalyses` rows at `status='executing'`.
+
+---
+
+## 2. P4a — consume `@quantum-l9/infisical-config` (Infisical loader)
+
+**Status:** coded; open as **draft PR #12**. CI red only because the package
+isn't published yet.
+
+**Unblock trigger:** `@quantum-l9/infisical-config` publishes to GitHub Packages
+**and** this repo is granted package read →
+- `npm install` in CI goes green,
+- mark PR #12 ready-for-review,
+- merge.
+
+No code changes remain on this repo's side.
+
+---
+
+## Related (other repo)
+
+- **P4b — Website-Bot `infisical run` wrap:** see `TODO.md` in `Quantum-L9/Website-Bot`.
+  Gated on the Infisical project being provisioned (`terraform apply`), secret
+  values populated, and the 3 `INFISICAL_*` bootstrap vars set as Actions secrets.
+
+Both P4a and P4b are downstream of the **handoff pushes** (`infra` +
+`infisical-config` repos).
