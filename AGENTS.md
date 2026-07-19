@@ -66,6 +66,10 @@ points at a `seed.ts` that does not exist. Follow the code; don't propagate the 
 | DB migrate | `npm run migrate` / `verify:db` (`--check`) | Mutates the DB — treat as stateful (§9). |
 | Dev | `npm run dev` | `tsx watch` |
 
+- **Private-dep auth:** installing `@quantum-l9/*` needs `NODE_AUTH_TOKEN` — a **`read:packages`-only
+  PAT** set in the environment-variables panel (not a repo file, not app config; publishing stays in
+  CI). Missing → deps don't install and CI stays the gate; `.claude/hooks/session-start.sh` installs
+  them once it is set.
 - **Lint is unconfigured** (`eslint src/` has no committed config → no-op/fails; CI skips it).
   **Format is unwired** (no prettier dep/config). Do not claim "lint/format pass" — they don't run.
 
