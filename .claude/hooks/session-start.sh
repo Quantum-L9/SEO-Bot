@@ -22,8 +22,10 @@ fi
 
 # Persist the token for every subsequent Bash tool call in this session.
 # CLAUDE_ENV_FILE is provided to SessionStart hooks; guard in case it is empty.
+# Use printf %q so a token with shell-significant characters is safely quoted
+# for when the env file is later sourced (no breakage, no injection).
 if [ -n "$CLAUDE_ENV_FILE" ]; then
-  echo "export NODE_AUTH_TOKEN=$NODE_AUTH_TOKEN" >> "$CLAUDE_ENV_FILE"
+  printf 'export NODE_AUTH_TOKEN=%q\n' "$NODE_AUTH_TOKEN" >> "$CLAUDE_ENV_FILE"
 fi
 
 # Belt-and-suspenders: back the scoped registry into ~/.npmrc (idempotent) so
