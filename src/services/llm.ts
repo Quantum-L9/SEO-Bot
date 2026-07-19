@@ -36,9 +36,18 @@ import {
 import { getConfig } from '../core/config.js';
 import { createModuleLogger } from '../core/logger.js';
 import { getDb, schema } from '../core/database/index.js';
+import { parseJsonFromLlm, parseScore } from './llm-parse.js';
 import type { ModuleName } from '../types/index.js';
 
 const logger = createModuleLogger('llm');
+
+/** Thrown when the optional hard daily spend cap (DAILY_SPEND_CAP) is reached. */
+export class DailyBudgetExhaustedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DailyBudgetExhaustedError';
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════
 // MODULE-TO-TASK-TYPE MAPPING
@@ -90,6 +99,7 @@ export class LlmService {
     userPrompt: string,
     options?: { images?: string[]; assistantContext?: string; consensus?: boolean },
   ): Promise<LLMResponse> {
+    await this.enforceDailyCap(task);
     try {
       const response = await this.router.execute(task, systemPrompt, userPrompt, options);
       await this.logUsage(task, response);
@@ -151,7 +161,7 @@ export class LlmService {
       'You are a precise data extractor. Always respond with valid JSON only. No markdown fences.',
       prompt,
     );
-    return JSON.parse(response.content) as T;
+    return parseJsonFromLlm<T>(response.content);
   }
 
   async score(
@@ -171,7 +181,7 @@ export class LlmService {
       'You are a precise scorer. Respond with only a number between 0 and 100, no explanation.',
       prompt,
     );
-    return parseFloat(response.content.trim());
+    return parseScore(response.content);
   }
 
   async generateContent(
@@ -351,6 +361,28 @@ export class LlmService {
 
   getGlobalSpend() {
     return this.router.getGlobalSpend();
+  }
+
+  /**
+   * Hard daily spend cap (opt-in via DAILY_SPEND_CAP). Complements the router's
+   * weekly/monthly/global ceilings, which have no daily tier. When the day's
+   * recorded spend has reached the cap, defer the task rather than dispatching.
+   *
+   * Note: this is a coarse pre-dispatch guard read from llm_usage; it does not
+   * reserve budget atomically, so under heavy concurrency the day's total can
+   * overshoot the cap by the in-flight calls. The authoritative fix is an atomic
+   * counter in the router — tracked separately.
+   */
+  private async enforceDailyCap(task: TaskDescriptor): Promise<void> {
+    const cap = getConfig().DAILY_SPEND_CAP;
+    if (!cap || cap <= 0) return;
+    const spent = await this.getDailySpend();
+    if (spent >= cap) {
+      logger.warn({ clientId: task.clientId, spent, cap }, 'Daily LLM spend cap reached; deferring task');
+      throw new DailyBudgetExhaustedError(
+        `Daily LLM spend cap reached ($${spent.toFixed(2)} >= $${cap.toFixed(2)})`,
+      );
+    }
   }
 
   /**
