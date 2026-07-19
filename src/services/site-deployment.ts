@@ -30,6 +30,7 @@
 
 import axios from 'axios';
 import { createModuleLogger } from '../core/logger.js';
+import type { ClientConfig } from '../types/index.js';
 
 const logger = createModuleLogger('site-deployment');
 
@@ -82,6 +83,16 @@ class GitHubContentClient {
   }
 
   async readFile(filePath: string): Promise<{ content: string; sha: string }> {
+    // Dry-run (test env, kill-switch, or an unconfigured/blank tenant) must make
+    // NO outbound call. Without this, a dry-run client would still hit the GitHub
+    // API with an empty token and 401 on every mutation — noisy and pointless for
+    // the many multi-tenant clients that run in dry-run until configured. Returning
+    // an empty sentinel lets the mutation run harmlessly and writeFile (already
+    // dry-run guarded) return the dry-run result.
+    if (this.config.dryRun) {
+      logger.info({ filePath }, '[DRY-RUN] Would read file');
+      return { content: '', sha: '' };
+    }
     const url = `${this.baseUrl}/repos/${this.config.websiteBotRepo}/contents/${filePath}?ref=${this.config.sourceBranch}`;
     const response = await axios.get(url, { headers: this.headers, timeout: REQUEST_TIMEOUT_MS });
     const content = Buffer.from(response.data.content, 'base64').toString('utf-8');
@@ -149,6 +160,38 @@ export function siteConfigFromEnv(): SiteDeploymentConfig {
 }
 
 /**
+ * Build a per-client transport config from a client's stored `clients.config`
+ * (multi-tenant). Each client's autonomous edits then write to THAT client's
+ * repo / deploy hook instead of the single shared `WEBSITE_BOT_REPO`.
+ *
+ * Safety invariant (mirrors `siteConfigFromEnv`): force `dryRun: true` whenever
+ * the github token OR the target repo is missing OR blank — an EMPTY STRING is
+ * treated the same as an absent key, so a half-populated `site_deployment`
+ * never performs a live write. Also honors the global test / dry-run env kills.
+ */
+export function siteConfigFromClient(clientConfig?: Partial<ClientConfig>): SiteDeploymentConfig {
+  const sd = clientConfig?.site_deployment;
+  const githubToken = sd?.githubToken ?? '';
+  const websiteBotRepo = sd?.websiteBotRepo ?? '';
+  if (!githubToken || !websiteBotRepo) {
+    logger.warn(
+      'client site_deployment missing githubToken or websiteBotRepo — forced to dry-run',
+    );
+  }
+  return {
+    githubToken,
+    vercelDeployHook: sd?.vercelDeployHook ?? '',
+    websiteBotRepo,
+    sourceBranch: sd?.sourceBranch || 'main',
+    dryRun:
+      process.env.NODE_ENV === 'test' ||
+      process.env.SITE_DEPLOY_DRY_RUN === 'true' ||
+      !githubToken ||
+      !websiteBotRepo,
+  };
+}
+
+/**
  * Get a GitHub content client.
  *
  * Pass an explicit `SiteDeploymentConfig` for multi-tenant use so each client
@@ -174,8 +217,9 @@ export async function updateMetaTitle(
   filePath: string,
   newTitle: string,
   clientDomain: string,
+  config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
-  const client = getSiteDeploymentService();
+  const client = getSiteDeploymentService(config);
   const { content, sha } = await client.readFile(filePath);
 
   const safeTitle = yamlDoubleQuoted(newTitle);
@@ -198,8 +242,9 @@ export async function updateMetaDescription(
   filePath: string,
   newDescription: string,
   clientDomain: string,
+  config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
-  const client = getSiteDeploymentService();
+  const client = getSiteDeploymentService(config);
   const { content, sha } = await client.readFile(filePath);
 
   const updated = content
@@ -221,8 +266,9 @@ export async function injectSchema(
   schemaType: string,
   schemaJson: Record<string, unknown>,
   clientDomain: string,
+  config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
-  const client = getSiteDeploymentService();
+  const client = getSiteDeploymentService(config);
   const { content, sha } = await client.readFile(filePath);
 
   const scriptBlock = `<script type="application/ld+json">
@@ -256,8 +302,9 @@ export async function updateHeading(
   filePath: string,
   newHeading: string,
   clientDomain: string,
+  config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
-  const client = getSiteDeploymentService();
+  const client = getSiteDeploymentService(config);
   const { content, sha } = await client.readFile(filePath);
 
   // Collapse newlines so a multi-line value can't inject extra markdown lines.
@@ -279,8 +326,9 @@ export async function rewritePageContent(
   filePath: string,
   newBodyMarkdown: string,
   clientDomain: string,
+  config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
-  const client = getSiteDeploymentService();
+  const client = getSiteDeploymentService(config);
   const { content, sha } = await client.readFile(filePath);
 
   // Preserve frontmatter (everything between --- delimiters), replace body
@@ -303,6 +351,7 @@ export async function updateFaq(
   filePath: string,
   faqs: Array<{ question: string; answer: string }>,
   clientDomain: string,
+  config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
   const faqSchema = {
     '@context': 'https://schema.org',
@@ -313,14 +362,14 @@ export async function updateFaq(
       acceptedAnswer: { '@type': 'Answer', text: f.answer },
     })),
   };
-  return injectSchema(filePath, 'FAQPage', faqSchema, clientDomain);
+  return injectSchema(filePath, 'FAQPage', faqSchema, clientDomain, config);
 }
 
 /**
  * Trigger Vercel deploy after one or more file mutations.
  */
-export async function triggerVercelDeploy(): Promise<void> {
-  const client = getSiteDeploymentService();
+export async function triggerVercelDeploy(config?: SiteDeploymentConfig): Promise<void> {
+  const client = getSiteDeploymentService(config);
   await client.triggerVercelDeploy();
 }
 

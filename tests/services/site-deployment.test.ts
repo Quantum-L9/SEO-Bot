@@ -1,14 +1,32 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock axios (site-deployment uses `import axios from 'axios'`).
-const { postMock } = vi.hoisted(() => ({ postMock: vi.fn() }));
-vi.mock('axios', () => ({ default: { post: postMock, get: vi.fn(), put: vi.fn() } }));
+const { postMock, getMock, putMock } = vi.hoisted(() => ({
+  postMock: vi.fn(),
+  getMock: vi.fn(),
+  putMock: vi.fn(),
+}));
+vi.mock('axios', () => ({ default: { post: postMock, get: getMock, put: putMock } }));
 
 vi.mock('../../src/core/logger.js', () => ({
   createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
-import { requestSiteBuild, yamlDoubleQuoted, type SiteDeploymentConfig } from '../../src/services/site-deployment.js';
+import {
+  requestSiteBuild,
+  siteConfigFromClient,
+  updateMetaTitle,
+  yamlDoubleQuoted,
+  type SiteDeploymentConfig,
+} from '../../src/services/site-deployment.js';
+import type { ClientConfig } from '../../src/types/index.js';
+
+/** A partial ClientConfig carrying only a site_deployment block — mirrors the
+ *  JSONB reality where existing clients may omit it. `siteConfigFromClient`
+ *  accepts `Partial<ClientConfig>`, so no cast is required. */
+function clientWithDeployment(sd?: ClientConfig['site_deployment']): Partial<ClientConfig> {
+  return sd ? { site_deployment: sd } : {};
+}
 
 const liveConfig: SiteDeploymentConfig = {
   githubToken: 'tok',
@@ -21,6 +39,8 @@ const liveConfig: SiteDeploymentConfig = {
 beforeEach(() => {
   postMock.mockReset();
   postMock.mockResolvedValue({ data: {} });
+  getMock.mockReset();
+  putMock.mockReset();
 });
 
 describe('requestSiteBuild', () => {
@@ -69,5 +89,111 @@ describe('yamlDoubleQuoted', () => {
     expect(yamlDoubleQuoted('')).toBe('""');
     expect(yamlDoubleQuoted(null)).toBe('""');
     expect(yamlDoubleQuoted(undefined)).toBe('""');
+  });
+});
+
+describe('siteConfigFromClient — MT dry-run guard (G6)', () => {
+  const savedEnv = { ...process.env };
+  beforeEach(() => {
+    // Neutralize the global env kills so the config's own guard is what we test.
+    delete process.env.NODE_ENV;
+    delete process.env.SITE_DEPLOY_DRY_RUN;
+  });
+  afterEach(() => {
+    process.env.NODE_ENV = savedEnv.NODE_ENV;
+    process.env.SITE_DEPLOY_DRY_RUN = savedEnv.SITE_DEPLOY_DRY_RUN;
+  });
+
+  it('a fully-populated site_deployment yields dryRun:false and carries the fields', () => {
+    const cfg = siteConfigFromClient(clientWithDeployment({
+      githubToken: 'ghp_live',
+      websiteBotRepo: 'Quantum-L9/tenant-a',
+      vercelDeployHook: 'https://hook/a',
+      sourceBranch: 'release',
+    }));
+    expect(cfg).toEqual({
+      githubToken: 'ghp_live',
+      websiteBotRepo: 'Quantum-L9/tenant-a',
+      vercelDeployHook: 'https://hook/a',
+      sourceBranch: 'release',
+      dryRun: false,
+    });
+  });
+
+  it('a missing token forces dryRun:true', () => {
+    const cfg = siteConfigFromClient(clientWithDeployment({
+      websiteBotRepo: 'Quantum-L9/tenant-a',
+      sourceBranch: 'main',
+    }));
+    expect(cfg.dryRun).toBe(true);
+  });
+
+  it('an EMPTY-STRING repo forces dryRun:true (blank ≠ configured)', () => {
+    const cfg = siteConfigFromClient(clientWithDeployment({
+      githubToken: 'ghp_live',
+      websiteBotRepo: '',
+      sourceBranch: 'main',
+    }));
+    expect(cfg.dryRun).toBe(true);
+  });
+
+  it('an absent site_deployment block forces dryRun:true', () => {
+    const cfg = siteConfigFromClient(clientWithDeployment());
+    expect(cfg.dryRun).toBe(true);
+    expect(cfg.sourceBranch).toBe('main');
+  });
+
+  it('still honors the NODE_ENV=test global kill even with a full config', () => {
+    process.env.NODE_ENV = 'test';
+    const cfg = siteConfigFromClient(clientWithDeployment({
+      githubToken: 'ghp_live',
+      websiteBotRepo: 'Quantum-L9/tenant-a',
+    }));
+    expect(cfg.dryRun).toBe(true);
+  });
+});
+
+describe('updateMetaTitle — explicit config overrides env', () => {
+  it('reads/writes against the injected config\'s repo, not the env fallback', async () => {
+    getMock.mockResolvedValue({
+      data: { content: Buffer.from('title: old\n').toString('base64'), sha: 'sha-1' },
+    });
+    putMock.mockResolvedValue({
+      data: { content: { sha: 'sha-2' }, commit: { html_url: 'https://gh/commit/2' } },
+    });
+
+    const explicit: SiteDeploymentConfig = {
+      githubToken: 'ghp_explicit',
+      vercelDeployHook: '',
+      websiteBotRepo: 'Quantum-L9/explicit-repo',
+      sourceBranch: 'main',
+      dryRun: false,
+    };
+
+    await updateMetaTitle('src/pages/index.astro', 'New Title', 'tenant.com', explicit);
+
+    expect(getMock).toHaveBeenCalledTimes(1);
+    expect(getMock.mock.calls[0][0]).toContain('Quantum-L9/explicit-repo');
+    expect(getMock.mock.calls[0][1].headers.Authorization).toBe('Bearer ghp_explicit');
+    expect(putMock).toHaveBeenCalledTimes(1);
+    expect(putMock.mock.calls[0][0]).toContain('Quantum-L9/explicit-repo');
+  });
+
+  it('makes NO outbound call (no GET/PUT) when the config is dry-run', async () => {
+    const dryRun: SiteDeploymentConfig = {
+      githubToken: '',
+      vercelDeployHook: '',
+      websiteBotRepo: '',
+      sourceBranch: 'main',
+      dryRun: true,
+    };
+
+    const result = await updateMetaTitle('src/pages/index.astro', 'New Title', 'tenant.com', dryRun);
+
+    // An unconfigured multi-tenant client must be a true no-op — no GitHub read
+    // (which would 401 on the empty token) and no write.
+    expect(getMock).not.toHaveBeenCalled();
+    expect(putMock).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ dryRun: true, success: true });
   });
 });

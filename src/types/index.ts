@@ -37,6 +37,22 @@ export interface ClientConfig {
   linkVelocity: LinkVelocityConfig;
   contentStrategy: ContentStrategyConfig;
   notifications: NotificationConfig;
+  /**
+   * Per-client site-deployment target (multi-tenant). When present, the surpass-plan
+   * executor writes this client's autonomous edits to THIS repo/hook instead of the
+   * single-tenant WEBSITE_BOT_REPO env fallback. Absent/blank ⇒ dry-run (no writes).
+   */
+  site_deployment?: ClientSiteDeploymentConfig;
+}
+
+export interface ClientSiteDeploymentConfig {
+  // All optional: this is persisted in the `clients.config` JSONB, so existing
+  // clients may have the block absent or partially filled. `siteConfigFromClient`
+  // treats any missing/blank token or repo as a forced dry-run.
+  githubToken?: string;
+  vercelDeployHook?: string;
+  websiteBotRepo?: string;
+  sourceBranch?: string;
 }
 
 export interface TargetKeyword {
