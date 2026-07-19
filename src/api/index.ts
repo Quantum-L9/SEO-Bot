@@ -24,19 +24,34 @@ import { getScheduler } from '../core/scheduler.js';
 import { getLlmService } from '../services/llm.js';
 import { registerDashboard } from './dashboard.js';
 import { registerClientRoutes } from './clients/register.js';
+import { registerApiSecurity } from './security.js';
+import { getConfig } from '../core/config.js';
 
 const logger = createModuleLogger('api');
 
 export async function startApiServer(port: number = 3100): Promise<void> {
-  const app = Fastify({ logger: false });
+  // trustProxy so request.ip (and the per-IP rate limiter) use X-Forwarded-For
+  // when deployed behind a reverse proxy / tunnel. Explicit + configurable.
+  const app = Fastify({ logger: false, trustProxy: getConfig().TRUST_PROXY });
 
   await app.register(helmet);
   await app.register(formBody);
-  await app.register(cors, { origin: true });
+  // Operator-only surface: CORS disabled (same-origin) unless an explicit
+  // allow-list is configured. `origin: true` (reflect any origin) removed.
+  const allowedOrigins = getConfig().DASHBOARD_ALLOWED_ORIGINS;
+  await app.register(cors, {
+    origin: allowedOrigins ? allowedOrigins.split(',').map((o) => o.trim()).filter(Boolean) : false,
+    credentials: true,
+  });
+
+  // Rate limiting + operator authentication, before any route.
+  registerApiSecurity(app);
 
   app.setErrorHandler((error, request, reply) => {
     logger.error({ err: error, url: request.url, method: request.method }, 'API route error');
-    reply.status(error.statusCode ?? 500).send({ error: error.message });
+    const status = error.statusCode ?? 500;
+    // Don't leak internal error detail on 5xx; 4xx messages are safe (validation, etc.).
+    reply.status(status).send({ error: status < 500 ? error.message : 'Internal Server Error' });
   });
 
   await registerDashboard(app);
@@ -81,9 +96,24 @@ export async function startApiServer(port: number = 3100): Promise<void> {
     };
   });
 
+  // Column allow-list — NEVER serialize posthogApiKey / posthogProjectId.
+  const publicClientColumns = {
+    id: schema.clients.id,
+    name: schema.clients.name,
+    domain: schema.clients.domain,
+    industry: schema.clients.industry,
+    city: schema.clients.city,
+    state: schema.clients.state,
+    country: schema.clients.country,
+    config: schema.clients.config,
+    active: schema.clients.active,
+    createdAt: schema.clients.createdAt,
+    updatedAt: schema.clients.updatedAt,
+  };
+
   app.get('/api/clients', async () => {
     const db = getDb();
-    const clients = await db.select()
+    const clients = await db.select(publicClientColumns)
       .from(schema.clients)
       .where(eq(schema.clients.active, true))
       .orderBy(schema.clients.name);
@@ -93,7 +123,7 @@ export async function startApiServer(port: number = 3100): Promise<void> {
   app.get<{ Params: { clientId: string } }>('/api/clients/:clientId', async (request) => {
     const db = getDb();
     const { clientId } = request.params;
-    const [client] = await db.select().from(schema.clients).where(eq(schema.clients.id, clientId)).limit(1);
+    const [client] = await db.select(publicClientColumns).from(schema.clients).where(eq(schema.clients.id, clientId)).limit(1);
     if (!client) return { error: 'Client not found' };
     const rankings = await db.select().from(schema.serpRankings).where(eq(schema.serpRankings.clientId, clientId)).orderBy(desc(schema.serpRankings.checkedAt)).limit(20);
     const vitals = await db.select().from(schema.webVitals).where(eq(schema.webVitals.clientId, clientId)).orderBy(desc(schema.webVitals.measuredAt)).limit(10);

@@ -68,16 +68,18 @@ function buildClientConfig(payload: WebsiteFactoryContractV2) {
 
 export async function registerClientRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/clients/register', async (request, reply) => {
-    // API-key gate: enforced only when SEO_BOT_API_KEY is configured, so
-    // existing deployments without the secret keep working. The caller
-    // (Website-Bot) presents it as `Authorization: Bearer <key>`.
+    // API-key gate — fail closed. The caller (Website-Bot) presents the shared
+    // secret as `Authorization: Bearer <key>`. If SEO_BOT_API_KEY is not
+    // configured, we refuse rather than accept anonymous tenant upserts.
     const expectedKey = process.env.SEO_BOT_API_KEY;
-    if (expectedKey) {
-      const token = bearerToken(request.headers.authorization);
-      if (!token || !safeEqual(token, expectedKey)) {
-        logger.warn({ ip: request.ip }, 'Rejected register request: bad or missing API key');
-        return reply.status(401).send({ registered: false, error: 'unauthorized' });
-      }
+    if (!expectedKey) {
+      logger.error({ ip: request.ip }, 'Registration rejected: SEO_BOT_API_KEY not configured');
+      return reply.status(503).send({ registered: false, error: 'registration not configured' });
+    }
+    const token = bearerToken(request.headers.authorization);
+    if (!token || !safeEqual(token, expectedKey)) {
+      logger.warn({ ip: request.ip }, 'Rejected register request: bad or missing API key');
+      return reply.status(401).send({ registered: false, error: 'unauthorized' });
     }
 
     const parsed = WebsiteFactoryContractV2.safeParse(request.body);
