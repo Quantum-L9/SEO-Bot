@@ -27,6 +27,25 @@ import type { JobDefinition, ModuleName } from '../types/index.js';
 
 const logger = createModuleLogger('scheduler');
 
+/**
+ * Deterministic BullMQ job id for a per-client fan-out child.
+ *
+ * BullMQ is at-least-once: if the parent fan-out job's worker crashes (or stalls
+ * past its lock) after enqueuing some/all children but before it is marked
+ * completed, BullMQ re-runs the SAME parent job instance — which would fan out a
+ * second full set of children. Children auto-execute irreversible per-client
+ * actions (outreach emails, directory submissions), so duplicates are harmful.
+ *
+ * Keying the child id on the PARENT job's instance id makes BullMQ ignore the
+ * re-add on a retry (same parent id) while still letting every distinct
+ * scheduled occurrence run: a job scheduled every 6 hours gets a NEW parent id
+ * per fire, so its fan-out is not wrongly deduped across the day (a day-scoped
+ * key would suppress all-but-the-first run).
+ */
+export function fanoutChildJobId(parentJobId: string, clientId: string): string {
+  return `child:${parentJobId}:${clientId}`;
+}
+
 // ─── Job Registry ────────────────────────────────────────────────────────────
 
 const JOB_DEFINITIONS: JobDefinition[] = [
@@ -261,6 +280,11 @@ export class Scheduler {
         const activeClients = await db.select().from(schema.clients)
           .where(eq(schema.clients.active, true));
 
+        // Parent job instance id — stable across retries of THIS fire, unique
+        // per scheduled occurrence, so the child dedup below is idempotent on
+        // retry without suppressing later scheduled runs.
+        const parentJobId = job.id ?? definition.name;
+
         for (const client of activeClients) {
           const queue = this.queues.get(`l9-${definition.module}`)!;
           await queue.add(definition.name, {
@@ -269,6 +293,9 @@ export class Scheduler {
             clientDomain: client.domain,
             clientConfig: client.config,
           }, {
+            // Deterministic id → a retried parent fan-out does not double-enqueue
+            // this client's child job (idempotency; prevents duplicate outreach).
+            jobId: fanoutChildJobId(parentJobId, client.id),
             removeOnComplete: { count: 100 },
             removeOnFail: { count: 50 },
           });
