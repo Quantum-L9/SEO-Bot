@@ -14,14 +14,14 @@
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { getDb, closeDb } from './index.js';
 import { createModuleLogger } from '../logger.js';
-import { loadSecrets } from '@quantum-l9/infisical-config';
+import { loadSecrets } from '../secrets.js';
 
 const logger = createModuleLogger('migrate');
 
 async function runMigrations() {
   // Hydrate process.env from Infisical so `npm run migrate` works on a VPS
   // with no committed .env (no-op when Infisical isn't configured).
-  await loadSecrets({ logger: createModuleLogger('secrets') });
+  await loadSecrets();
 
   logger.info('Starting database migrations...');
 
