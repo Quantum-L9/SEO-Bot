@@ -18,7 +18,15 @@
     "verify:source": "test -f src/index.ts && test -f src/core/config.ts",
     "verify:build": "npm run build && test -f dist/index.js",
     "verify:db": "tsx src/core/database/migrate.ts --check",
-    "verify:all": "npm run verify:preflight && npm run verify:source && npm run verify:build"
+    "verify:all": "npm run verify:preflight && npm run verify:source && npm run verify:build",
+    "typecheck": "tsc -p tsconfig.check.json --noEmit",
+    "manifest:generate": "tsx scripts/manifest/generate.ts",
+    "manifest:check": "tsx scripts/manifest/check.ts",
+    "verify:assurance": "tsx scripts/validation/cli.ts run --profile ci",
+    "verify:release": "tsx scripts/validation/cli.ts run --profile release",
+    "verify:production": "tsx scripts/validation/cli.ts run --profile production",
+    "evidence:clean": "tsx scripts/validation/cli.ts clean",
+    "lockfile:generate": "npm install --package-lock-only --ignore-scripts --no-audit --no-fund"
   },
   "dependencies": {
     "@quantum-l9/llm-router": "^1.0.0",
@@ -43,12 +51,15 @@
     "nodemailer": "^6.9.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.0.0",
     "@types/node": "^22.0.0",
     "@types/nodemailer": "^6.4.0",
     "@types/pg": "^8.11.0",
     "eslint": "^9.0.0",
+    "globals": "^15.14.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
+    "typescript-eslint": "^8.64.0",
     "vitest": "^2.1.0",
     "drizzle-kit": "^0.28.1"
   },
