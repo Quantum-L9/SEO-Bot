@@ -1,0 +1,163 @@
+{
+  "schema_version": "1.0.0",
+  "rules": [
+    {
+      "pattern": "*",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration"
+    },
+    {
+      "pattern": ".claude/**",
+      "owner": "agent-operations",
+      "purpose": "Agent session controls and hooks",
+      "classification": "configuration"
+    },
+    {
+      "pattern": ".github/**",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration"
+    },
+    {
+      "pattern": "adr/**",
+      "owner": "architecture",
+      "purpose": "Architecture decision records",
+      "classification": "documentation"
+    },
+    {
+      "pattern": "client-snippets/**",
+      "owner": "client-integration",
+      "purpose": "Client-side integration snippets",
+      "classification": "runtime"
+    },
+    {
+      "pattern": "contracts/**",
+      "owner": "integration-contracts",
+      "purpose": "Cross-repository and external integration contracts",
+      "classification": "schema"
+    },
+    {
+      "pattern": "docker/**",
+      "owner": "runtime-platform",
+      "purpose": "Container build and database initialization assets",
+      "classification": "configuration"
+    },
+    {
+      "pattern": "docs/**",
+      "owner": "repository-governance",
+      "purpose": "Repository technical and operating documentation",
+      "classification": "documentation"
+    },
+    {
+      "pattern": "drizzle/**",
+      "owner": "database",
+      "purpose": "Generated and immutable database migrations",
+      "classification": "generated",
+      "generated": true,
+      "source_of_generation": "npx drizzle-kit generate"
+    },
+    {
+      "pattern": "manifest/**",
+      "owner": "continuous-assurance",
+      "purpose": "Manifest ownership policy and generation inputs",
+      "classification": "configuration"
+    },
+    {
+      "pattern": "scripts/**",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling"
+    },
+    {
+      "pattern": "src/**",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime"
+    },
+    {
+      "pattern": "tests/**",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test"
+    },
+    {
+      "pattern": "validation/**",
+      "owner": "continuous-assurance",
+      "purpose": "Validation policy and operator guidance",
+      "classification": "configuration"
+    }
+  ],
+  "overrides": [
+    {
+      "path": "MANIFEST.json",
+      "owner": "continuous-assurance",
+      "purpose": "Generated machine-readable repository inventory",
+      "classification": "generated",
+      "generated": true,
+      "source_of_generation": "npm run manifest:generate"
+    },
+    {
+      "path": "MANIFEST.md",
+      "owner": "continuous-assurance",
+      "purpose": "Generated human-readable repository inventory",
+      "classification": "generated",
+      "generated": true,
+      "source_of_generation": "npm run manifest:generate"
+    },
+    {
+      "path": "README.md",
+      "owner": "repository-governance",
+      "purpose": "Repository entrypoint and supported command surface",
+      "classification": "documentation"
+    },
+    {
+      "path": "RUNBOOK.md",
+      "owner": "operations",
+      "purpose": "Operator procedures, validation, deployment, backup, and rollback",
+      "classification": "documentation"
+    },
+    {
+      "path": "VALIDATION.md",
+      "owner": "continuous-assurance",
+      "purpose": "Canonical validation policy and evidence model",
+      "classification": "documentation"
+    },
+    {
+      "path": "AGENTS.md",
+      "owner": "repository-governance",
+      "purpose": "Binding agent operating contract",
+      "classification": "documentation"
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "owner": "repository-governance",
+      "purpose": "Contribution and assurance requirements",
+      "classification": "documentation"
+    },
+    {
+      "path": "TODO.md",
+      "owner": "operations",
+      "purpose": "Externally gated work with explicit activation conditions",
+      "classification": "documentation"
+    },
+    {
+      "path": "validation/schemas/gate-evidence.schema.json",
+      "owner": "continuous-assurance",
+      "purpose": "Machine-readable assurance contract",
+      "classification": "schema"
+    },
+    {
+      "path": "validation/schemas/run-report.schema.json",
+      "owner": "continuous-assurance",
+      "purpose": "Machine-readable assurance contract",
+      "classification": "schema"
+    },
+    {
+      "path": "validation/schemas/repository-manifest.schema.json",
+      "owner": "continuous-assurance",
+      "purpose": "Machine-readable assurance contract",
+      "classification": "schema"
+    }
+  ]
+}
