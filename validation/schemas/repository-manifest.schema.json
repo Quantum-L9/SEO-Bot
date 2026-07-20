@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quantum-l9.example/schemas/seo-bot/repository-manifest.schema.json",
+  "title": "SEO Bot Repository Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "repository", "entries", "inventory_digest"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "repository": { "const": "Quantum-L9/SEO-Bot" },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "owner", "purpose", "classification", "status", "generated", "source_of_generation"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "owner": { "type": "string", "minLength": 1 },
+          "purpose": { "type": "string", "minLength": 1 },
+          "classification": { "enum": ["runtime", "tooling", "test", "schema", "documentation", "configuration", "generated"] },
+          "status": { "const": "active" },
+          "generated": { "type": "boolean" },
+          "source_of_generation": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "inventory_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

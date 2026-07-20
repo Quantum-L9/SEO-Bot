@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0.0",
+  "policy_version": "1.0.0",
+  "profiles": {
+    "ci": {
+      "gates": ["preflight", "source", "typecheck", "lint", "test", "build", "database", "manifest", "claims"],
+      "allow_pass_with_findings": true,
+      "blocked_is_failure": true
+    },
+    "release": {
+      "gates": ["preflight", "source", "typecheck", "lint", "test", "build", "database", "manifest", "claims", "container"],
+      "allow_pass_with_findings": false,
+      "blocked_is_failure": true
+    },
+    "production": {
+      "gates": ["preflight", "source", "typecheck", "lint", "test", "build", "database", "manifest", "claims", "container", "runtime-health", "tenant-readiness", "posthog-readiness"],
+      "allow_pass_with_findings": false,
+      "blocked_is_failure": true
+    }
+  }
+}

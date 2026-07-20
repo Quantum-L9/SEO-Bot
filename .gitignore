@@ -3,3 +3,9 @@ dist/
 *.log
 *.rdb
 dump.rdb
+
+# Generated assurance evidence
+validation/runs/
+
+# Local validation state
+.validation-tmp/
