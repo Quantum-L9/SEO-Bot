@@ -18,7 +18,8 @@
     "verify:source": "test -f src/index.ts && test -f src/core/config.ts",
     "verify:build": "npm run build && test -f dist/index.js",
     "verify:db": "tsx src/core/database/migrate.ts --check",
-    "verify:all": "npm run verify:preflight && npm run verify:source && npm run verify:build"
+    "verify:all": "npm run verify:preflight && npm run verify:source && npm run verify:build && npm run verify:handoff-v3",
+    "verify:handoff-v3": "vitest run tests/api/register-v3.e2e.test.ts tests/services/maintenance-readiness.test.ts tests/services/site-deployment-config.test.ts"
   },
   "dependencies": {
     "@quantum-l9/llm-router": "^1.0.0",

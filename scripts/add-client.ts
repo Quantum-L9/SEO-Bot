@@ -1,31 +1,22 @@
-/* L9_META
- * layer: module
- * role: seo_bot_engine
- * status: active
- */
-
-/**
- * ═══════════════════════════════════════════════════════════════════════════════
- * L9 SEO Bot - Add Client Script
- * 
- * Usage: pnpm add-client
- * Onboards a new domain into the multi-tenant SEO system.
- * ═══════════════════════════════════════════════════════════════════════════════
- */
-
+/* L9_META: layer=module, role=seo_bot_engine, status=active, version=3.0.0 */
 import { getDb, schema, closeDb } from '../src/core/database/index.js';
 import { loadConfig } from '../src/core/config.js';
-import readline from 'readline';
+import readline from 'node:readline';
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-const ask = (q: string): Promise<string> => new Promise(r => rl.question(q, r));
+const ask = (question: string): Promise<string> => new Promise(resolve => rl.question(question, resolve));
+const ENV_REF = /^env:\/\/[A-Z][A-Z0-9_]*$/;
 
-async function main() {
+function normalizeDomain(value: string): string {
+  return value.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '').toLowerCase();
+}
+
+async function main(): Promise<void> {
   loadConfig();
   const db = getDb();
 
   console.log('\n═══════════════════════════════════════════════════════════');
-  console.log('  L9 SEO Bot - Add New Client');
+  console.log('  L9 SEO Bot - Add New Client (monitoring-only)');
   console.log('═══════════════════════════════════════════════════════════\n');
 
   const name = await ask('Business name: ');
@@ -34,76 +25,78 @@ async function main() {
   const city = await ask('City: ');
   const state = await ask('State (2-letter): ');
   const posthogProjectId = await ask('PostHog Project ID (or press Enter to skip): ');
-  const posthogApiKey = await ask('PostHog Project API Key (or press Enter to skip): ');
+  const posthogApiKey = await ask('PostHog Personal API Key (or press Enter to skip): ');
 
   console.log('\nTarget Keywords (enter one per line, empty line to finish):');
   const keywords: Array<{ keyword: string; priority: string }> = [];
   while (true) {
-    const kw = await ask('  Keyword: ');
-    if (!kw) break;
-    const priority = await ask('  Priority (critical/high/medium/low): ') || 'medium';
-    keywords.push({ keyword: kw, priority });
+    const keyword = await ask('  Keyword: ');
+    if (!keyword) break;
+    const priority = (await ask('  Priority (critical/high/medium/low): ')) || 'medium';
+    keywords.push({ keyword, priority });
   }
 
   console.log('\nServices offered (enter one per line, empty line to finish):');
   const services: string[] = [];
   while (true) {
-    const svc = await ask('  Service: ');
-    if (!svc) break;
-    services.push(svc);
+    const service = await ask('  Service: ');
+    if (!service) break;
+    services.push(service);
   }
 
-  // Per-client site-deployment target (multi-tenant). Leave any field blank to
-  // operate this client in dry-run — the executor logs mutations but writes
-  // nothing until both a GitHub token and target repo are present.
-  // Per AGENTS.md ("do not use console.log"), new output in this script writes
-  // directly to the TTY rather than adding to the existing console.log footprint.
-  process.stdout.write('\nSite deployment target (press Enter on any field to keep this client dry-run):\n');
-  const sdGithubToken = await ask('  GitHub token (repo:write on the site repo): ');
-  const sdWebsiteBotRepo = await ask('  Website repo (e.g. Quantum-L9/Website-Bot): ');
-  const sdVercelDeployHook = await ask('  Vercel deploy hook URL: ');
-  const sdSourceBranch = (await ask('  Source branch [main]: ')) || 'main';
+  console.log('\nOptional unverified site target. Raw tokens are never stored.');
+  const websiteBotRepo = await ask('  Website repo (owner/repo, or press Enter to skip): ');
+  const sourceBranch = (await ask('  Source branch [main]: ')) || 'main';
+  const githubCredentialRef = await ask('  GitHub credential ref [env://CLIENT_SITE_GITHUB_TOKEN]: ') || 'env://CLIENT_SITE_GITHUB_TOKEN';
+  const vercelDeployHookRef = await ask('  Vercel deploy hook ref [env://CLIENT_SITE_VERCEL_DEPLOY_HOOK]: ') || 'env://CLIENT_SITE_VERCEL_DEPLOY_HOOK';
 
-  const siteDeployment = {
-    githubToken: sdGithubToken,
-    websiteBotRepo: sdWebsiteBotRepo,
-    vercelDeployHook: sdVercelDeployHook,
-    sourceBranch: sdSourceBranch,
+  if (!ENV_REF.test(githubCredentialRef) || !ENV_REF.test(vercelDeployHookRef)) {
+    throw new Error('Credential references must use env://UPPERCASE_NAME');
+  }
+
+  const config = {
+    targetKeywords: keywords,
+    services,
+    industry,
+    city,
+    state,
+    ...(websiteBotRepo ? {
+      site_deployment: {
+        schemaVersion: '3.0',
+        status: 'unverified',
+        transport: 'github-contents-api',
+        githubCredentialRef,
+        vercelDeployHookRef,
+        websiteBotRepo,
+        sourceBranch,
+      },
+    } : {}),
   };
-  const siteDeployDryRun = !sdGithubToken || !sdWebsiteBotRepo;
-  if (siteDeployDryRun) {
-    process.stderr.write('  ⚠️  site_deployment incomplete — this client operates in DRY-RUN (no live writes).\n');
-  }
 
-  // Insert client
   const [client] = await db.insert(schema.clients).values({
     name,
-    domain: domain.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, ''),
+    domain: normalizeDomain(domain),
     industry,
     city: city || null,
     state: state || null,
     posthogProjectId: posthogProjectId || null,
     posthogApiKey: posthogApiKey || null,
-    config: {
-      targetKeywords: keywords,
-      services,
-      industry,
-      city,
-      state,
-      site_deployment: siteDeployment,
-    },
+    config,
+    active: false,
   }).returning();
 
-  console.log(`\n✅ Client added successfully!`);
+  console.log('\n✅ Client added in monitoring-only mode.');
   console.log(`   ID: ${client.id}`);
   console.log(`   Domain: ${client.domain}`);
   console.log(`   Keywords: ${keywords.length}`);
-  console.log(`   Services: ${services.length}`);
-  process.stdout.write(`   Site deployment: ${siteDeployDryRun ? 'DRY-RUN (incomplete)' : sdWebsiteBotRepo}\n`);
-  console.log(`\nThe Bot will begin monitoring on the next scheduled cycle.`);
+  console.log('   Maintenance: INACTIVE until a canonical Website Factory v3 handoff proves the repo, commit, and editable Astro paths.');
 
   rl.close();
   await closeDb();
 }
 
-main().catch(console.error);
+main().catch(error => {
+  console.error(error);
+  rl.close();
+  process.exitCode = 1;
+});

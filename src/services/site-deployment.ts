@@ -31,6 +31,7 @@
 import axios from 'axios';
 import { createModuleLogger } from '../core/logger.js';
 import type { ClientConfig } from '../types/index.js';
+import { siteConfigFromStoredClient } from './site-deployment-config.js';
 
 const logger = createModuleLogger('site-deployment');
 
@@ -170,25 +171,11 @@ export function siteConfigFromEnv(): SiteDeploymentConfig {
  * never performs a live write. Also honors the global test / dry-run env kills.
  */
 export function siteConfigFromClient(clientConfig?: Partial<ClientConfig>): SiteDeploymentConfig {
-  const sd = clientConfig?.site_deployment;
-  const githubToken = sd?.githubToken ?? '';
-  const websiteBotRepo = sd?.websiteBotRepo ?? '';
-  if (!githubToken || !websiteBotRepo) {
-    logger.warn(
-      'client site_deployment missing githubToken or websiteBotRepo — forced to dry-run',
-    );
+  const resolved = siteConfigFromStoredClient(clientConfig);
+  if (resolved.dryRun) {
+    logger.warn('client site_deployment is not canonically verified or its credential ref is unresolved — forced to dry-run');
   }
-  return {
-    githubToken,
-    vercelDeployHook: sd?.vercelDeployHook ?? '',
-    websiteBotRepo,
-    sourceBranch: sd?.sourceBranch || 'main',
-    dryRun:
-      process.env.NODE_ENV === 'test' ||
-      process.env.SITE_DEPLOY_DRY_RUN === 'true' ||
-      !githubToken ||
-      !websiteBotRepo,
-  };
+  return resolved;
 }
 
 /**

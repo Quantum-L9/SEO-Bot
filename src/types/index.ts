@@ -46,13 +46,29 @@ export interface ClientConfig {
 }
 
 export interface ClientSiteDeploymentConfig {
-  // All optional: this is persisted in the `clients.config` JSONB, so existing
-  // clients may have the block absent or partially filled. `siteConfigFromClient`
-  // treats any missing/blank token or repo as a forced dry-run.
-  githubToken?: string;
-  vercelDeployHook?: string;
+  schemaVersion?: '2.0' | '3.0';
+  status?: 'unverified' | 'ready';
+  transport?: 'github-contents-api';
+  githubCredentialRef?: string;
+  vercelDeployHookRef?: string;
   websiteBotRepo?: string;
+  repositoryId?: string;
   sourceBranch?: string;
+  verifiedCommitSha?: string;
+  sourceDigest?: string;
+  managedManifestPath?: string;
+  editableRoot?: 'src/pages';
+  pagePathStrategy?: 'directory-index-astro';
+  vercelProjectId?: string;
+  vercelDeploymentId?: string;
+  deploymentUrl?: string;
+  contractId?: string;
+  contractDigest?: string;
+  verifiedAt?: string;
+  /** @deprecated Raw credentials are read only when SEO_BOT_ALLOW_LEGACY_SITE_DEPLOYMENT=true. */
+  githubToken?: string;
+  /** @deprecated Use vercelDeployHookRef. */
+  vercelDeployHook?: string;
 }
 
 export interface TargetKeyword {

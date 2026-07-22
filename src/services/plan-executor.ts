@@ -134,6 +134,10 @@ export async function executeSurpassPlans(job: Job): Promise<void> {
   // assume it's present. `siteConfigFromClient` forces dry-run when the target
   // repo/token is absent or blank, so an unconfigured client never writes live.
   const siteConfig = siteConfigFromClient(job.data.clientConfig);
+  if (siteConfig.dryRun) {
+    logger.warn({ clientId, clientDomain }, 'Maintenance transport is not ready — leaving planned work untouched');
+    return;
+  }
 
   const db = getDb();
 
