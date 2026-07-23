@@ -104,20 +104,50 @@ describe('siteConfigFromClient — MT dry-run guard (G6)', () => {
     process.env.SITE_DEPLOY_DRY_RUN = savedEnv.SITE_DEPLOY_DRY_RUN;
   });
 
-  it('a fully-populated site_deployment yields dryRun:false and carries the fields', () => {
+  it('a canonically-verified v3 site_deployment yields dryRun:false and resolves env:// credential refs', () => {
+    // Since the v3 handoff became the runtime schema authority, live writes
+    // (dryRun:false) require a verified canonical contract; inline secrets no
+    // longer qualify. Credentials come from env:// refs resolved at use time.
+    process.env.TENANT_A_GITHUB_TOKEN = 'ghp_live';
+    process.env.TENANT_A_DEPLOY_HOOK = 'https://hook/a';
+    try {
+      const cfg = siteConfigFromClient(clientWithDeployment({
+        schemaVersion: '3.0',
+        status: 'ready',
+        githubCredentialRef: 'env://TENANT_A_GITHUB_TOKEN',
+        vercelDeployHookRef: 'env://TENANT_A_DEPLOY_HOOK',
+        websiteBotRepo: 'Quantum-L9/tenant-a',
+        sourceBranch: 'release',
+        verifiedCommitSha: 'a'.repeat(40),
+        sourceDigest: 'b'.repeat(64),
+        contractId: 'contract-1',
+        contractDigest: 'c'.repeat(64),
+        verifiedAt: '2026-07-01T00:00:00.000Z',
+        managedManifestPath: '.l9/generated-manifest.json',
+        editableRoot: 'src/pages',
+        pagePathStrategy: 'directory-index-astro',
+      } as ClientConfig['site_deployment']));
+      expect(cfg).toEqual({
+        githubToken: 'ghp_live',
+        websiteBotRepo: 'Quantum-L9/tenant-a',
+        vercelDeployHook: 'https://hook/a',
+        sourceBranch: 'release',
+        dryRun: false,
+      });
+    } finally {
+      delete process.env.TENANT_A_GITHUB_TOKEN;
+      delete process.env.TENANT_A_DEPLOY_HOOK;
+    }
+  });
+
+  it('legacy inline credentials stay dry-run even when present (fail closed without a v3 contract)', () => {
     const cfg = siteConfigFromClient(clientWithDeployment({
       githubToken: 'ghp_live',
       websiteBotRepo: 'Quantum-L9/tenant-a',
       vercelDeployHook: 'https://hook/a',
       sourceBranch: 'release',
     }));
-    expect(cfg).toEqual({
-      githubToken: 'ghp_live',
-      websiteBotRepo: 'Quantum-L9/tenant-a',
-      vercelDeployHook: 'https://hook/a',
-      sourceBranch: 'release',
-      dryRun: false,
-    });
+    expect(cfg.dryRun).toBe(true);
   });
 
   it('a missing token forces dryRun:true', () => {

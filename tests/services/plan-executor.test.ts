@@ -57,18 +57,35 @@ const mockUpdateFaq = vi.fn().mockResolvedValue({ success: true, dryRun: true })
 const mockInjectSchema = vi.fn().mockResolvedValue({ success: true, dryRun: true });
 const mockTriggerDeploy = vi.fn().mockResolvedValue(undefined);
 
-// Mirror the real dry-run guard: absent OR blank token/repo ⇒ dryRun.
+// Mirror the real (v3, fail-closed) guard: only a canonically-verified
+// site_deployment (schemaVersion 3.0, status ready) with a resolvable token
+// and repo yields dryRun:false; anything else — including legacy inline
+// creds — stays dry-run.
 const mockSiteConfigFromClient = vi.fn((clientConfig: any) => {
   const sd = clientConfig?.site_deployment;
-  const githubToken = sd?.githubToken ?? '';
+  const canonicalReady = sd?.schemaVersion === '3.0' && sd?.status === 'ready';
+  const githubToken = canonicalReady ? (sd?.githubToken ?? '') : '';
   const websiteBotRepo = sd?.websiteBotRepo ?? '';
   return {
     githubToken,
-    vercelDeployHook: sd?.vercelDeployHook ?? '',
+    vercelDeployHook: canonicalReady ? (sd?.vercelDeployHook ?? '') : '',
     websiteBotRepo,
     sourceBranch: sd?.sourceBranch || 'main',
-    dryRun: !githubToken || !websiteBotRepo,
+    dryRun: !canonicalReady || !githubToken || !websiteBotRepo,
   };
+});
+
+// A canonically-verified per-client deployment: the only shape that executes
+// live writes since the v3 handoff became the runtime schema authority.
+const verifiedClientConfig = () => ({
+  site_deployment: {
+    schemaVersion: '3.0',
+    status: 'ready',
+    githubToken: 'ghp_client1',
+    websiteBotRepo: 'Quantum-L9/client1-site',
+    vercelDeployHook: 'https://hook.vercel/client1',
+    sourceBranch: 'main',
+  },
 });
 
 vi.mock('../../src/core/database/index.js', () => ({
@@ -118,22 +135,22 @@ describe('executeSurpassPlans — GAP-07', () => {
 
   it('dispatches meta_title_update action to site-deployment', async () => {
     const { executeSurpassPlans } = await import('../../src/services/plan-executor.js');
-    const mockJob = { data: { clientId: 'client-1', clientDomain: 'test.com' } } as any;
+    const mockJob = { data: { clientId: 'client-1', clientDomain: 'test.com', clientConfig: verifiedClientConfig() } } as any;
 
     await executeSurpassPlans(mockJob);
 
-    // 4th arg is the per-client siteConfig (dry-run: no clientConfig on the job).
+    // 4th arg is the per-client siteConfig (live: verified v3 clientConfig).
     expect(mockUpdateMetaTitle).toHaveBeenCalledWith(
       'src/pages/services/index.astro',
       'Best Roofer Austin TX',
       'test.com',
-      expect.objectContaining({ dryRun: true }),
+      expect.objectContaining({ dryRun: false }),
     );
   });
 
   it('triggers Vercel deploy after dispatching actions', async () => {
     const { executeSurpassPlans } = await import('../../src/services/plan-executor.js');
-    const mockJob = { data: { clientId: 'client-1', clientDomain: 'test.com' } } as any;
+    const mockJob = { data: { clientId: 'client-1', clientDomain: 'test.com', clientConfig: verifiedClientConfig() } } as any;
 
     await executeSurpassPlans(mockJob);
 
@@ -142,7 +159,7 @@ describe('executeSurpassPlans — GAP-07', () => {
 
   it('sets gap status to executing after processing', async () => {
     const { executeSurpassPlans } = await import('../../src/services/plan-executor.js');
-    const mockJob = { data: { clientId: 'client-1', clientDomain: 'test.com' } } as any;
+    const mockJob = { data: { clientId: 'client-1', clientDomain: 'test.com', clientConfig: verifiedClientConfig() } } as any;
 
     await executeSurpassPlans(mockJob);
 
@@ -152,7 +169,7 @@ describe('executeSurpassPlans — GAP-07', () => {
 
   it('logs action through execution-policy before dispatching', async () => {
     const { executeSurpassPlans } = await import('../../src/services/plan-executor.js');
-    const mockJob = { data: { clientId: 'client-1', clientDomain: 'test.com' } } as any;
+    const mockJob = { data: { clientId: 'client-1', clientDomain: 'test.com', clientConfig: verifiedClientConfig() } } as any;
 
     await executeSurpassPlans(mockJob);
 
@@ -164,14 +181,7 @@ describe('executeSurpassPlans — GAP-07', () => {
 
   it('routes a configured client\'s edit to THAT client\'s repo (live config)', async () => {
     const { executeSurpassPlans } = await import('../../src/services/plan-executor.js');
-    const clientConfig = {
-      site_deployment: {
-        githubToken: 'ghp_client1',
-        websiteBotRepo: 'Quantum-L9/client1-site',
-        vercelDeployHook: 'https://hook.vercel/client1',
-        sourceBranch: 'main',
-      },
-    };
+    const clientConfig = verifiedClientConfig();
     const mockJob = { data: { clientId: 'client-1', clientDomain: 'test.com', clientConfig } } as any;
 
     await executeSurpassPlans(mockJob);
@@ -189,18 +199,36 @@ describe('executeSurpassPlans — GAP-07', () => {
     );
   });
 
-  it('falls back to dry-run when the client has no site_deployment', async () => {
+  it('leaves planned work untouched (no dispatch) when the client has no site_deployment', async () => {
+    // Fail-closed: an unverified client no longer even dry-run-dispatches —
+    // the executor returns early so planned gaps stay 'planned' for retry
+    // after the maintenance transport is verified.
     const { executeSurpassPlans } = await import('../../src/services/plan-executor.js');
     const mockJob = { data: { clientId: 'client-1', clientDomain: 'test.com', clientConfig: {} } } as any;
 
     await executeSurpassPlans(mockJob);
 
-    expect(mockUpdateMetaTitle).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.any(String),
-      expect.any(String),
-      expect.objectContaining({ dryRun: true }),
-    );
+    expect(mockUpdateMetaTitle).not.toHaveBeenCalled();
+    expect(mockTriggerDeploy).not.toHaveBeenCalled();
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it('leaves planned work untouched for legacy inline credentials (no v3 contract)', async () => {
+    const { executeSurpassPlans } = await import('../../src/services/plan-executor.js');
+    const legacyConfig = {
+      site_deployment: {
+        githubToken: 'ghp_client1',
+        websiteBotRepo: 'Quantum-L9/client1-site',
+        vercelDeployHook: 'https://hook.vercel/client1',
+        sourceBranch: 'main',
+      },
+    };
+    const mockJob = { data: { clientId: 'client-1', clientDomain: 'test.com', clientConfig: legacyConfig } } as any;
+
+    await executeSurpassPlans(mockJob);
+
+    expect(mockUpdateMetaTitle).not.toHaveBeenCalled();
+    expect(mockTriggerDeploy).not.toHaveBeenCalled();
   });
 
   it('does NOT dispatch a write for faq_content_update (G3 — no FAQ payload)', async () => {
