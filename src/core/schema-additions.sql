@@ -4,11 +4,14 @@
 -- Apply via: psql $DATABASE_URL < src/core/schema-additions.sql
 -- Then reflect into Drizzle by adding the table definitions to schema.ts and generating a migration.
 
+-- Repository identifier constant (referenced in 3 locations below)
+\set REPO_ID '''seo-bot'''
+
 -- ─── Agent jobs (cross-run accounting) ───────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS agent_jobs (
     job_id           UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-    repo             VARCHAR(100)  NOT NULL DEFAULT 'seo-bot',
+    repo             VARCHAR(100)  NOT NULL DEFAULT :REPO_ID,
     client_id        VARCHAR(255),                                    -- NULL = all clients
     trigger_type     VARCHAR(50)   NOT NULL,                          -- 'cron' | 'api' | 'dispatch' | 'manual'
     trigger_payload  JSONB,
@@ -38,7 +41,7 @@ CREATE INDEX IF NOT EXISTS idx_seo_agent_jobs_client_id
 CREATE TABLE IF NOT EXISTS budget_violations (
     id           BIGSERIAL    PRIMARY KEY,
     job_id       UUID         NOT NULL REFERENCES agent_jobs(job_id),
-    repo         VARCHAR(100) NOT NULL DEFAULT 'seo-bot',
+    repo         VARCHAR(100) NOT NULL DEFAULT :REPO_ID,
     client_id    VARCHAR(255),
     cost_usd     NUMERIC(10,6) NOT NULL,
     cost_cap_usd NUMERIC(10,6) NOT NULL,
@@ -57,7 +60,7 @@ BEGIN
        AND (OLD.cost_usd IS NULL OR OLD.cost_usd <= OLD.cost_cap_usd)
     THEN
         INSERT INTO budget_violations (job_id, repo, client_id, cost_usd, cost_cap_usd, overage_usd)
-        VALUES (NEW.job_id, 'seo-bot', NEW.client_id, NEW.cost_usd, NEW.cost_cap_usd, NEW.cost_usd - NEW.cost_cap_usd);
+        VALUES (NEW.job_id, :REPO_ID, NEW.client_id, NEW.cost_usd, NEW.cost_cap_usd, NEW.cost_usd - NEW.cost_cap_usd);
     END IF;
     RETURN NEW;
 END;

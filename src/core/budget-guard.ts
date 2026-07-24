@@ -9,8 +9,9 @@
  * Moves: Open (admission) → Reserve → Reconcile → Enforce
  */
 
-import { getConfig } from './config.js';
-import { logger } from './logger.js';
+import { createModuleLogger } from './logger.js';
+
+const logger = createModuleLogger('budget-guard');
 
 export class BudgetExceededError extends Error {}
 export class AdmissionRejectedError extends Error {}
@@ -28,7 +29,7 @@ export interface BudgetEnforcement {
 }
 
 export class AgentBudgetGuard {
-  private capUsd: number;
+  private readonly capUsd: number;
   private actualUsd = 0;
   private reservedUsd = 0;
   private forecastUsd = 0;

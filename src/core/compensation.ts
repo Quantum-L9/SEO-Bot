@@ -8,7 +8,9 @@
  * On failure, call compensate() to reverse registered actions in LIFO order.
  */
 
-import { logger } from './logger.js';
+import { createModuleLogger } from './logger.js';
+
+const logger = createModuleLogger('compensation');
 
 export interface CompensationEntry {
   stepId: string;

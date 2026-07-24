@@ -1,9 +1,9 @@
-# ADR-0005: Autonomy Runtime Controls
+# ADR-0008: Autonomy Runtime Controls
 
 **Status:** Proposed  
 **Date:** 2026-07-15  
 **Supersedes:** None  
-**Related:** ADR-0001 (BullMQ), ADR-0002 (multi-tenancy), ADR-0003 (token budget)
+**Related:** ADR-0004 (BullMQ), ADR-0002 (multi-tenancy), ADR-0003 (token budget)
 
 ## Context
 
@@ -34,7 +34,7 @@ Add the following **without replacing or modifying any existing files**:
 - `src/core/config.ts` — untouched.
 - `src/core/database/schema.ts` — the SQL DDL is provided separately; Drizzle migration is a follow-on task.
 - `AGENTS.md` locked decisions (BullMQ, multi-tenancy, Pino logging, Drizzle, no Puppeteer/Playwright).
-- Existing ADRs 0001–0004.
+- Existing ADRs 0001–0007.
 
 ## Integration path
 
