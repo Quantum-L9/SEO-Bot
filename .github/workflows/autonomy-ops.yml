@@ -1,0 +1,149 @@
+# autonomy-ops.yml
+# NEW workflow — does NOT replace or conflict with: ci.yml
+# Provides manual-dispatch and weekly scheduled gate for full-site autonomous SEO runs.
+# Routine per-client module jobs continue to be driven by the internal BullMQ scheduler.
+
+name: SEO Bot — Autonomous Full-Site Ops
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'   # Weekly Monday 03:00 UTC — off-peak
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: 'Analysis scope: full | delta | single-url'
+        required: false
+        default: 'delta'
+      cost_cap_usd:
+        description: 'Hard cost cap for this run (USD)'
+        required: false
+        default: '2.00'
+      target_url:
+        description: 'Target URL (only used when scope=single-url)'
+        required: false
+        default: ''
+      client_id:
+        description: 'Client ID to scope this run (leave empty for all clients)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Pre-flight gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@quantum-l9'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Type check
+        run: npm run build   # tsc — fail on type errors
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Verify all
+        run: npm run verify:all
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+
+  run-seo-ops:
+    name: Run SEO Bot autonomous ops
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      packages: read
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+      DATAFORSEO_LOGIN: ${{ secrets.DATAFORSEO_LOGIN }}
+      DATAFORSEO_PASSWORD: ${{ secrets.DATAFORSEO_PASSWORD }}
+      POSTHOG_PROJECT_API_KEY: ${{ secrets.POSTHOG_PROJECT_API_KEY }}
+      COST_CAP_USD: ${{ inputs.cost_cap_usd || '2.00' }}
+      ANALYSIS_SCOPE: ${{ inputs.scope || 'delta' }}
+      TARGET_URL: ${{ inputs.target_url || '' }}
+      CLIENT_ID: ${{ inputs.client_id || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@quantum-l9'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Restore crawl cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/seo-bot
+          key: seo-bot-crawl-${{ github.run_number }}
+          restore-keys: seo-bot-crawl-
+
+      - name: Run autonomous SEO ops
+        run: node dist/scripts/autonomous-run.js
+        # This script:
+        #   1. Reads COST_CAP_USD, ANALYSIS_SCOPE, TARGET_URL, CLIENT_ID from env
+        #   2. Creates an agent_jobs row in Postgres with idempotency_key = hash(scope+date+client)
+        #   3. Dispatches a BullMQ job with the parameters
+        #   4. Polls job completion with a 110-minute timeout
+        #   5. Writes outputs/seo-report-{run_id}.json on success
+
+      - name: Create recommendations PR
+        if: success()
+        run: |
+          BRANCH="bot/seo-${{ github.run_id }}"
+          git config user.email "seo-bot@quantum-l9.io"
+          git config user.name "SEO Bot"
+          git checkout -b "$BRANCH"
+          if git diff --quiet; then
+            echo "No file changes to commit"
+          else
+            git add outputs/
+            git commit -m "chore(seo-bot): recommendations run ${{ github.run_id }}"
+            git push origin "$BRANCH"
+            gh pr create \
+              --title "SEO Bot: recommendations ${{ github.run_id }}" \
+              --body-file outputs/pr-body.md \
+              --base main --head "$BRANCH" \
+              --label "seo-bot,automated" || true
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload SEO report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: seo-report-${{ github.run_id }}
+          path: outputs/
+          if-no-files-found: ignore
