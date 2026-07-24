@@ -23,7 +23,6 @@ env:
 
 permissions:
   contents: read
-  checks: write
 
 concurrency:
   group: l9-analysis-${{ github.workflow }}-${{ github.ref }}
@@ -79,7 +78,7 @@ jobs:
         if: steps.gov.outputs.enabled == 'true'
         run: |
           set -euo pipefail
-          pip install --upgrade pip semgrep
+          pip install --only-binary :all: "semgrep==1.171.0"
           mkdir -p "artifacts/raw/semgrep/${L9_MATRIX_ID}"
           semgrep scan \
             --config p/typescript \
