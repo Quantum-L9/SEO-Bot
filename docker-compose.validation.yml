@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: l9bot
+      POSTGRES_PASSWORD: validation-only
+      POSTGRES_DB: l9_seo_bot_validation
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U l9bot -d l9_seo_bot_validation"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 30

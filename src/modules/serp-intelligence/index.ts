@@ -302,7 +302,7 @@ serp_features (featured snippets, PAA, etc.)`,
 // ─── Handler: Generate Surpass Plan (STRATEGIC LLM - weekly) ─────────────────
 
 async function generateSurpassPlan(job: Job): Promise<void> {
-  const { clientId, clientDomain, clientConfig } = job.data;
+  const { clientId, clientDomain } = job.data;
   if (!clientId) return;
 
   const db = getDb();
@@ -377,7 +377,6 @@ async function generateWeeklyReport(job: Job): Promise<void> {
   const notifications = getNotificationService();
 
   // Gather week's data
-  const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
   const rankings = await db.select()
     .from(schema.serpRankings)

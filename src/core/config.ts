@@ -40,10 +40,20 @@ const envSchema = z.object({
   PERPLEXITY_API_KEY: z.string().min(1),
 
   // Cross-repo handoff: shared secret presented by Website-Bot as a Bearer
-  // token to POST /api/clients/register. When unset, that route is open
-  // (backward compatible); set it to require auth. Must match Website-Bot's
-  // SEO_BOT_API_KEY secret.
+  // token to POST /api/clients/register. REQUIRED for that route — when unset,
+  // registration fails closed (503) rather than accepting anonymous upserts.
+  // Must match Website-Bot's SEO_BOT_API_KEY secret.
   SEO_BOT_API_KEY: z.string().optional(),
+
+  // Operator API/dashboard auth. Shared secret required (Basic password or
+  // Bearer token) to reach any operator route except /health and the
+  // machine-authenticated /api/clients/register. When unset, the operator API
+  // is locked (401) — fail closed. Set this to enable dashboard access.
+  OPERATOR_API_KEY: z.string().optional(),
+
+  // Comma-separated CORS allow-list for the operator API. When unset, CORS is
+  // disabled (same-origin only) — the safe default for an operator-only surface.
+  DASHBOARD_ALLOWED_ORIGINS: z.string().optional(),
 
   // Email Outreach
   SMTP_HOST: z.string().default('smtp.sendgrid.net'),
@@ -63,6 +73,11 @@ const envSchema = z.object({
   BOT_PORT: z.coerce.number().default(3100),
   BOT_LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   BOT_TIMEZONE: z.string().default('America/New_York'),
+  // Trust X-Forwarded-For. Set true when the API runs behind a reverse proxy /
+  // tunnel (Caddy/nginx/Cloudflare) so request.ip — and the per-IP rate limiter
+  // — reflect the real client IP rather than the proxy's. Default false (do not
+  // trust XFF) to avoid IP spoofing when not behind a trusted proxy.
+  TRUST_PROXY: z.string().optional().transform((v) => v === 'true' || v === '1'),
 
   // Notifications
   OPERATOR_EMAIL: z.string().email().optional(),
@@ -76,6 +91,10 @@ const envSchema = z.object({
   DEFAULT_CLIENT_WEEKLY_CEILING: z.coerce.number().default(100.00),
   GLOBAL_MONTHLY_HARD_CEILING: z.coerce.number().default(2000.00),
   SURGE_THRESHOLD: z.coerce.number().default(0.6),
+  // Optional hard daily LLM spend cap (USD). When set, execute() defers tasks
+  // once the day's recorded spend reaches this value. Unset = no daily cap
+  // (the router's weekly/monthly/global ceilings still apply).
+  DAILY_SPEND_CAP: z.coerce.number().optional(),
 
   // Execution Policy
   AUTO_EXECUTE_THRESHOLD: z.enum(['low', 'medium', 'high']).default('high'),

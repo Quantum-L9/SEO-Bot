@@ -32,7 +32,8 @@
 
 import axios from 'axios';
 import { Job } from 'bullmq';
-import { eq, and, desc, lt, inArray } from 'drizzle-orm';
+import { eq, and, desc, gte, sql } from 'drizzle-orm';
+import { velocityRunLimit } from './velocity.js';
 import { Scheduler } from '../../core/scheduler.js';
 import { getConfig } from '../../core/config.js';
 import { createModuleLogger } from '../../core/logger.js';
@@ -154,7 +155,6 @@ async function discoverBacklinkProspects(
 
 function classifyTactic(backlink: any): LinkTactic {
   const url = (backlink.url_from || '').toLowerCase();
-  const anchor = (backlink.anchor || '').toLowerCase();
 
   if (url.includes('/resources') || url.includes('/links') || url.includes('/tools')) return 'resource_page';
   if (url.includes('/blog/') || url.includes('/guest')) return 'guest_post';
@@ -275,6 +275,24 @@ async function processOutreach(job: Job): Promise<void> {
     return;
   }
 
+  // Link velocity governor: cap NEW outreach so this client stays under
+  // maxLinksPerWeek. Count prospects moved to outreach_queued in the last 7
+  // days; the daily cap alone (10/day) would otherwise allow ~70/week.
+  const oneWeekAgo = new Date(Date.now() - 7 * 86400000);
+  const sentThisWeekRows = await db.select({ count: sql<number>`COUNT(*)` })
+    .from(schema.linkProspects)
+    .where(and(
+      eq(schema.linkProspects.clientId, clientId),
+      eq(schema.linkProspects.status, 'outreach_queued'),
+      gte(schema.linkProspects.updatedAt, oneWeekAgo),
+    ));
+  const sentThisWeek = Number(sentThisWeekRows[0]?.count ?? 0);
+  const runLimit = velocityRunLimit(sentThisWeek, SAFETY.maxLinksPerWeek, SAFETY.maxEmailsPerDay);
+  if (runLimit === 0) {
+    logger.info({ clientDomain, sentThisWeek }, 'Weekly link velocity cap reached — skipping outreach');
+    return;
+  }
+
   // Get ready prospects (have email, not yet contacted)
   const readyProspects = await db.select()
     .from(schema.linkProspects)
@@ -283,7 +301,7 @@ async function processOutreach(job: Job): Promise<void> {
       eq(schema.linkProspects.status, 'ready'),
     ))
     .orderBy(desc(schema.linkProspects.relevanceScore))
-    .limit(SAFETY.maxEmailsPerDay);
+    .limit(runLimit);
 
   if (!readyProspects.length) {
     logger.info({ clientDomain }, 'No ready prospects — skipping outreach');
@@ -295,7 +313,7 @@ async function processOutreach(job: Job): Promise<void> {
   let sentCount = 0;
 
   for (const prospect of readyProspects) {
-    if (sentCount >= SAFETY.maxEmailsPerDay) break;
+    if (sentCount >= runLimit) break;
     if (!prospect.contactEmail) continue;
 
     try {

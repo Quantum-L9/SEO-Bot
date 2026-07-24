@@ -37,6 +37,44 @@ export interface ClientConfig {
   linkVelocity: LinkVelocityConfig;
   contentStrategy: ContentStrategyConfig;
   notifications: NotificationConfig;
+  /**
+   * Per-client site-deployment target (multi-tenant). When present, the surpass-plan
+   * executor writes this client's autonomous edits to THIS repo/hook instead of the
+   * single-tenant WEBSITE_BOT_REPO env fallback. Absent/blank ⇒ dry-run (no writes).
+   */
+  site_deployment?: ClientSiteDeploymentConfig;
+}
+
+export interface ClientSiteDeploymentConfig {
+  // All optional: this is persisted in the `clients.config` JSONB, so existing
+  // clients may have the block absent or partially filled. `siteConfigFromClient`
+  // treats any missing/blank token or repo as a forced dry-run.
+  githubToken?: string;
+  vercelDeployHook?: string;
+  websiteBotRepo?: string;
+  sourceBranch?: string;
+
+  // ── Canonical v2 provenance (written by the enriched-v2 registration path) ─────
+  // When `schemaVersion === '2.0'` and `status === 'ready'`, credentials are
+  // resolved from env:// references (githubCredentialRef / vercelDeployHookRef)
+  // rather than raw tokens, and the deploy target is treated as verified.
+  schemaVersion?: '2.0';
+  status?: 'unverified' | 'ready';
+  transport?: 'github-contents-api';
+  githubCredentialRef?: string;
+  vercelDeployHookRef?: string;
+  repositoryId?: string;
+  verifiedCommitSha?: string;
+  sourceDigest?: string;
+  managedManifestPath?: string;
+  editableRoot?: string;
+  pagePathStrategy?: string;
+  vercelProjectId?: string;
+  vercelDeploymentId?: string;
+  deploymentUrl?: string;
+  contractId?: string;
+  contractDigest?: string;
+  verifiedAt?: string;
 }
 
 export interface TargetKeyword {

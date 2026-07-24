@@ -22,11 +22,28 @@
  */
 
 import { FastifyInstance } from 'fastify';
-import { eq, and, desc, gte, sql, count } from 'drizzle-orm';
+import { eq, and, desc, gte, sql } from 'drizzle-orm';
 import { getDb, schema } from '../core/database/index.js';
 import { createModuleLogger } from '../core/logger.js';
 
 const logger = createModuleLogger('dashboard');
+
+/**
+ * HTML-escape any interpolated value. DB/LLM-derived strings (client names,
+ * keywords, action descriptions, LLM rationales/options) must never be placed
+ * into the operator dashboard markup unescaped — a client registered with a
+ * `<script>`/`<img onerror>` name would otherwise inject into the operator's
+ * session. Numbers/enums pass through harmlessly.
+ */
+export function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+const esc = escapeHtml;
 
 // ─── Dashboard Registration ───────────────────────────────────────────────────
 
@@ -289,12 +306,12 @@ function renderPortfolio(clients: any[], pendingCount: number, todaySpend: numbe
 
   const clientRows = clients.map(c => `
     <tr>
-      <td><a href="/dashboard/${c.id}" class="btn-view" style="text-decoration: none;">${c.name}</a></td>
-      <td>${c.domain}</td>
-      <td>${c.industry}</td>
+      <td><a href="/dashboard/${encodeURIComponent(c.id)}" class="btn-view" style="text-decoration: none;">${esc(c.name)}</a></td>
+      <td>${esc(c.domain)}</td>
+      <td>${esc(c.industry)}</td>
       <td>${c.avgPosition ? `#${c.avgPosition}` : '—'}</td>
-      <td><span class="badge badge-${c.healthRating === 'good' ? 'good' : c.healthRating === 'needs-improvement' ? 'warning' : 'critical'}">${c.healthRating}</span></td>
-      <td>${c.pendingApprovals > 0 ? `<span class="badge badge-pending">${c.pendingApprovals} pending</span>` : '—'}</td>
+      <td><span class="badge badge-${c.healthRating === 'good' ? 'good' : c.healthRating === 'needs-improvement' ? 'warning' : 'critical'}">${esc(c.healthRating)}</span></td>
+      <td>${c.pendingApprovals > 0 ? `<span class="badge badge-pending">${esc(c.pendingApprovals)} pending</span>` : '—'}</td>
     </tr>
   `).join('');
 
@@ -319,10 +336,10 @@ function renderPortfolio(clients: any[], pendingCount: number, todaySpend: numbe
   return baseLayout('Portfolio', content);
 }
 
-function renderClientDetail(client: any, rankings: any[], actions: any[], engagement: any[]): string {
+function renderClientDetail(client: any, rankings: any[], actions: any[], _engagement: any[]): string {
   const rankingRows = rankings.slice(0, 10).map(r => `
     <tr>
-      <td>${r.keyword}</td>
+      <td>${esc(r.keyword)}</td>
       <td>${r.position || '—'}</td>
       <td>${r.previousPosition || '—'}</td>
       <td style="color: ${!r.position || !r.previousPosition ? '#94a3b8' : r.position < r.previousPosition ? '#6ee7b7' : r.position > r.previousPosition ? '#fca5a5' : '#94a3b8'}">
@@ -333,17 +350,17 @@ function renderClientDetail(client: any, rankings: any[], actions: any[], engage
 
   const actionRows = actions.slice(0, 10).map(a => `
     <tr>
-      <td>${a.action}</td>
-      <td>${a.description}</td>
-      <td><span class="badge badge-${a.riskLevel === 'low' ? 'good' : a.riskLevel === 'medium' ? 'warning' : 'critical'}">${a.riskLevel}</span></td>
-      <td><span class="badge badge-${a.status === 'auto_executed' ? 'good' : 'pending'}">${a.status}</span></td>
-      <td style="font-style: italic; color: #94a3b8; font-size: 12px;">${a.triggeredBy}</td>
+      <td>${esc(a.action)}</td>
+      <td>${esc(a.description)}</td>
+      <td><span class="badge badge-${a.riskLevel === 'low' ? 'good' : a.riskLevel === 'medium' ? 'warning' : 'critical'}">${esc(a.riskLevel)}</span></td>
+      <td><span class="badge badge-${a.status === 'auto_executed' ? 'good' : 'pending'}">${esc(a.status)}</span></td>
+      <td style="font-style: italic; color: #94a3b8; font-size: 12px;">${esc(a.triggeredBy)}</td>
     </tr>
   `).join('');
 
   const content = `
-    <h2 style="margin-bottom: 8px; color: #f8fafc;">${client.name}</h2>
-    <p style="color: #94a3b8; margin-bottom: 24px;">${client.domain} | ${client.industry} | ${client.city || ''}, ${client.state || ''}</p>
+    <h2 style="margin-bottom: 8px; color: #f8fafc;">${esc(client.name)}</h2>
+    <p style="color: #94a3b8; margin-bottom: 24px;">${esc(client.domain)} | ${esc(client.industry)} | ${esc(client.city || '')}, ${esc(client.state || '')}</p>
 
     <h3 style="margin-bottom: 12px; color: #f8fafc;">Rankings (Last 7 Days)</h3>
     <table>
@@ -373,14 +390,20 @@ function renderApprovals(pending: any[]): string {
   }
 
   const approvalCards = pending.map(a => {
-    const options = a.options ? JSON.parse(a.options as string) : [];
+    let options: any[] = [];
+    try {
+      const parsed = typeof a.options === 'string' ? JSON.parse(a.options) : a.options;
+      if (Array.isArray(parsed)) options = parsed;
+    } catch {
+      options = [];
+    }
     const optionsHtml = options.length > 0 ? `
       <ul class="options-list">
         ${options.map((o: any) => `
           <li class="${o.recommended ? 'recommended' : ''}">
-            <strong>${o.id.toUpperCase()})</strong> ${o.label} — ${o.description}
+            <strong>${esc(String(o.id ?? '').toUpperCase())})</strong> ${esc(o.label)} — ${esc(o.description)}
             ${o.recommended ? '<span class="badge badge-good" style="margin-left: 8px;">AI Recommended</span>' : ''}
-            <span style="float: right; color: #94a3b8;">${(o.confidence * 100).toFixed(0)}% confidence</span>
+            <span style="float: right; color: #94a3b8;">${((Number(o.confidence) || 0) * 100).toFixed(0)}% confidence</span>
           </li>
         `).join('')}
       </ul>
@@ -390,26 +413,26 @@ function renderApprovals(pending: any[]): string {
       <div class="approval-card">
         <div style="display: flex; justify-content: space-between; align-items: start;">
           <div>
-            <h3 style="color: #fbbf24;">${a.action}</h3>
-            <p style="color: #94a3b8; font-size: 12px;">${a.clientDomain} | ${a.module} | ${a.riskLevel} risk${a.reversible ? '' : ' | IRREVERSIBLE'}</p>
+            <h3 style="color: #fbbf24;">${esc(a.action)}</h3>
+            <p style="color: #94a3b8; font-size: 12px;">${esc(a.clientDomain)} | ${esc(a.module)} | ${esc(a.riskLevel)} risk${a.reversible ? '' : ' | IRREVERSIBLE'}</p>
           </div>
-          <span class="badge badge-${a.riskLevel === 'medium' ? 'warning' : 'critical'}">${a.riskLevel}</span>
+          <span class="badge badge-${a.riskLevel === 'medium' ? 'warning' : 'critical'}">${esc(a.riskLevel)}</span>
         </div>
-        <p style="margin: 12px 0;">${a.description}</p>
-        <p style="margin: 8px 0; color: #94a3b8;"><strong>Rationale:</strong> ${a.rationale}</p>
-        <p style="margin: 8px 0; color: #94a3b8;"><strong>Triggered by:</strong> ${a.triggeredBy}</p>
-        ${a.aiRecommendation ? `<p style="margin: 8px 0; color: #38bdf8;"><strong>AI Recommendation:</strong> ${a.aiRecommendation} (${((a.aiConfidence || 0) * 100).toFixed(0)}% confidence)</p>` : ''}
+        <p style="margin: 12px 0;">${esc(a.description)}</p>
+        <p style="margin: 8px 0; color: #94a3b8;"><strong>Rationale:</strong> ${esc(a.rationale)}</p>
+        <p style="margin: 8px 0; color: #94a3b8;"><strong>Triggered by:</strong> ${esc(a.triggeredBy)}</p>
+        ${a.aiRecommendation ? `<p style="margin: 8px 0; color: #38bdf8;"><strong>AI Recommendation:</strong> ${esc(a.aiRecommendation)} (${((Number(a.aiConfidence) || 0) * 100).toFixed(0)}% confidence)</p>` : ''}
         ${optionsHtml}
         <div style="margin-top: 16px; display: flex; gap: 8px;">
           ${options.map((o: any) => `
-            <form method="POST" action="/dashboard/approve/${a.id}">
-              <input type="hidden" name="option" value="${o.id}">
+            <form method="POST" action="/dashboard/approve/${encodeURIComponent(a.id)}">
+              <input type="hidden" name="option" value="${esc(o.id)}">
               <button type="submit" class="btn ${o.recommended ? 'btn-approve' : 'btn-view'}">
-                Approve ${o.id.toUpperCase()}${o.recommended ? ' (Recommended)' : ''}
+                Approve ${esc(String(o.id ?? '').toUpperCase())}${o.recommended ? ' (Recommended)' : ''}
               </button>
             </form>
           `).join('')}
-          <form method="POST" action="/dashboard/reject/${a.id}">
+          <form method="POST" action="/dashboard/reject/${encodeURIComponent(a.id)}">
             <button type="submit" class="btn btn-reject">Reject</button>
           </form>
         </div>

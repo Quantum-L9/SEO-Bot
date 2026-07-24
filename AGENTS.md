@@ -1,95 +1,129 @@
-# AGENTS.md
+# AGENTS.md — L9 SEO Bot operating contract
 
-## Mission
+Binding control plane for AI agents in this repo. Compact by design; load it every session.
+Every rule here changes behavior. When this file disagrees with the code, **the code wins** (see
+Authority order) — fix the stale rule.
 
-Maintain, extend, and operate the L9 SEO Bot codebase without degrading its multi-tenant architecture, token efficiency, or stability. This file is binding guidance for AI coding agents and developer assistants working in this repository.
+## 1. Identity
 
-## Source-of-Truth Order
+- **What:** `l9-seo-bot` v2.0.0 — a multi-tenant SEO **maintenance daemon**. One long-running
+  Node/TS process: Fastify REST API + BullMQ workers, managing SEO for many client sites, every
+  row/query/job scoped by `clientId`. Deterministic-first (≈95% zero-token code; LLM only for judgment).
+- **Archetype:** deployable service, **not** a library or published package. No consumer API stability
+  contract beyond the webhook schema in §4.
+- **Stack (locked):** Node `>=22`, TypeScript strict, **ESM** (`"type":"module"`), **npm**,
+  **no lockfile**. BullMQ + Redis, Drizzle + Postgres, self-hosted PostHog, Pino logs.
+  LLM via `@quantum-l9/llm-router` (private GitHub Packages, `@quantum-l9` scope).
 
-1. Current explicit operator instruction.
-2. Domain specification and generated contracts (e.g., `contracts/website_factory_integration.yaml`).
-3. Existing repository files and ADRs.
-4. Machine validation evidence.
-5. Root docs in this pack.
-6. General best practices.
+## 2. Operating mode — default to action
 
-When sources conflict, stop and report the conflict. Do not silently choose the more convenient answer.
+- Reversible, evidence-supported next step → **do it, then report.** No permission theater, no menus.
+- State a low-risk assumption once and proceed; validate by tsc/vitest/git-diff.
+- **Stop and ask only when** an action is destructive/irreversible, force-pushes over others, touches
+  secrets/production, enables the gated site-deploy path (§9), or needs authority/credentials you lack.
+- **`l4` (optional session token):** if the operator says `l4`, stop asking low-risk clarifying
+  questions this session — choose sane reversible defaults, execute through validation, report what you
+  did. `l4` never authorizes destructive, irreversible, credential, production, publication, or
+  force-overwrite actions; §9 still binds.
+- Never claim a remote action (push/PR/merge) or a credential-bound check passed without observed evidence.
 
-## Locked Decisions
+## 3. Authority order (higher wins; record conflicts)
 
-- Framework: Node.js / TypeScript.
-- Package manager: npm.
-- Architecture: Multi-tenant, single persistent process.
-- Job Queue: BullMQ + Redis.
-- Analytics: Self-hosted PostHog.
-- Readiness claims: Evidence-backed only.
+1. Explicit operator instruction.
+2. **Executable truth** — CI (`.github/workflows/ci.yml`), tests, `src/core/config.ts`, `package.json`.
+3. Contracts & ADRs — `contracts/website_factory_integration.yaml`, `src/contracts/*`, `adr/`.
+4. This file.
+5. Other docs (README, CONTRIBUTING, MANIFEST, RUNBOOK).
 
-## Allowed Changes
+Executable truth beats prose. Some docs are known-stale: **CONTRIBUTING/README say `pnpm` — wrong,
+this repo is npm**; **MANIFEST.md is incomplete** (missing several `src/` files); `npm run seed`
+points at a `seed.ts` that does not exist. Follow the code; don't propagate the stale prose.
 
-- Fix build, runtime, route, or verification errors.
-- Improve scripts when they preserve existing command semantics.
-- Update docs to match inspected repo facts.
-- Add environment variable names without values.
-- Improve command consistency across docs and package scripts.
-- Add validation evidence generated from real commands.
+## 4. Navigation — canonical sources of truth
 
-## Forbidden Changes
+- **Start:** `src/index.ts` (entry) → `src/core/` (config, scheduler, logger, secrets, database) →
+  `src/modules/*` (the 5 job-handler pillars) → `src/services/*` → `src/api/*`.
+- **Env/config:** `src/core/config.ts` (Zod `envSchema`, `getConfig()`) is the only config gateway;
+  `.env.example` is the template. Secrets hydrate first via `src/core/secrets.ts` (Infisical).
+- **DB schema:** `src/core/database/schema.ts` + `schema-extensions.ts` (Drizzle). `drizzle.config.ts`
+  lists both.
+- **Webhook contract:** `contracts/website_factory_integration.yaml` + validator
+  `src/contracts/website_factory_v2.ts` (`schema_version` literal `'2.0'`). PostHog event names:
+  `src/contracts/posthog_events.ts`.
+- **Decisions:** `adr/` (ADR-0001..0006, all accepted) + `adr/README.md`; `DECISION_LOG.md`.
+- **Do-not-edit / generated:** `drizzle/` migrations + `drizzle/meta/` (regenerate, never hand-edit),
+  `dist/` (build output, gitignored), `validation/*.jsonl` (machine evidence).
 
-- Do not break multi-tenancy (no hardcoded client logic).
-- Do not violate the token budget (95% deterministic, LLM for strategy only).
-- Do not bypass the job queue (no raw `setTimeout` for business logic).
-- Do not hardcode secrets or commit `.env.local`.
-- Do not mark credential-bound checks as passed without runtime evidence.
-- Do not use `console.log` (use Pino structured logging).
-- Do not modify existing database migration files.
-- Do not introduce Puppeteer, Playwright, or OpenClaw dependencies.
+## 5. Execution — verified commands
 
-## Required Work Loop
+| Purpose | Command | Notes |
+|---|---|---|
+| Install | `npm install --no-audit --no-fund` | No lockfile — never `npm ci`. Needs `NODE_AUTH_TOKEN` for `@quantum-l9/*`. |
+| Build | `npm run build` | `tsc` → `dist/` |
+| Typecheck | `npx tsc --noEmit` | **Blocking CI gate.** `strict:true`. |
+| Test | `npx vitest run` | **Blocking CI gate.** Vitest; `NODE_ENV=test`. |
+| Preflight | `npm run verify:all` | preflight+source+build only — **not** typecheck/tests. A smoke check, not the gate. |
+| DB migrate | `npm run migrate` / `verify:db` (`--check`) | Mutates the DB — treat as stateful (§9). |
+| Dev | `npm run dev` | `tsx watch` |
 
-1. Inspect files before editing.
-2. Identify the smallest change that closes the actual gap.
-3. Modify only relevant files.
-4. Run the narrowest validation command that proves the fix.
-5. Run `npm run verify:all` when preparing handoff.
-6. Record Unknowns rather than inventing values.
-7. Package only approved outputs (excluding node_modules, secrets, caches).
+- **Private-dep auth:** installing `@quantum-l9/*` needs `NODE_AUTH_TOKEN` — a **`read:packages`-only
+  PAT** set in the environment-variables panel (not a repo file, not app config; publishing stays in
+  CI). Missing → deps don't install and CI stays the gate; `.claude/hooks/session-start.sh` installs
+  them once it is set.
+- **Lint is unconfigured** (`eslint src/` has no committed config → no-op/fails; CI skips it).
+  **Format is unwired** (no prettier dep/config). Do not claim "lint/format pass" — they don't run.
 
-## Domain Rules
+## 6. Validation
 
-## 1. Core Architecture Boundaries
+- **The gate = `npx tsc --noEmit` && `npx vitest run`** (mirrors CI). tsc must stay at 0.
+- Run the narrowest command that proves the change, then the full gate before handoff.
+- Establish baseline vs. new failures — don't fix or hide pre-existing failures under an unrelated task.
+- Evidence required: paste actual command output. Credential-bound checks that can't run (no
+  `NODE_AUTH_TOKEN`) are reported as blocked/UNKNOWN, never as passed.
 
-- **Single Purpose:** This Bot does SEO maintenance. Do NOT add features for site building, Astro deployment, or CMS management.
-- **Multi-Tenant Only:** Do NOT write code that assumes the Bot is running for a single client. Every database query, API call, and job execution MUST be scoped by `clientId`.
-- **No Browser Automation:** Do NOT introduce Puppeteer, Playwright, or OpenClaw dependencies into this repository. The Bot is strictly headless and relies on APIs.
+## 7. Change discipline
 
-## 2. Token Efficiency & LLM Usage
+- Smallest coherent change. Reuse the canonical owners: `getConfig()`, `createModuleLogger`, the BullMQ
+  `scheduler`, `@quantum-l9/llm-router` (via `src/services/llm.ts`) — no parallel frameworks.
+- **Multi-tenant:** every operational query/API call/job MUST be `clientId`-scoped. No hardcoded client logic.
+- **Async only via BullMQ** in `src/core/scheduler.ts` — no `setTimeout`/`setInterval` for business logic.
+  Job handlers MUST be idempotent (a crashed worker may re-run a job).
+- **Token discipline:** deterministic code by default; LLM only for judgment. New scheduled jobs define a
+  per-job `tokenBudget` (`maxFastTokensPerRun`, `maxStrategicTokensPerRun`, `cooldownMinutes`) in the
+  `JOB_DEFINITIONS` registry.
+- **New integration:** add its env vars to the Zod schema in `src/core/config.ts`; never hardcode secrets.
+- **Schema change:** edit `schema.ts`/`schema-extensions.ts`, generate a migration
+  (`npx drizzle-kit generate`), keep `migrate.ts` applying it. **Never edit an existing migration file.**
+- Keep `schema_version '2.0'` back-compat: `src/contracts/website_factory_v2.ts` is a cross-repo contract
+  Website-Bot mirrors — field renames are breaking. Update schema + migration + tests + contract together.
+- **No browser automation** (Puppeteer/Playwright/OpenClaw) — the bot is headless/API-only.
 
-- **Tiered Model Rule:** Do NOT use the strategic LLM (`gpt-4o` / `claude-3.5-sonnet`) for simple data extraction, classification, or formatting. You MUST use the fast tier (`gpt-4o-mini`) via `LlmService.classify()` or `LlmService.extractJson()`.
-- **Budget Enforcement:** If you add a new job to `src/core/scheduler.ts`, you MUST define a realistic `TokenBudget` (`maxFastTokensPerRun` and `maxStrategicTokensPerRun`).
-- **Zero-Token Default:** Prefer deterministic code over LLM calls. Only invoke the LLM when human-like judgment or generation is strictly required.
+## 8. Git & PR
 
-## 3. Database & State
+- Branch `claude/<topic>` off `main`; conventional commits (`fix(api): …`); create/commit/push without asking.
+- Open a PR → `main` when delivery is requested; include generated migrations and a new ADR when the change
+  is architectural (per CONTRIBUTING).
+- Never modify existing migrations. Never force-push over someone else's work. Never report a push/PR/merge
+  you did not observe succeed. No auto-merge without operator authorization.
 
-- **Drizzle ORM:** All database interactions MUST use Drizzle ORM (`src/core/database/schema.ts`). Do not write raw SQL queries.
-- **Migrations:** If you modify `schema.ts`, you MUST generate a new migration using `pnpm drizzle-kit generate` and ensure `src/core/database/migrate.ts` can apply it.
+## 9. Safety boundaries (stop → get operator/ADR sign-off)
 
-## 4. Scheduling & Concurrency
+- **Live-site mutation (highest blast radius):** `src/services/site-deployment.ts` writes the client's live
+  Astro site (GitHub Contents API + Vercel deploy hook); `src/services/plan-executor.ts` drives it. Its job
+  `serp:execute-surpass-plans` ships **`enabled: false`** and defaults to `SITE_DEPLOY_DRY_RUN`. **Do not
+  enable, un-dry-run, or extend this path without operator sign-off.** Note: this capability conflicts with
+  ADR-0001 (single-purpose) / AGENTS §1-history — it exists but is **gated, not blessed**; superseding
+  ADR-0001 requires operator approval (§ADR rule below).
+- **Execution policy:** `src/core/execution-policy.ts` auto-executes LOW/MED/HIGH and queues only CRITICAL
+  for human approval. Don't widen auto-execute or reclassify CRITICAL without sign-off.
+- **Secrets/credentials:** never read/commit real `.env`/`.env.local`, never print secret values, never
+  commit `NODE_AUTH_TOKEN`. `.env.example` (names only) is fine.
+- **DB migrations, publish/registry writes, prod config:** treat as stateful/irreversible — confirm first.
+- **ADR rule:** a change conflicting with an accepted ADR must either comply, or ship a superseding ADR
+  **with explicit operator approval before coding.**
 
-- **BullMQ:** All asynchronous or scheduled work MUST be dispatched through BullMQ in `src/core/scheduler.ts`. Do not use `setInterval` or `setTimeout` for business logic.
-- **Idempotency:** Job handlers MUST be idempotent. Assume BullMQ might execute a job twice if a worker crashes mid-execution.
+## 10. Completion checklist
 
-## 5. Security & Credentials
-
-- **Zod Validation:** If you introduce a new API integration, you MUST add the required environment variables to the Zod schema in `src/core/config.ts`.
-- **No Hardcoded Secrets:** Never hardcode API keys, database passwords, or PostHog tokens. Always use `getConfig()`.
-
-## 6. Modifying Client Integration
-
-- If you change the Web Vitals tracking or PostHog event structure, you MUST update `client-snippets/posthog-tracking.html`.
-- You must ensure the snippet remains lightweight (< 5KB) and does not negatively impact the client site's Lighthouse performance score.
-
-## 7. ADR Compliance
-
-Before making architectural changes, read the ADRs in `adr/`. If your proposed change conflicts with an accepted ADR, you must either:
-1. Revise your approach to comply.
-2. Write a new ADR superseding the old one, and explicitly request human operator approval before implementing the code.
+Done = code + tests + contracts/migrations updated together · `npx tsc --noEmit` and `npx vitest run` green
+with output shown (or the exact blocker/UNKNOWN stated) · diff reviewed for scope creep · no known
+unreported regression · Unknowns recorded, never invented.

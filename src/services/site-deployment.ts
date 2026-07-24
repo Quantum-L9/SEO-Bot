@@ -30,8 +30,26 @@
 
 import axios from 'axios';
 import { createModuleLogger } from '../core/logger.js';
+import type { ClientConfig } from '../types/index.js';
+import { siteConfigFromStoredClient } from './site-deployment-config.js';
 
 const logger = createModuleLogger('site-deployment');
+
+// Every outbound call gets a bounded timeout so a hung GitHub/Vercel endpoint
+// can't stall a BullMQ worker slot indefinitely.
+const REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * Render a value as a safe double-quoted YAML scalar (including the quotes).
+ * LLM-generated titles/descriptions are written into Astro frontmatter; an
+ * unescaped `"` breaks the YAML (fails the site build) and a newline can inject
+ * an arbitrary extra frontmatter key. Collapse newlines and escape `\` and `"`.
+ */
+export function yamlDoubleQuoted(value: string | null | undefined): string {
+  const oneLine = String(value ?? '').replace(/[\r\n]+/g, ' ').trim();
+  const escaped = oneLine.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `"${escaped}"`;
+}
 
 export interface SiteDeploymentConfig {
   githubToken: string;
@@ -66,8 +84,18 @@ class GitHubContentClient {
   }
 
   async readFile(filePath: string): Promise<{ content: string; sha: string }> {
+    // Dry-run (test env, kill-switch, or an unconfigured/blank tenant) must make
+    // NO outbound call. Without this, a dry-run client would still hit the GitHub
+    // API with an empty token and 401 on every mutation — noisy and pointless for
+    // the many multi-tenant clients that run in dry-run until configured. Returning
+    // an empty sentinel lets the mutation run harmlessly and writeFile (already
+    // dry-run guarded) return the dry-run result.
+    if (this.config.dryRun) {
+      logger.info({ filePath }, '[DRY-RUN] Would read file');
+      return { content: '', sha: '' };
+    }
     const url = `${this.baseUrl}/repos/${this.config.websiteBotRepo}/contents/${filePath}?ref=${this.config.sourceBranch}`;
-    const response = await axios.get(url, { headers: this.headers });
+    const response = await axios.get(url, { headers: this.headers, timeout: REQUEST_TIMEOUT_MS });
     const content = Buffer.from(response.data.content, 'base64').toString('utf-8');
     return { content, sha: response.data.sha };
   }
@@ -84,7 +112,7 @@ class GitHubContentClient {
       content: Buffer.from(content, 'utf-8').toString('base64'),
       sha,
       branch: this.config.sourceBranch,
-    }, { headers: this.headers });
+    }, { headers: this.headers, timeout: REQUEST_TIMEOUT_MS });
 
     return {
       success: true,
@@ -104,7 +132,7 @@ class GitHubContentClient {
       logger.warn('VERCEL_DEPLOY_HOOK not set — skipping Vercel deploy trigger');
       return;
     }
-    await axios.post(this.config.vercelDeployHook, {});
+    await axios.post(this.config.vercelDeployHook, {}, { timeout: REQUEST_TIMEOUT_MS });
     logger.info('Vercel deploy hook triggered');
   }
 }
@@ -124,6 +152,46 @@ export function siteConfigFromEnv(): SiteDeploymentConfig {
     vercelDeployHook: process.env.VERCEL_DEPLOY_HOOK ?? '',
     websiteBotRepo,
     sourceBranch: process.env.SITE_SOURCE_BRANCH ?? 'main',
+    dryRun:
+      process.env.NODE_ENV === 'test' ||
+      process.env.SITE_DEPLOY_DRY_RUN === 'true' ||
+      !githubToken ||
+      !websiteBotRepo,
+  };
+}
+
+/**
+ * Build a per-client transport config from a client's stored `clients.config`
+ * (multi-tenant). Each client's autonomous edits then write to THAT client's
+ * repo / deploy hook instead of the single shared `WEBSITE_BOT_REPO`.
+ *
+ * Safety invariant (mirrors `siteConfigFromEnv`): force `dryRun: true` whenever
+ * the github token OR the target repo is missing OR blank — an EMPTY STRING is
+ * treated the same as an absent key, so a half-populated `site_deployment`
+ * never performs a live write. Also honors the global test / dry-run env kills.
+ */
+export function siteConfigFromClient(clientConfig?: Partial<ClientConfig>): SiteDeploymentConfig {
+  const sd = clientConfig?.site_deployment;
+
+  // Canonical v2 path: credentials come from env:// references and the target is
+  // verified. Delegate to the canonical resolver (fail-closed on any incomplete
+  // provenance). Existing non-canonical clients keep the raw-token behavior below.
+  if (sd?.schemaVersion === '2.0' && sd.status === 'ready') {
+    return siteConfigFromStoredClient(clientConfig);
+  }
+
+  const githubToken = sd?.githubToken ?? '';
+  const websiteBotRepo = sd?.websiteBotRepo ?? '';
+  if (!githubToken || !websiteBotRepo) {
+    logger.warn(
+      'client site_deployment missing githubToken or websiteBotRepo — forced to dry-run',
+    );
+  }
+  return {
+    githubToken,
+    vercelDeployHook: sd?.vercelDeployHook ?? '',
+    websiteBotRepo,
+    sourceBranch: sd?.sourceBranch || 'main',
     dryRun:
       process.env.NODE_ENV === 'test' ||
       process.env.SITE_DEPLOY_DRY_RUN === 'true' ||
@@ -158,13 +226,15 @@ export async function updateMetaTitle(
   filePath: string,
   newTitle: string,
   clientDomain: string,
+  config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
-  const client = getSiteDeploymentService();
+  const client = getSiteDeploymentService(config);
   const { content, sha } = await client.readFile(filePath);
 
+  const safeTitle = yamlDoubleQuoted(newTitle);
   const updated = content
-    .replace(/^title:.*$/m, `title: "${newTitle}"`)
-    .replace(/^og_title:.*$/m, `og_title: "${newTitle}"`);
+    .replace(/^title:.*$/m, `title: ${safeTitle}`)
+    .replace(/^og_title:.*$/m, `og_title: ${safeTitle}`);
 
   return client.writeFile(
     filePath,
@@ -181,12 +251,13 @@ export async function updateMetaDescription(
   filePath: string,
   newDescription: string,
   clientDomain: string,
+  config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
-  const client = getSiteDeploymentService();
+  const client = getSiteDeploymentService(config);
   const { content, sha } = await client.readFile(filePath);
 
   const updated = content
-    .replace(/^description:.*$/m, `description: "${newDescription}"`);
+    .replace(/^description:.*$/m, `description: ${yamlDoubleQuoted(newDescription)}`);
 
   return client.writeFile(
     filePath,
@@ -204,8 +275,9 @@ export async function injectSchema(
   schemaType: string,
   schemaJson: Record<string, unknown>,
   clientDomain: string,
+  config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
-  const client = getSiteDeploymentService();
+  const client = getSiteDeploymentService(config);
   const { content, sha } = await client.readFile(filePath);
 
   const scriptBlock = `<script type="application/ld+json">
@@ -239,11 +311,14 @@ export async function updateHeading(
   filePath: string,
   newHeading: string,
   clientDomain: string,
+  config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
-  const client = getSiteDeploymentService();
+  const client = getSiteDeploymentService(config);
   const { content, sha } = await client.readFile(filePath);
 
-  const updated = content.replace(/^# .+$/m, `# ${newHeading}`);
+  // Collapse newlines so a multi-line value can't inject extra markdown lines.
+  const safeHeading = String(newHeading ?? '').replace(/[\r\n]+/g, ' ').trim();
+  const updated = content.replace(/^# .+$/m, `# ${safeHeading}`);
 
   return client.writeFile(
     filePath,
@@ -260,8 +335,9 @@ export async function rewritePageContent(
   filePath: string,
   newBodyMarkdown: string,
   clientDomain: string,
+  config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
-  const client = getSiteDeploymentService();
+  const client = getSiteDeploymentService(config);
   const { content, sha } = await client.readFile(filePath);
 
   // Preserve frontmatter (everything between --- delimiters), replace body
@@ -284,6 +360,7 @@ export async function updateFaq(
   filePath: string,
   faqs: Array<{ question: string; answer: string }>,
   clientDomain: string,
+  config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
   const faqSchema = {
     '@context': 'https://schema.org',
@@ -294,14 +371,14 @@ export async function updateFaq(
       acceptedAnswer: { '@type': 'Answer', text: f.answer },
     })),
   };
-  return injectSchema(filePath, 'FAQPage', faqSchema, clientDomain);
+  return injectSchema(filePath, 'FAQPage', faqSchema, clientDomain, config);
 }
 
 /**
  * Trigger Vercel deploy after one or more file mutations.
  */
-export async function triggerVercelDeploy(): Promise<void> {
-  const client = getSiteDeploymentService();
+export async function triggerVercelDeploy(config?: SiteDeploymentConfig): Promise<void> {
+  const client = getSiteDeploymentService(config);
   await client.triggerVercelDeploy();
 }
 
@@ -355,6 +432,7 @@ export async function requestSiteBuild(
         Accept: 'application/vnd.github.v3+json',
         'X-GitHub-Api-Version': '2022-11-28',
       },
+      timeout: REQUEST_TIMEOUT_MS,
     },
   );
 

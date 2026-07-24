@@ -116,6 +116,10 @@ async function pullEngagementData(job: Job): Promise<void> {
     return;
   }
 
+  // Query API needs a PostHog PERSONAL API key. client.posthogApiKey is the
+  // per-project ingestion key (client-side snippet) and would 401 here. All
+  // clients share one PostHog instance, so the global personal key reads any
+  // project. The per-client key presence above just signals PostHog is configured.
   const posthog = new PostHogClient(config.POSTHOG_API_URL, config.POSTHOG_PERSONAL_API_KEY);
   const today = new Date().toISOString().split('T')[0];
 
