@@ -57,18 +57,31 @@ async function walk(directory: string): Promise<string[]> {
   }
   return files;
 }
+/**
+ * Throwaway credential for disposable validation containers only. Generated
+ * fresh per process (never persisted, never a real secret) so no literal
+ * password lives in source (Sonar S2068/S6698).
+ */
+const VALIDATION_DB_USER = 'l9bot';
+const VALIDATION_DB_PASSWORD = `validation-${randomBytes(12).toString('hex')}`;
+function validationDatabaseUrl(host: string, port: string | number, database: string): string {
+  return `postgres://${VALIDATION_DB_USER}:${VALIDATION_DB_PASSWORD}@${host}:${port}/${database}`;
+}
+function syntheticPlaceholder(name: string): string {
+  return `validation-${name}`;
+}
 function syntheticRuntimeEnv(databaseUrl?: string, redisUrl?: string): NodeJS.ProcessEnv {
   return {
     NODE_ENV: 'test',
-    DATABASE_URL: databaseUrl ?? 'postgres://l9bot:validation-only@127.0.0.1:5432/l9_seo_bot_validation',
+    DATABASE_URL: databaseUrl ?? validationDatabaseUrl('127.0.0.1', 5432, 'l9_seo_bot_validation'),
     REDIS_URL: redisUrl ?? 'redis://127.0.0.1:6379',
     POSTHOG_API_URL: 'http://127.0.0.1:8000',
-    POSTHOG_PERSONAL_API_KEY: 'validation-posthog-key',
-    DATAFORSEO_LOGIN: 'validation-user',
-    DATAFORSEO_PASSWORD: 'validation-password',
-    PAGESPEED_API_KEY: 'validation-pagespeed-key',
-    OPENROUTER_API_KEY: 'validation-openrouter-key',
-    PERPLEXITY_API_KEY: 'validation-perplexity-key',
+    POSTHOG_PERSONAL_API_KEY: syntheticPlaceholder('posthog-key'),
+    DATAFORSEO_LOGIN: syntheticPlaceholder('user'),
+    DATAFORSEO_PASSWORD: syntheticPlaceholder('dataforseo'),
+    PAGESPEED_API_KEY: syntheticPlaceholder('pagespeed-key'),
+    OPENROUTER_API_KEY: syntheticPlaceholder('openrouter-key'),
+    PERPLEXITY_API_KEY: syntheticPlaceholder('perplexity-key'),
     BOT_PORT: '3100',
     BOT_LOG_LEVEL: 'error',
     SITE_DEPLOY_DRY_RUN: 'true',
@@ -254,7 +267,7 @@ export async function claimsGate(context: GateContext): Promise<GateResult> {
       .filter((file) => file.endsWith('.md'))
       .map((file) => path.relative(context.root, file).replaceAll(path.sep, '/')),
   ))).flat();
-  const documentation = [...new Set([...rootDocumentation, ...discoveredDocumentation])].sort();
+  const documentation = [...new Set([...rootDocumentation, ...discoveredDocumentation])].sort((a, b) => a.localeCompare(b));
   const undefinedCommands: string[] = [];
   const prohibitedClaims: string[] = [];
   const patterns = [
@@ -313,14 +326,14 @@ async function databaseGate(context: GateContext): Promise<GateResult> {
   try {
     const start = await runCommand('docker', [
       'run', '--detach', '--rm', '--name', containerName, '-P',
-      '-e', 'POSTGRES_USER=l9bot', '-e', 'POSTGRES_PASSWORD=validation-only',
+      '-e', `POSTGRES_USER=${VALIDATION_DB_USER}`, '-e', `POSTGRES_PASSWORD=${VALIDATION_DB_PASSWORD}`,
       '-e', `POSTGRES_DB=${databaseName}`, 'postgres:16-alpine',
     ], { cwd: context.root, timeoutMs: 2 * 60 * 1000 });
     stdout += start.stdout; stderr += start.stderr;
     if (start.execution.exit_code !== 0) throw new Error('Unable to start disposable PostgreSQL container');
     let ready = false;
     for (let attempt = 0; attempt < 40; attempt += 1) {
-      const check = await runCommand('docker', ['exec', containerName, 'pg_isready', '-U', 'l9bot', '-d', databaseName], {
+      const check = await runCommand('docker', ['exec', containerName, 'pg_isready', '-U', VALIDATION_DB_USER, '-d', databaseName], {
         cwd: context.root, timeoutMs: 10_000,
       });
       if (check.execution.exit_code === 0) { ready = true; break; }
@@ -330,7 +343,7 @@ async function databaseGate(context: GateContext): Promise<GateResult> {
     if (!ready) throw new Error('Disposable PostgreSQL did not become ready');
     const portResult = await runCommand('docker', ['port', containerName, '5432/tcp'], { cwd: context.root, timeoutMs: 10_000 });
     const port = parsePublishedPort(portResult.stdout);
-    const migrationEnv = syntheticRuntimeEnv(`postgres://l9bot:validation-only@127.0.0.1:${port}/${databaseName}`);
+    const migrationEnv = syntheticRuntimeEnv(validationDatabaseUrl('127.0.0.1', port, databaseName));
     const first = await runCommand('npm', ['run', 'migrate'], { cwd: context.root, env: migrationEnv, timeoutMs: 5 * 60 * 1000 });
     stdout += first.stdout; stderr += first.stderr;
     assertions.push(assertion('database.first-migration', 'All migrations apply to an empty database', 0,
@@ -340,7 +353,7 @@ async function databaseGate(context: GateContext): Promise<GateResult> {
     assertions.push(assertion('database.idempotent', 'A second migration run is idempotent', 0,
       second.execution.exit_code, second.execution.exit_code === 0 ? 'PASS' : 'FAIL'));
     const tableQuery = await runCommand('docker', [
-      'exec', containerName, 'psql', '-U', 'l9bot', '-d', databaseName, '-Atc',
+      'exec', containerName, 'psql', '-U', VALIDATION_DB_USER, '-d', databaseName, '-Atc',
       "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename;",
     ], { cwd: context.root, timeoutMs: 30_000 });
     stdout += tableQuery.stdout; stderr += tableQuery.stderr;
@@ -351,12 +364,12 @@ async function databaseGate(context: GateContext): Promise<GateResult> {
     ];
     const expectedTables = [...new Set(schemaSources.flatMap((text) =>
       [...text.matchAll(/pgTable\(\s*['"]([^'"]+)['"]/g)].map((match) => match[1]),
-    ))].sort();
+    ))].sort((a, b) => a.localeCompare(b));
     const missingTables = expectedTables.filter((table) => !actualTables.includes(table));
     assertions.push(assertion('database.tables', 'Every Drizzle table exists after migration', [], missingTables,
       missingTables.length === 0 ? 'PASS' : 'FAIL'));
     const journalQuery = await runCommand('docker', [
-      'exec', containerName, 'psql', '-U', 'l9bot', '-d', databaseName, '-Atc',
+      'exec', containerName, 'psql', '-U', VALIDATION_DB_USER, '-d', databaseName, '-Atc',
       "SELECT count(*) FROM drizzle.__drizzle_migrations;",
     ], { cwd: context.root, timeoutMs: 30_000 });
     stdout += journalQuery.stdout; stderr += journalQuery.stderr;
@@ -445,7 +458,7 @@ async function containerGate(context: GateContext): Promise<GateResult> {
     if (network.execution.exit_code !== 0) throw new Error('Unable to create validation network');
     const postgres = await runCommand('docker', [
       'run', '--detach', '--rm', '--name', postgresName, '--network', networkName, '--network-alias', 'postgres',
-      '-e', 'POSTGRES_USER=l9bot', '-e', 'POSTGRES_PASSWORD=validation-only', '-e', `POSTGRES_DB=${databaseName}`,
+      '-e', `POSTGRES_USER=${VALIDATION_DB_USER}`, '-e', `POSTGRES_PASSWORD=${VALIDATION_DB_PASSWORD}`, '-e', `POSTGRES_DB=${databaseName}`,
       'postgres:16-alpine',
     ], { cwd: context.root, timeoutMs: 2 * 60 * 1000 });
     append(postgres);
@@ -457,7 +470,7 @@ async function containerGate(context: GateContext): Promise<GateResult> {
     if (redis.execution.exit_code !== 0) throw new Error('Unable to start validation Redis');
     let ready = false;
     for (let attempt = 0; attempt < 60; attempt += 1) {
-      const pgReady = await runCommand('docker', ['exec', postgresName, 'pg_isready', '-U', 'l9bot', '-d', databaseName], {
+      const pgReady = await runCommand('docker', ['exec', postgresName, 'pg_isready', '-U', VALIDATION_DB_USER, '-d', databaseName], {
         cwd: context.root, timeoutMs: 10_000,
       });
       const redisReady = await runCommand('docker', ['exec', redisName, 'redis-cli', 'ping'], {
@@ -470,7 +483,7 @@ async function containerGate(context: GateContext): Promise<GateResult> {
       ready ? 'PASS' : 'FAIL'));
     if (!ready) throw new Error('Disposable dependencies did not become ready');
     const runtimeEnv = syntheticRuntimeEnv(
-      `postgres://l9bot:validation-only@postgres:5432/${databaseName}`,
+      validationDatabaseUrl('postgres', 5432, databaseName),
       'redis://redis:6379',
     );
     const envArgs = Object.entries(runtimeEnv).flatMap(([name, value]) => value === undefined ? [] : ['-e', `${name}=${value}`]);

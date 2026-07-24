@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 export type ManifestClassification = 'runtime' | 'tooling' | 'test' | 'schema' | 'documentation' | 'configuration' | 'generated';
@@ -29,8 +30,16 @@ export interface RepositoryManifest {
   entries: RepositoryManifestEntry[];
   inventory_digest: string;
 }
+/** Fixed, unwriteable candidate locations for the git binary (SonarCloud S4036:
+ * never resolve executables through a caller-controlled PATH). */
+const GIT_BINARY_CANDIDATES = ['/usr/bin/git', '/usr/local/bin/git', '/opt/homebrew/bin/git', '/bin/git'] as const;
+function resolveGitBinary(): string {
+  const found = GIT_BINARY_CANDIDATES.find((candidate) => existsSync(candidate));
+  if (!found) throw new Error(`git binary not found in fixed locations: ${GIT_BINARY_CANDIDATES.join(', ')}`);
+  return found;
+}
 function runGit(root: string, args: string[]): string {
-  const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', shell: false });
+  const result = spawnSync(resolveGitBinary(), args, { cwd: root, encoding: 'utf8', shell: false });
   if (result.status !== 0) throw new Error(result.stderr.trim() || `git ${args.join(' ')} failed`);
   return result.stdout;
 }
