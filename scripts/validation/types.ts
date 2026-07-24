@@ -185,8 +185,9 @@ const STATUS_PRECEDENCE: Record<ValidationStatus, number> = {
 
 export function aggregateStatus(statuses: ValidationStatus[]): ValidationStatus {
   if (statuses.length === 0) return 'UNKNOWN';
-  return statuses.reduce((worst, current) =>
-    STATUS_PRECEDENCE[current] > STATUS_PRECEDENCE[worst] ? current : worst,
+  return statuses.reduce<ValidationStatus>(
+    (worst, current) => (STATUS_PRECEDENCE[current] > STATUS_PRECEDENCE[worst] ? current : worst),
+    'PASS',
   );
 }
 
