@@ -26,7 +26,7 @@
 
 import { getDb, schema } from './database/index.js';
 import { createModuleLogger } from './logger.js';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
 const logger = createModuleLogger('execution-policy');
 

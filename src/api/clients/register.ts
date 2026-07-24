@@ -42,7 +42,7 @@ import {
 
 const logger = createModuleLogger('api:register');
 
-export interface RegisterClientRouteDeps extends MaintenanceReadinessDeps {}
+export type RegisterClientRouteDeps = MaintenanceReadinessDeps;
 
 /** Constant-time string compare (avoids leaking the key via timing). */
 function safeEqual(a: string, b: string): boolean {

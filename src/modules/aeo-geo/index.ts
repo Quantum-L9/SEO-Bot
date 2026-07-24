@@ -25,7 +25,7 @@
 
 import axios from 'axios';
 import { Job } from 'bullmq';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 import { Scheduler } from '../../core/scheduler.js';
 import { getConfig } from '../../core/config.js';
 import { createModuleLogger } from '../../core/logger.js';
@@ -37,7 +37,7 @@ const logger = createModuleLogger('aeo-geo');
 
 // ─── AEO Citation Architecture Constants ────────────────────────────────────
 
-const AEO_RULES = {
+const _AEO_RULES = {
   answerBlockLength: { min: 40, max: 60 },  // words per extractable answer
   statisticalDensityTarget: 19,              // data points per page for max citations
   freshnessIntervalDays: 30,                 // update FAQ content monthly

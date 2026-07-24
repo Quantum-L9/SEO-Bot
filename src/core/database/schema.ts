@@ -22,7 +22,6 @@ import {
   timestamp,
   jsonb,
   index,
-  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 // ─── Clients (Tenants) ──────────────────────────────────────────────────────

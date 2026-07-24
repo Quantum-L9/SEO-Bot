@@ -21,7 +21,7 @@
 
 import axios from 'axios';
 import { Job } from 'bullmq';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { Scheduler } from '../../core/scheduler.js';
 import { getConfig } from '../../core/config.js';
 import { createModuleLogger } from '../../core/logger.js';
@@ -152,7 +152,7 @@ async function fetchCruxData(origin: string, device: 'PHONE' | 'DESKTOP'): Promi
 
 // ─── Source 3: PostHog RUM (web-vitals.js events) ────────────────────────────
 
-async function fetchRumFromPosthog(clientId: string, domain: string): Promise<{
+async function fetchRumFromPosthog(clientId: string, _domain: string): Promise<{
   lcp: number | null;
   inp: number | null;
   cls: number | null;

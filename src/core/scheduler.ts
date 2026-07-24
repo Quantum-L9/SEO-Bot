@@ -23,7 +23,7 @@ import { eq } from 'drizzle-orm';
 import { getConfig } from './config.js';
 import { createModuleLogger } from './logger.js';
 import { getDb, schema } from './database/index.js';
-import type { JobDefinition, ModuleName } from '../types/index.js';
+import type { JobDefinition } from '../types/index.js';
 
 const logger = createModuleLogger('scheduler');
 
