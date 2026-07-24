@@ -53,6 +53,28 @@ export interface ClientSiteDeploymentConfig {
   vercelDeployHook?: string;
   websiteBotRepo?: string;
   sourceBranch?: string;
+
+  // ── Canonical v2 provenance (written by the enriched-v2 registration path) ─────
+  // When `schemaVersion === '2.0'` and `status === 'ready'`, credentials are
+  // resolved from env:// references (githubCredentialRef / vercelDeployHookRef)
+  // rather than raw tokens, and the deploy target is treated as verified.
+  schemaVersion?: '2.0';
+  status?: 'unverified' | 'ready';
+  transport?: 'github-contents-api';
+  githubCredentialRef?: string;
+  vercelDeployHookRef?: string;
+  repositoryId?: string;
+  verifiedCommitSha?: string;
+  sourceDigest?: string;
+  managedManifestPath?: string;
+  editableRoot?: string;
+  pagePathStrategy?: string;
+  vercelProjectId?: string;
+  vercelDeploymentId?: string;
+  deploymentUrl?: string;
+  contractId?: string;
+  contractDigest?: string;
+  verifiedAt?: string;
 }
 
 export interface TargetKeyword {
