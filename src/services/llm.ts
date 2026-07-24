@@ -29,10 +29,9 @@ import {
   type LLMResponse,
   type BudgetConfig,
   type RoutingDecision,
-  type FullSiteQAConfig,
-  type VisualQATask,
   BudgetExhaustedError,
 } from '@quantum-l9/llm-router';
+import type { FullSiteQAConfig, VisualQATask } from '@quantum-l9/llm-router/vision';
 import { getConfig } from '../core/config.js';
 import { createModuleLogger } from '../core/logger.js';
 import { getDb, schema } from '../core/database/index.js';
@@ -481,3 +480,4 @@ export function getLlmService(): LlmService {
 
 export { TaskType, TaskComplexity, BudgetExhaustedError } from '@quantum-l9/llm-router';
 export type { TaskDescriptor, LLMResponse, RoutingDecision } from '@quantum-l9/llm-router';
+export type { FullSiteQAConfig, VisualQATask } from '@quantum-l9/llm-router/vision';
