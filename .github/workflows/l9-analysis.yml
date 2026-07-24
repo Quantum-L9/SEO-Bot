@@ -18,7 +18,9 @@ on:
 
 env:
   L9_CORE_REF: "f88116503430aa18992b70d8d31063e34ff97ef1"
-  L9_PROFILE: "pr_fast"
+  # `pr_fast` governs pull_request / workflow_dispatch; `merge` governs push to main
+  # (governance execution-profiles.yaml only allows `push` under the merge profile)
+  L9_PROFILE: ${{ github.event_name == 'push' && 'merge' || 'pr_fast' }}
   L9_MATRIX_ID: "pr-semgrep"
 
 permissions:
@@ -174,7 +176,7 @@ jobs:
       contents: read
     with:
       artifact-name: ${{ needs.analyze.outputs.artifact-name }}
-      profile: pr_fast
+      profile: ${{ github.event_name == 'push' && 'merge' || 'pr_fast' }}
       mode: ${{ needs.analyze.outputs.mode }}
       provider: semgrep
       matrix-id: pr-semgrep
