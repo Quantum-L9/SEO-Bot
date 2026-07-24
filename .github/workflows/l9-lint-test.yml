@@ -65,9 +65,9 @@ jobs:
         run: |
           set -euo pipefail
           case "${PACKAGE_MANAGER}" in
-            npm)  if [ -f package-lock.json ]; then npm ci --ignore-scripts; else npm install --ignore-scripts; fi ;;
-            pnpm) corepack enable && (if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile --ignore-scripts; else pnpm install --ignore-scripts; fi) ;;
-            yarn) corepack enable && (if [ -f yarn.lock ]; then yarn install --frozen-lockfile --ignore-scripts; else yarn install --ignore-scripts; fi) ;;
+            npm)  npm ci --ignore-scripts ;;
+            pnpm) corepack enable && pnpm install --frozen-lockfile --ignore-scripts ;;
+            yarn) corepack enable && yarn install --frozen-lockfile --ignore-scripts ;;
             *) echo "::error::unknown PACKAGE_MANAGER ${PACKAGE_MANAGER}" && exit 1 ;;
           esac
 
@@ -126,9 +126,9 @@ jobs:
         run: |
           set -euo pipefail
           case "${PACKAGE_MANAGER}" in
-            npm)  if [ -f package-lock.json ]; then npm ci --ignore-scripts; else npm install --ignore-scripts; fi ;;
-            pnpm) corepack enable && (if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile --ignore-scripts; else pnpm install --ignore-scripts; fi) ;;
-            yarn) corepack enable && (if [ -f yarn.lock ]; then yarn install --frozen-lockfile --ignore-scripts; else yarn install --ignore-scripts; fi) ;;
+            npm)  npm ci --ignore-scripts ;;
+            pnpm) corepack enable && pnpm install --frozen-lockfile --ignore-scripts ;;
+            yarn) corepack enable && yarn install --frozen-lockfile --ignore-scripts ;;
             *) echo "::error::unknown PACKAGE_MANAGER ${PACKAGE_MANAGER}" && exit 1 ;;
           esac
 
