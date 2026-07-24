@@ -22,7 +22,7 @@
  */
 
 import { FastifyInstance } from 'fastify';
-import { eq, and, desc, gte, sql, count } from 'drizzle-orm';
+import { eq, and, desc, gte, sql } from 'drizzle-orm';
 import { getDb, schema } from '../core/database/index.js';
 import { createModuleLogger } from '../core/logger.js';
 
@@ -336,7 +336,7 @@ function renderPortfolio(clients: any[], pendingCount: number, todaySpend: numbe
   return baseLayout('Portfolio', content);
 }
 
-function renderClientDetail(client: any, rankings: any[], actions: any[], engagement: any[]): string {
+function renderClientDetail(client: any, rankings: any[], actions: any[], _engagement: any[]): string {
   const rankingRows = rankings.slice(0, 10).map(r => `
     <tr>
       <td>${esc(r.keyword)}</td>

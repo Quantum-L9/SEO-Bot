@@ -14,10 +14,10 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 import { getDb, schema } from '../../core/database/index.js';
 import { getLlmService } from '../../services/llm.js';
-import { evaluateExecution, logAction, classifyAction } from '../../core/execution-policy.js';
+import { evaluateExecution, logAction } from '../../core/execution-policy.js';
 import { createModuleLogger } from '../../core/logger.js';
 import type { ActionOption, ActionProposal } from '../../core/execution-policy.js';
 

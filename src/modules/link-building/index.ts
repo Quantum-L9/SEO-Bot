@@ -155,7 +155,6 @@ async function discoverBacklinkProspects(
 
 function classifyTactic(backlink: any): LinkTactic {
   const url = (backlink.url_from || '').toLowerCase();
-  const anchor = (backlink.anchor || '').toLowerCase();
 
   if (url.includes('/resources') || url.includes('/links') || url.includes('/tools')) return 'resource_page';
   if (url.includes('/blog/') || url.includes('/guest')) return 'guest_post';
