@@ -31,6 +31,7 @@
 import axios from 'axios';
 import { createModuleLogger } from '../core/logger.js';
 import type { ClientConfig } from '../types/index.js';
+import { siteConfigFromStoredClient } from './site-deployment-config.js';
 
 const logger = createModuleLogger('site-deployment');
 
@@ -171,6 +172,14 @@ export function siteConfigFromEnv(): SiteDeploymentConfig {
  */
 export function siteConfigFromClient(clientConfig?: Partial<ClientConfig>): SiteDeploymentConfig {
   const sd = clientConfig?.site_deployment;
+
+  // Canonical v2 path: credentials come from env:// references and the target is
+  // verified. Delegate to the canonical resolver (fail-closed on any incomplete
+  // provenance). Existing non-canonical clients keep the raw-token behavior below.
+  if (sd?.schemaVersion === '2.0' && sd.status === 'ready') {
+    return siteConfigFromStoredClient(clientConfig);
+  }
+
   const githubToken = sd?.githubToken ?? '';
   const websiteBotRepo = sd?.websiteBotRepo ?? '';
   if (!githubToken || !websiteBotRepo) {

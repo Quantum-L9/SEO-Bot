@@ -57,3 +57,20 @@ No code changes remain on this repo's side.
 
 Both P4a and P4b are downstream of the **handoff pushes** (`infra` +
 `infisical-config` repos).
+
+---
+
+## Adding Infisical (outstanding)
+
+**Decision (2026-07-20):** PR #12 was reverted to keep the local
+`src/core/secrets.ts` loader so SEO-Bot no longer imports the unpublished
+`@quantum-l9/infisical-config` package — this turns #12's CI green. Consuming
+the shared package is deferred, not done.
+
+**To actually add Infisical, do the handoff work first (other repo,
+`Quantum-L9/infisical-config`):**
+- publish `@quantum-l9/infisical-config@1.0.0` to GitHub Packages, and grant
+  this repo package-read access;
+- then re-apply the P4a swap here (import `loadSecrets` from the package, delete
+  the inline loader + its test, drop the direct `@infisical/sdk` dependency);
+- run CI to confirm `npm install` resolves the package and stays green.
