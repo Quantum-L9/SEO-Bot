@@ -35,6 +35,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      packages: read
     steps:
       - name: Checkout immutable event revision
         env:
@@ -95,6 +96,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+      packages: read
     steps:
       - name: Checkout immutable event revision
         env:
