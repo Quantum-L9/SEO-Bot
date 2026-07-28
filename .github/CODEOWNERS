@@ -1,0 +1,25 @@
+# Quantum-L9/SEO-Bot CODEOWNERS
+# Adapted from Quantum-L9 org defaults for this repo's layout.
+
+# Default — platform team owns everything
+*                                  @Quantum-L9/platform
+
+# CI/CD workflows and governance — highest blast-radius
+/.github/workflows/                @Quantum-L9/platform
+/.github/governance/               @Quantum-L9/platform
+/.github/scripts/                  @Quantum-L9/platform
+
+# Community health / governance surfaces
+/CONTRIBUTING.md                   @Quantum-L9/platform
+/SECURITY.md                       @Quantum-L9/platform
+/.github/PULL_REQUEST_TEMPLATE.md  @Quantum-L9/platform
+
+# Package manifest, lockfile, and publish config
+/package.json                      @Quantum-L9/platform
+/package-lock.json                 @Quantum-L9/platform
+
+# Security-sensitive runtime surfaces
+/src/core/config.ts                @Quantum-L9/platform
+/src/core/database/                @Quantum-L9/platform
+/contracts/                        @Quantum-L9/platform
+/docker/                           @Quantum-L9/platform

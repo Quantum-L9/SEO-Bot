@@ -9,3 +9,7 @@ validation/runs/
 
 # Local validation state
 .validation-tmp/
+
+# Python bytecode (CI classifier)
+__pycache__/
+*.pyc

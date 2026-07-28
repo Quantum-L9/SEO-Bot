@@ -1,0 +1,36 @@
+# L9 CI routing policy — SEO-Bot
+# Maps pr_class (from .github/scripts/classify_pr.py) to the gates that run.
+# Changed files are the primary signal; labels are hints; unknown diffs fail closed.
+schema: l9.ci-routing-policy/v1
+primary_signal: changed_files
+secondary_signal: labels
+conflict_resolution: evidence_beats_labels
+unknown_diff_behavior: fail_closed
+
+classes:
+  docs_only:
+    gates: []
+    advisory: [lint]
+  tests_only:
+    gates: [lint, test]
+  dependency:
+    gates: [lint, security]
+    advisory: [test]
+  docker:
+    gates: [lint, security]
+  ci_workflow:
+    gates: [lint]
+    advisory: [security]
+  compliance:
+    gates: [lint]
+  app_code:
+    gates: [lint, test, security]
+  security:
+    gates: [lint, test, security]
+    requires_human_review: true
+  unknown_diff:
+    gates: [lint, test, security]
+    policy: fail_closed
+    requires_human_review: true
+
+gate_job: "PR Pipeline Gate"

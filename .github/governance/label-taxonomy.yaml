@@ -1,0 +1,71 @@
+# L9 namespaced label taxonomy — SEO-Bot
+# Source of truth for the repo's labels. Namespaced labels are routing hints
+# for the PR classifier and future agent-review loops; deprecated plain labels
+# should be migrated to their namespaced equivalents.
+schema: l9.label-taxonomy/v1
+namespace_required: true
+
+labels:
+  automation:
+    color: "5319e7"
+    values:
+      - automation:dependabot
+      - automation:coderabbit
+      - automation:perplexity
+      - automation:github-actions
+      - automation:gitguardian
+      - automation:sonarcloud
+      - automation:codex
+      - automation:l9-agent
+  type:
+    color: "0e8a16"
+    values:
+      - type:ci
+      - type:security
+      - type:docs
+      - type:test
+      - type:deps
+      - type:refactor
+      - type:governance
+      - type:bug
+      - type:feature
+      - type:release
+  area:
+    color: "1d76db"
+    values:
+      - area:workflows
+      - area:l9
+      - area:contracts
+      - area:docker
+      - area:api
+      - area:kb
+      - area:runtime
+      - area:typing
+      - area:infra
+      - area:transport
+  risk:
+    color: "b60205"
+    values:
+      - risk:blocking
+      - risk:advisory
+      - risk:secret
+      - risk:deploy
+      - risk:contract
+      - risk:runtime
+      - risk:security
+
+deprecated_plain_labels:
+  # migrate -> namespaced equivalent
+  ci: type:ci
+  security: type:security
+  testing: type:test
+  typing: area:typing
+  docker: area:docker
+  dependencies: type:deps
+  github-actions: automation:github-actions
+  seo-bot: automation:l9-agent
+  automated: automation:l9-agent
+
+notes:
+  - "Labels are secondary signals. The classifier treats changed files as primary."
+  - "Provision with `gh label create <name> --color <hex> --force` (Phase 1 settings step)."

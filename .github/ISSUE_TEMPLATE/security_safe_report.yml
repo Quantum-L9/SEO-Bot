@@ -1,0 +1,31 @@
+name: Security report (non-sensitive)
+description: Report a NON-sensitive security concern. For exploitable vulnerabilities, use private disclosure instead.
+labels: ["type:security", "risk:security"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > **Do not file exploitable vulnerabilities here.** For anything that could
+        > be abused before a fix ships, follow the private disclosure process in
+        > [SECURITY.md](../../SECURITY.md). Never include working exploits,
+        > secrets, or client data in a public issue.
+  - type: textarea
+    id: concern
+    attributes:
+      label: Security concern
+      description: Describe the non-sensitive concern (e.g., a hardening opportunity, a dependency advisory).
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact / scope
+    validations:
+      required: false
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: This report contains no working exploit, secret, or client data.
+          required: true

@@ -1,0 +1,35 @@
+# L9 blocking / advisory policy — SEO-Bot
+# Defines which CI outcomes hard-block a merge vs. which are advisory.
+schema: l9.blocking-policy/v1
+merge_gate: "PR Pipeline Gate"
+
+blocking_jobs:
+  - "PR Pipeline Gate"       # canonical aggregate (this repo's required check)
+  - "Lint and Type Check"    # via pr-pipeline and l9-lint-test
+  - "Test Suite"             # via pr-pipeline and l9-lint-test
+  - "Governed Semgrep Analysis"  # l9-analysis (strict/blocking per governance profile)
+
+advisory_jobs:
+  - "Dependency Review"      # warn-only until promoted in branch protection
+  - "SBOM (CycloneDX)"
+  - "Secret Scan"            # gitleaks — promote to blocking once stable
+
+hard_block_if_touched:
+  - secret_leak
+  - auth_bypass
+  - security_boundary_weakening
+  - contract_bound_change_without_contract_update
+  - unknown_high_or_critical_security_finding
+
+advisory_if_untouched:
+  - inherited_style_debt
+  - inherited_docstring_findings
+  - historical_non_touched_high_findings
+
+fail_closed:
+  - diff_unknown
+  - classifier_failure
+  - missing_required_ci_context
+
+unknown_class_behavior: block_all
+inherited_debt_behavior: advisory_unless_touched

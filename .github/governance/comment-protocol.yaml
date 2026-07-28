@@ -1,0 +1,20 @@
+# L9 PR comment protocol — SEO-Bot
+# Persistent governance comments must use stable markers and update-in-place
+# (never duplicate). Prepares the repo for future agent-review loops.
+schema: l9.comment-protocol/v1
+stable_markers_required: true
+duplicate_persistent_comments_allowed: false
+update_existing_comment: true
+max_comment_chars: 65336
+
+markers:
+  ci_summary: "<!-- l9-ci-summary-marker: v1 -->"
+  audit: "<!-- l9-audit-marker: v1 -->"
+  contract_control: "<!-- l9-contract-control-marker: v1 -->"
+  security: "<!-- l9-security-marker: v1 -->"
+  future_agent_review: "<!-- l9-agent-review-marker: v1 -->"
+
+rules:
+  - "Use a stable marker for every persistent comment; update it in place."
+  - "Never post a second copy of a marked comment — edit the existing one."
+  - "Keep each comment section bounded; truncate with a link to full output."

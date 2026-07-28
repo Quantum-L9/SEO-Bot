@@ -1,0 +1,71 @@
+# L9 Supply Chain — TypeScript node (SEO-Bot)
+#
+# Dependency review (new/changed deps on a PR) + CycloneDX SBOM generation.
+# Adapted from the converged Quantum-L9/LLM-Router supply-chain pattern.
+name: Supply Chain
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # dependency-review-action only runs on pull_request events.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@v4
+        with:
+          # Advisory during convergence: surfaces vulnerable/denied licenses
+          # without hard-blocking the merge until promoted in branch protection.
+          fail-on-severity: high
+          warn-only: true
+
+  sbom:
+    name: SBOM (CycloneDX)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@quantum-l9"
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate CycloneDX SBOM
+        run: npm sbom --sbom-format cyclonedx > sbom.cdx.json
+      - name: Checksum SBOM
+        run: sha256sum sbom.cdx.json > sbom.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: |
+            sbom.cdx.json
+            sbom.sha256
+          if-no-files-found: error
+          retention-days: 30

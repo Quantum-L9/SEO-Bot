@@ -1,0 +1,157 @@
+# L9 Canonical PR Pipeline — TypeScript node (SEO-Bot)
+#
+# This is the canonical merge gate for the L9 shared CI model:
+#   classify (changed-files router) -> routed lint/typecheck/test/build -> PR Pipeline Gate
+#
+# "CI is a router, not a bouncer": the classifier decides which gates run.
+# Unknown diffs fail closed (every gate runs). The final `PR Pipeline Gate`
+# job uses `if: always()` and depends on every other job so it summarizes
+# merge truth in a single required check.
+#
+# The externally-managed L9 presets (l9-lint-test.yml, l9-analysis.yml) remain
+# the governed analysis layer and run in parallel. See
+# docs/ci/l9-ci-convergence.md for how required checks compose.
+name: PR Pipeline
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-pipeline-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  classify:
+    name: Classify PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      pr_class: ${{ steps.classify.outputs.pr_class }}
+      run_lint: ${{ steps.classify.outputs.run_lint }}
+      run_test: ${{ steps.classify.outputs.run_test }}
+      run_security: ${{ steps.classify.outputs.run_security }}
+      run_infrastructure: ${{ steps.classify.outputs.run_infrastructure }}
+      is_docs_only: ${{ steps.classify.outputs.is_docs_only }}
+      requires_human_review: ${{ steps.classify.outputs.requires_human_review }}
+      diff_unknown: ${{ steps.classify.outputs.diff_unknown }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - id: classify
+        name: Classify changed files
+        run: python3 .github/scripts/classify_pr.py
+
+  lint:
+    name: Lint and Type Check
+    needs: classify
+    if: needs.classify.outputs.run_lint == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@quantum-l9"
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Lint
+        run: npm run lint
+      - name: Type check
+        run: npx tsc --noEmit
+
+  test:
+    name: Test Suite
+    needs: classify
+    if: needs.classify.outputs.run_test == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@quantum-l9"
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Test
+        run: npx vitest run
+        env:
+          NODE_ENV: test
+          CI: "true"
+
+  gate:
+    name: PR Pipeline Gate
+    needs: [classify, lint, test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate merge gate
+        env:
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          PR_CLASS: ${{ needs.classify.outputs.pr_class }}
+          DIFF_UNKNOWN: ${{ needs.classify.outputs.diff_unknown }}
+        run: |
+          set -euo pipefail
+          echo "pr_class=${PR_CLASS}  diff_unknown=${DIFF_UNKNOWN}"
+          echo "classify=${CLASSIFY_RESULT} lint=${LINT_RESULT} test=${TEST_RESULT}"
+
+          fail=0
+
+          # Fail closed: the classifier itself must succeed.
+          if [ "${CLASSIFY_RESULT}" != "success" ]; then
+            echo "::error::classifier did not succeed — failing closed"
+            fail=1
+          fi
+
+          # A skipped job (routed off by the classifier) is an allowed outcome.
+          # Only a genuine failure blocks the gate.
+          if [ "${LINT_RESULT}" = "failure" ]; then
+            echo "::error::lint/type-check failed"
+            fail=1
+          fi
+          if [ "${TEST_RESULT}" = "failure" ]; then
+            echo "::error::test suite failed"
+            fail=1
+          fi
+
+          if [ "${DIFF_UNKNOWN}" = "true" ]; then
+            echo "::warning::diff classified as unknown — all gates were forced on"
+          fi
+
+          if [ "${fail}" -ne 0 ]; then
+            echo "PR Pipeline Gate: FAILED"
+            exit 1
+          fi
+          echo "PR Pipeline Gate: PASSED"

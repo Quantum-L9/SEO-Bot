@@ -1,0 +1,43 @@
+# L9 branch protection baseline — SEO-Bot
+#
+# DOCUMENTATION ONLY. This file records the TARGET protection settings for the
+# `main` branch. It is NOT self-enforcing — a repo admin must apply these in
+# Settings -> Branches/Rulesets. The current live settings are UNKNOWN from repo
+# files alone and must be verified in the GitHub UI/API.
+schema: l9.branch-protection-baseline/v1
+target_branch: main
+status: proposed          # proposed -> applied (set to applied only after admin confirms)
+
+required:
+  pull_request_before_merge: true
+  approvals: 1
+  dismiss_stale_approvals: true
+  require_codeowners: true
+  require_conversation_resolution: true
+  require_status_checks: true
+  require_branch_up_to_date: true
+  require_linear_history: true
+  disallow_force_pushes: true
+  disallow_deletions: true
+
+merge_strategy:
+  squash_only: true
+  update_branch_enabled: true
+  auto_delete_head_branches: true
+
+# Required status checks compose across the canonical gate + governed presets.
+# Job/check names must match exactly.
+required_checks_initial:
+  - "PR Pipeline Gate"          # from pr-pipeline.yml (canonical aggregate)
+  - "Lint and Type Check"       # from l9-lint-test.yml (governed preset)
+  - "Test Suite"                # from l9-lint-test.yml (governed preset)
+  - "Governed Semgrep Analysis" # from l9-analysis.yml
+
+required_checks_after_stable:
+  - "Secret Scan"               # gitleaks.yml — promote once green across PRs
+  - "SBOM (CycloneDX)"          # supply-chain.yml
+  - "Dependency Review"         # supply-chain.yml — flip warn-only -> blocking
+
+notes:
+  - "Do not require a check that does not run on every PR, or merges will hang."
+  - "Promote advisory checks to required only after they are consistently green."

@@ -1,0 +1,19 @@
+# Gitleaks configuration for SEO-Bot.
+# Extends the upstream default ruleset; adds repo-specific allowlists for
+# example/placeholder files that intentionally contain non-secret tokens.
+title = "SEO-Bot gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Global allowlist: example configs and lockfiles"
+paths = [
+  '''\.env\.example$''',
+  '''package-lock\.json$''',
+  '''.*\.md$''',
+]
+regexes = [
+  # Common placeholder values used in docs/.env.example
+  '''(?i)(your[-_]?(api[-_]?key|token|secret)|example|placeholder|changeme|xxxx+)''',
+]
