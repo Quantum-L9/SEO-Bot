@@ -36,6 +36,11 @@ import { getConfig } from '../core/config.js';
 import { createModuleLogger } from '../core/logger.js';
 import { getDb, schema } from '../core/database/index.js';
 import { parseJsonFromLlm, parseScore } from './llm-parse.js';
+import {
+  AgentBudgetGuard,
+  BudgetExceededError as GuardBudgetExceededError,
+  type BudgetMode,
+} from '../core/budget-guard.js';
 import type { ModuleName } from '../types/index.js';
 
 const logger = createModuleLogger('llm');
@@ -64,6 +69,12 @@ function tierToComplexity(tier: LegacyTier): TaskComplexity {
 
 export class LlmService {
   private router: L9LLMRouter;
+  /**
+   * Most recent ADR-0008 budget mode computed by the daily AgentBudgetGuard on
+   * the last admitted call. Callers may read it (`getBudgetMode()`) to downshift
+   * to a cheaper tier or narrow scope as the daily USD cap is approached.
+   */
+  private lastBudgetMode: BudgetMode = 'normal';
 
   constructor() {
     const config = getConfig();
@@ -98,10 +109,11 @@ export class LlmService {
     userPrompt: string,
     options?: { images?: string[]; assistantContext?: string; consensus?: boolean },
   ): Promise<LLMResponse> {
-    await this.enforceDailyCap(task);
+    const guard = await this.admitDailyBudget(task);
     try {
       const response = await this.router.execute(task, systemPrompt, userPrompt, options);
       await this.logUsage(task, response);
+      this.reconcileDailyBudget(guard, task, response);
       return response;
     } catch (error: any) {
       if (error instanceof BudgetExhaustedError) {
@@ -362,25 +374,104 @@ export class LlmService {
     return this.router.getGlobalSpend();
   }
 
+  /** Public read of the last computed ADR-0008 budget mode (default `normal`). */
+  getBudgetMode(): BudgetMode {
+    return this.lastBudgetMode;
+  }
+
   /**
-   * Hard daily spend cap (opt-in via DAILY_SPEND_CAP). Complements the router's
-   * weekly/monthly/global ceilings, which have no daily tier. When the day's
-   * recorded spend has reached the cap, defer the task rather than dispatching.
+   * ADR-0008 daily budget admission (opt-in via DAILY_SPEND_CAP). Complements the
+   * router's weekly/monthly/global ceilings, which have no daily tier.
    *
-   * Note: this is a coarse pre-dispatch guard read from llm_usage; it does not
-   * reserve budget atomically, so under heavy concurrency the day's total can
-   * overshoot the cap by the in-flight calls. The authoritative fix is an atomic
-   * counter in the router — tracked separately.
+   * Wires AgentBudgetGuard onto the real USD cost seam: the guard is seeded with
+   * the day's persistent spend (getDailySpend → llm_usage) and reserves this
+   * call's real pre-dispatch estimate (router.route().estimatedCost). If the
+   * reservation cannot fit even after the guard downshifts its mode, the call is
+   * deferred BEFORE any spend — stricter and earlier than the previous
+   * post-hoc `spent >= cap` check, which ignored the incoming call's cost. The
+   * returned guard is reconciled with the real cost in reconcileDailyBudget().
+   *
+   * Note: like the prior check this is a coarse pre-dispatch guard read from
+   * llm_usage; it does not reserve across processes atomically, so under heavy
+   * concurrency the day's total can still overshoot by the in-flight calls. The
+   * authoritative fix is an atomic counter in the router — tracked separately.
    */
-  private async enforceDailyCap(task: TaskDescriptor): Promise<void> {
+  private async admitDailyBudget(task: TaskDescriptor): Promise<AgentBudgetGuard | null> {
     const cap = getConfig().DAILY_SPEND_CAP;
-    if (!cap || cap <= 0) return;
+    if (!cap || cap <= 0) return null;
+
     const spent = await this.getDailySpend();
     if (spent >= cap) {
+      this.lastBudgetMode = 'stop';
       logger.warn({ clientId: task.clientId, spent, cap }, 'Daily LLM spend cap reached; deferring task');
       throw new DailyBudgetExhaustedError(
         `Daily LLM spend cap reached ($${spent.toFixed(2)} >= $${cap.toFixed(2)})`,
       );
+    }
+
+    const guard = new AgentBudgetGuard(`llm-daily:${task.clientId ?? 'system'}`, cap, task.clientId);
+    guard.open(0);
+    if (spent > 0) guard.reconcile(spent); // seed with the day's real spend (< cap here)
+
+    // Real pre-dispatch USD estimate from the router's own pricing model.
+    let estimate = 0;
+    try {
+      estimate = this.router.route(task).estimatedCost ?? 0;
+    } catch {
+      estimate = 0; // routing/estimation is best-effort; never block a call on it
+    }
+
+    try {
+      guard.reserve(estimate);
+    } catch (error) {
+      if (error instanceof GuardBudgetExceededError) {
+        this.lastBudgetMode = 'stop';
+        logger.warn(
+          { clientId: task.clientId, spent, estimate, cap },
+          'Daily LLM spend cap would be exceeded by this call; deferring task',
+        );
+        throw new DailyBudgetExhaustedError(
+          `Daily LLM spend cap would be exceeded ($${spent.toFixed(2)} + est $${estimate.toFixed(2)} > cap $${cap.toFixed(2)})`,
+        );
+      }
+      throw error;
+    }
+
+    this.lastBudgetMode = guard.currentMode;
+    if (guard.currentMode !== 'normal') {
+      logger.warn(
+        { clientId: task.clientId, spent, estimate, cap, mode: guard.currentMode },
+        'Daily budget pressure elevated',
+      );
+    }
+    return guard;
+  }
+
+  /**
+   * Reconcile the guard with the call's real actual cost (LLMResponse.cost) and
+   * refresh the exposed budget mode. Runs after a successful dispatch; the spend
+   * has already occurred, so a post-hoc cap breach is logged (mode → stop) rather
+   * than thrown — throwing would discard a response that was already paid for.
+   */
+  private reconcileDailyBudget(
+    guard: AgentBudgetGuard | null,
+    task: TaskDescriptor,
+    response: LLMResponse,
+  ): void {
+    if (!guard) return;
+    try {
+      guard.reconcile(response.cost);
+      this.lastBudgetMode = guard.currentMode;
+    } catch (error) {
+      if (error instanceof GuardBudgetExceededError) {
+        this.lastBudgetMode = 'stop';
+        logger.warn(
+          { clientId: task.clientId, cost: response.cost, error: error.message },
+          'Daily LLM spend cap breached after dispatch; subsequent calls will defer',
+        );
+        return;
+      }
+      throw error;
     }
   }
 
