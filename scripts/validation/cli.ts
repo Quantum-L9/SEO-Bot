@@ -2,6 +2,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { GATE_BY_ID, type GateDefinition, type GateContext } from './gate-registry.js';
+import { scheduleGates, resolveGateConcurrency } from './core/gate-scheduler.js';
 import { EvidenceWriter, canonicalJson, sha256 } from './core/evidence-writer.js';
 import { getEnvironmentRecord, getRepositoryContext } from './core/repository-context.js';
 import { validateReleaseReceipt } from './core/schema-validator.js';
@@ -17,7 +18,6 @@ import {
   type RunReport,
   type ValidationFinding,
   type ValidationProfile,
-  type ValidationStatus,
   type ValidationUnknown,
 } from './types.js';
 
@@ -150,7 +150,46 @@ async function executeRun(profile: ValidationProfile, requestedGate?: string): P
   const writer = new EvidenceWriter(ROOT, requestedGate ? `gate-${requestedGate}` : profile, repository.commit_sha);
   await writer.initialize();
   const runStarted = new Date();
-  const gateStatuses = new Map<string, ValidationStatus>();
+  const context: GateContext = { root: ROOT, profile };
+
+  // Phase A — execute gates with bounded concurrency, honoring the dependency
+  // DAG. Only gate.execute() (which spawns the heavy subprocess toolchain) runs
+  // concurrently; all evidence writing and reporting stay serialized in Phase B
+  // below, in gateOrder, so outputs remain deterministic regardless of gate
+  // completion order. Concurrency is capped (VALIDATION_CONCURRENCY, default
+  // min(4, cpus)); setting it to 1 reproduces the original serial order.
+  interface ExecutedGate {
+    result: GateResult;
+    started: Date;
+    completed: Date;
+    duration: number;
+  }
+  const executed = await scheduleGates<ExecutedGate>(gateOrder, GATE_BY_ID, {
+    concurrency: resolveGateConcurrency(),
+    isSatisfied: (entry) =>
+      entry.result.status === 'PASS' || entry.result.status === 'PASS_WITH_FINDINGS',
+    onDependencyBlocked: (gateId, failedDependencies) => {
+      const gate = GATE_BY_ID.get(gateId);
+      if (!gate) throw new Error(`Unknown gate after dependency expansion: ${gateId}`);
+      const now = new Date();
+      return { result: dependencyBlockedResult(gate, failedDependencies), started: now, completed: now, duration: 0 };
+    },
+    runGate: async (gateId) => {
+      const gate = GATE_BY_ID.get(gateId);
+      if (!gate) throw new Error(`Unknown gate after dependency expansion: ${gateId}`);
+      const started = new Date();
+      const startTick = performance.now();
+      let result: GateResult;
+      try {
+        result = await gate.execute(context);
+      } catch (error) {
+        result = internalFailureResult(gateId, error);
+      }
+      return { result, started, completed: new Date(), duration: performance.now() - startTick };
+    },
+  });
+
+  // Phase B — serialized evidence assembly in deterministic gateOrder.
   const evidence: GateEvidence[] = [];
   const allFindings: ValidationFinding[] = [];
   const allUnknowns: ValidationUnknown[] = [];
@@ -158,23 +197,10 @@ async function executeRun(profile: ValidationProfile, requestedGate?: string): P
   for (const gateId of gateOrder) {
     const gate = GATE_BY_ID.get(gateId);
     if (!gate) throw new Error(`Unknown gate after dependency expansion: ${gateId}`);
-    const failedDependencies = gate.dependencies.filter((dependency) => {
-      const status = gateStatuses.get(dependency);
-      return status !== 'PASS' && status !== 'PASS_WITH_FINDINGS';
-    });
-    const started = new Date();
-    const startTick = performance.now();
-    let result: GateResult;
-    try {
-      const context: GateContext = { root: ROOT, profile };
-      result = failedDependencies.length > 0
-        ? dependencyBlockedResult(gate, failedDependencies)
-        : await gate.execute(context);
-    } catch (error) {
-      result = internalFailureResult(gateId, error);
-    }
-    const completed = new Date();
-    const duration = performance.now() - startTick;
+    const entry = executed.get(gateId);
+    if (!entry) throw new Error(`Missing gate result after scheduling: ${gateId}`);
+    let { result } = entry;
+    const { started, completed, duration } = entry;
     let artifacts = [...(result.artifacts ?? [])];
     const artifactSources = [...(result.artifact_sources ?? [])];
     try {
@@ -210,7 +236,6 @@ async function executeRun(profile: ValidationProfile, requestedGate?: string): P
       artifacts,
       logs: { stdout_path: stdoutPath, stderr_path: stderrPath, redacted: true },
     });
-    gateStatuses.set(gateId, result.status);
     evidence.push(gateEvidence);
     allFindings.push(...gateEvidence.findings.filter((item) => item.blocking));
     allUnknowns.push(...gateEvidence.unknowns);

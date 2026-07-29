@@ -40,6 +40,23 @@ Machine-readable validation artifacts live in `validation/`:
 - `FAIL`: check executed and violated expected result.
 - `UNKNOWN`: insufficient evidence exists.
 
+## Assurance Runner Concurrency
+
+The assurance CLI (`scripts/validation/cli.ts`, invoked by `verify:assurance` /
+`verify:release` / `verify:production`) executes its gate DAG with **bounded
+concurrency**. Gates run as soon as their dependencies are satisfied, so mutually
+independent gates (e.g. `typecheck`, `lint`, `test`, `manifest`, `claims`, which
+depend only on `source`) run in parallel instead of one-at-a-time.
+
+- Concurrency is capped by `VALIDATION_CONCURRENCY` (a positive integer);
+  when unset it defaults to `min(4, cpuCount)`. The cap is never unbounded.
+- `VALIDATION_CONCURRENCY=1` forces fully serial execution in exact dependency
+  order — the previous runner's behavior — and is the deterministic fallback.
+- Dependency ordering and dependency-blocked semantics are unchanged: a gate
+  whose dependency fails is still reported `BLOCKED` and never executed.
+- Evidence writing and the run report are assembled serially in dependency
+  order, so `validation/runs/**` output is independent of gate completion order.
+
 ## Operational Readiness Gate
 
 The SEO Bot is not operationally ready until all are true:
