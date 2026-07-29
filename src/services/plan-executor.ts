@@ -27,6 +27,7 @@ import {
   createProposal,
   logAction,
 } from '../core/execution-policy.js';
+import { CompensationRegistry } from '../core/compensation.js';
 import {
   updateMetaTitle,
   updateMetaDescription,
@@ -137,6 +138,14 @@ export async function executeSurpassPlans(job: Job): Promise<void> {
 
   const db = getDb();
 
+  // Saga registry for this job. Site edits are pushed to each client's repo per
+  // gap and only made live by the single batched Vercel deploy at the end; if
+  // that deploy throws, gaps already advanced to 'executing' would never ship
+  // yet never retry (the next run re-selects only status='planned'). Each gap
+  // advanced on the strength of a real dispatch registers a status-rollback
+  // compensation so a deploy failure leaves the work retryable.
+  const compensation = new CompensationRegistry(String(job.id ?? clientId), clientId);
+
   const plannedGaps = await db.select()
     .from(schema.gapAnalyses)
     .where(and(
@@ -220,11 +229,38 @@ export async function executeSurpassPlans(job: Job): Promise<void> {
     await db.update(schema.gapAnalyses)
       .set({ status: 'executing' })
       .where(eq(schema.gapAnalyses.id, gap.id));
+
+    // Only gaps advanced on the strength of a real, successful dispatch join the
+    // saga. Gaps with no autonomous actions or no dispatcher are legitimately
+    // 'executing' and must not be reopened by a deploy failure elsewhere.
+    if (dispatchSuccesses > 0) {
+      compensation.register(`gap:${gap.id}:status-advance`, async () => {
+        await db.update(schema.gapAnalyses)
+          .set({ status: 'planned' })
+          .where(eq(schema.gapAnalyses.id, gap.id));
+      });
+    }
   }
 
   if (anyDeployed) {
-    await triggerVercelDeploy(siteConfig);
-    logger.info({ clientDomain }, 'Vercel deploy triggered after surpass plan execution');
+    try {
+      await triggerVercelDeploy(siteConfig);
+      // Deploy shipped: the advanced statuses are now durable. Drop the saga so
+      // a later unrelated error cannot roll back already-live work.
+      compensation.clear();
+      logger.info({ clientDomain }, 'Vercel deploy triggered after surpass plan execution');
+    } catch (err) {
+      const reverted = await compensation.compensate();
+      logger.error(
+        {
+          clientDomain,
+          revertedGaps: reverted.length,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        'Vercel deploy failed — reverted advanced gap statuses to planned for retry',
+      );
+      throw err;
+    }
   }
 }
 

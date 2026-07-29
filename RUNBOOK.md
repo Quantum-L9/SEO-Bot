@@ -103,6 +103,77 @@ Backups are critical. Run a manual backup before any major update:
 ```
 Backups are saved to `data/backups/` and the script automatically prunes backups older than 7 days.
 
+## Database Migrations
+
+Migrations are Drizzle SQL files under `drizzle/`, applied by `src/core/database/migrate.ts`.
+
+```bash
+# Apply all pending migrations (idempotent — already-applied files are skipped)
+docker compose exec l9-seo-bot npm run migrate
+
+# Dry-run: report pending migrations WITHOUT applying any (read-only)
+docker compose exec l9-seo-bot npm run migrate -- --check
+# equivalently:
+docker compose exec l9-seo-bot npm run verify:db
+```
+
+`--check` performs a genuine read-only dry run: it reads the drizzle-managed
+`drizzle.__drizzle_migrations` history table and compares each on-disk
+migration's `folderMillis` against the latest applied migration's timestamp —
+the exact pending-migration logic drizzle-orm uses internally. It executes no
+SQL other than that one `SELECT`. If any migration is pending it logs the count
+and exits non-zero (safe to use as a deploy gate); if the history table does not
+yet exist it treats every migration as pending. It never writes to the database.
+
+## Autonomy Runtime Controls (ADR-0008)
+
+### Compensation saga (surpass-plan executor)
+
+`serp:execute-surpass-plans` (`src/services/plan-executor.ts`) pushes per-gap
+site edits to each client's repo and then fires a single batched Vercel deploy.
+Those edits only go live on that deploy. To stop a deploy failure from silently
+stranding advanced work, the executor registers a `CompensationRegistry`
+(`src/core/compensation.ts`) rollback for every gap it advances to `executing`
+on the strength of a real dispatch:
+
+- **Deploy succeeds** → the registry is cleared; advanced statuses are durable.
+- **Deploy throws** → registered compensations run in LIFO order, reverting each
+  affected gap's status from `executing` back to `planned`, then the job rethrows
+  so BullMQ marks it failed. The next run re-selects `status='planned'` and retries.
+
+No operator action is normally required — recovery is automatic. If you see
+`Vercel deploy failed — reverted advanced gap statuses to planned for retry` in
+the logs, confirm the deploy target (per-client `site_deployment` config / Vercel
+hook) is healthy; the gaps will retry on the next `serp:execute-surpass-plans` cycle.
+
+### Budget guard
+
+`AgentBudgetGuard` (`src/core/budget-guard.ts`) implements the ADR-0008 USD-level
+admission → reserve → reconcile → enforce loop with the documented mode thresholds
+(`normal` < 70% ≤ `cheaper_model` < 85% ≤ `narrow_scope` < 95% ≤ `require_approval`
+< 100% ≤ `stop`). It is unit-tested but **not yet wired into a live per-call USD
+cost signal** — see `TODO.md` for the activation trigger. Day-to-day token safety
+today is still enforced by the per-run `TokenBudget` circuit breaker (see
+*Scenario A* above).
+
+## Repository Manifest Gate
+
+Every tracked path must be owned by exactly one rule in `manifest/ownership.yaml`;
+`MANIFEST.json` / `MANIFEST.md` are the generated inventory of that ownership.
+
+```bash
+# Verify the committed manifest matches the working tree (fails on drift)
+npm run manifest:check
+
+# Regenerate MANIFEST.json + MANIFEST.md after adding/removing/renaming files
+npm run manifest:generate
+```
+
+If `manifest:check` reports drift or an "Unowned repository path", either add the
+missing file's ownership rule to `manifest/ownership.yaml`, then run
+`npm run manifest:generate` and commit the regenerated `MANIFEST.*` alongside your
+change. Do not hand-edit `MANIFEST.json` / `MANIFEST.md` — they are generated.
+
 ## Environment Variable Reference
 
 The system is configured entirely via `.env`.
