@@ -13,7 +13,7 @@ const baseConfig = {
   DEFAULT_CLIENT_WEEKLY_CEILING: 40,
   GLOBAL_MONTHLY_HARD_CEILING: 1000,
   SURGE_THRESHOLD: 1.5,
-  DAILY_SPEND_CAP: 5,
+  DAILY_SPEND_CAP: 5 as number | undefined,
 };
 
 const mockGetConfig = vi.fn(() => ({ ...baseConfig }));
