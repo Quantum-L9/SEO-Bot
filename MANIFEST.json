@@ -525,6 +525,15 @@
       "source_of_generation": null
     },
     {
+      "path": "scripts/validation/bench-scheduler.ts",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
       "path": "scripts/validation/cli.ts",
       "owner": "developer-tooling",
       "purpose": "Operator, deployment, manifest, and validation tooling",
@@ -544,6 +553,15 @@
     },
     {
       "path": "scripts/validation/core/evidence-writer.ts",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/validation/core/gate-scheduler.ts",
       "owner": "developer-tooling",
       "purpose": "Operator, deployment, manifest, and validation tooling",
       "classification": "tooling",
@@ -1146,6 +1164,15 @@
       "source_of_generation": null
     },
     {
+      "path": "tests/validation/gate-scheduler.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
       "path": "tests/validation/profile-loader.test.ts",
       "owner": "quality",
       "purpose": "Automated behavioral and assurance tests",
@@ -1308,5 +1335,5 @@
       "source_of_generation": null
     }
   ],
-  "inventory_digest": "7dc8a00e05978aa1b00476b3e37529ad09da28d165276907183cbe2beb2aa569"
+  "inventory_digest": "f44132096133fe5b97893b03fc2d79bbef005480090ac049cf824421c4585ce0"
 }
