@@ -49,34 +49,37 @@ No code changes remain on this repo's side.
 
 ---
 
-## 3. Wire `AgentBudgetGuard` to a live per-call USD cost signal
+## 3. Persist `budget_violations` / `agent_jobs` evidence rows
 
-**Status:** deferred — class merged and unit-tested, not yet enforcing on a real
-spend path.
-**Where:** `src/core/budget-guard.ts` (the `AgentBudgetGuard` class).
+**Status:** partially done — `AgentBudgetGuard` is now **wired and enforcing** on
+the real LLM USD seam; only DB persistence of violation evidence remains.
+**Where:** `src/services/llm.ts` (`LlmService.execute` → `admitDailyBudget` /
+`reconcileDailyBudget`), `src/core/database/schema-extensions.ts` (the
+`budgetViolations` / `agentJobs` tables).
 
-`AgentBudgetGuard` implements the ADR-0008 USD admission → reserve → reconcile →
-enforce loop with the documented mode thresholds, and has full unit coverage
-(`tests/core/budget-guard.test.ts`). `CompensationRegistry` — the other half of
-ADR-0008's runtime controls — **is** now wired and proven in
-`serp:execute-surpass-plans` (see `tests/services/plan-executor.test.ts`, the
-deploy-failure rollback saga).
+`AgentBudgetGuard` (ADR-0008 admission → reserve → reconcile → enforce) enforces
+the opt-in `DAILY_SPEND_CAP` on every `LlmService.execute` call, seeded with real
+persistent daily spend (`getDailySpend()`) and reserving each call's real
+pre-dispatch estimate (`router.route().estimatedCost`), reconciling the real
+`response.cost` afterward. Covered by `tests/services/llm-budget-guard.test.ts`
+and `tests/core/budget-guard.test.ts`. `CompensationRegistry` — the other half of
+ADR-0008 — is wired and proven in `serp:execute-surpass-plans`
+(`tests/services/plan-executor.test.ts`).
 
-**Deliberately NOT wired.** The guard needs a *real* per-call USD cost to
-`reserve()`/`reconcile()` against. The surpass-plan executor path performs no
-metered LLM spend of its own (its dispatchers are file edits + a Vercel deploy),
-so wiring the guard there would require inventing per-action cost figures — an
-unverified fabrication. The genuine USD signal lives in the LLM service
-(`src/services/llm.ts` `getDailySpend()` / the router cost log), which is a
-different, un-audited integration seam.
+**What is still deferred.** The guard enforces and logs, but does **not** yet
+write `budget_violations` rows. `budget_violations.job_id` is `NOT NULL REFERENCES
+agent_jobs(job_id)` (ADR-0008 schema), and the LLM service has no `agent_jobs`
+row to attach a violation to — that parent belongs to an agent-job execution
+model that does not exist yet. Inserting a violation from the LLM path would
+either violate the FK or require fabricating an `agent_jobs` row.
 
-**Unblock trigger:** a metered high-cost job handler exposes real per-call USD
-(e.g. the gap-analysis/LLM generation path threads `router` call costs into a
-per-job guard) **or** the approved remediation plan specifies the exact seam →
-then `open()` at admission, `reserve()` before each LLM call, `reconcile()` on
-each response, and persist `budget_violations` / `agent_jobs` rows for evidence.
+**Unblock trigger:** an agent-job execution model creates `agent_jobs` rows (a job
+lifecycle around `serp:execute-surpass-plans` / high-cost handlers) → thread its
+`jobId` into the guard and persist a `budget_violations` row on each
+`BudgetExceededError` / `stop`-mode transition, plus `agent_jobs` status rows for
+run evidence.
 
-**Interim safety:** per-run token limits are still enforced by the existing
+**Interim safety:** per-run token limits also remain enforced by the existing
 `TokenBudget` circuit breaker in `src/core/scheduler.ts` (RUNBOOK Scenario A).
 
 ---

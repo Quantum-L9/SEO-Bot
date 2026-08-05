@@ -146,15 +146,33 @@ No operator action is normally required — recovery is automatic. If you see
 the logs, confirm the deploy target (per-client `site_deployment` config / Vercel
 hook) is healthy; the gaps will retry on the next `serp:execute-surpass-plans` cycle.
 
-### Budget guard
+### Budget guard (daily USD cap)
 
 `AgentBudgetGuard` (`src/core/budget-guard.ts`) implements the ADR-0008 USD-level
 admission → reserve → reconcile → enforce loop with the documented mode thresholds
 (`normal` < 70% ≤ `cheaper_model` < 85% ≤ `narrow_scope` < 95% ≤ `require_approval`
-< 100% ≤ `stop`). It is unit-tested but **not yet wired into a live per-call USD
-cost signal** — see `TODO.md` for the activation trigger. Day-to-day token safety
-today is still enforced by the per-run `TokenBudget` circuit breaker (see
-*Scenario A* above).
+< 100% ≤ `stop`). It is wired onto the LLM cost seam in `LlmService.execute`
+(`src/services/llm.ts`):
+
+- **Opt-in** via the `DAILY_SPEND_CAP` env var (USD/day). When unset or ≤ 0 the
+  guard is inert and behaviour is unchanged.
+- **Admission (reserve):** before each call the guard is seeded with the day's
+  real persistent spend (`getDailySpend()` → `llm_usage`) and reserves that call's
+  real pre-dispatch estimate (`router.route().estimatedCost`). If the reservation
+  cannot fit even after the guard downshifts its mode, the call is **deferred
+  before any spend** with `DailyBudgetExhaustedError` — earlier and stricter than a
+  post-hoc "already over cap" check.
+- **Reconcile:** after a successful call the guard reconciles the real
+  `response.cost`; a post-dispatch cap breach is logged (mode → `stop`) so the next
+  call defers.
+- **Mode signal:** `getLlmService().getBudgetMode()` exposes the current ADR-0008
+  mode so callers can route to a cheaper tier / narrow scope under pressure.
+
+To raise/lower the daily ceiling, set `DAILY_SPEND_CAP` in `.env` and restart.
+Per-run token limits remain independently enforced by the `TokenBudget` circuit
+breaker (see *Scenario A* above). DB persistence of `budget_violations` rows is
+still deferred — see `TODO.md` (it is gated on the `agent_jobs` execution model
+that owns the row's required foreign key).
 
 ## Repository Manifest Gate
 
@@ -194,3 +212,4 @@ The system is configured entirely via `.env`.
 | `SMTP_PASS` | No | Notification delivery |
 | `TELEGRAM_BOT_TOKEN` | No | Emergency alerts |
 | `TELEGRAM_CHAT_ID` | No | Emergency alerts |
+| `DAILY_SPEND_CAP` | No | Hard daily LLM USD cap enforced by `AgentBudgetGuard`; unset ⇒ no daily cap |

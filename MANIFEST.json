@@ -1056,6 +1056,15 @@
       "source_of_generation": null
     },
     {
+      "path": "tests/services/llm-budget-guard.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
       "path": "tests/services/llm-parse.test.ts",
       "owner": "quality",
       "purpose": "Automated behavioral and assurance tests",
@@ -1299,5 +1308,5 @@
       "source_of_generation": null
     }
   ],
-  "inventory_digest": "18495c3607ab73214b6d8cad994ab4cb6051cf656cc8104e85781ec8169f28a1"
+  "inventory_digest": "7dc8a00e05978aa1b00476b3e37529ad09da28d165276907183cbe2beb2aa569"
 }
