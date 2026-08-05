@@ -4,7 +4,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 const { insertMock, valuesMock, onConflictDoUpdateMock, returningMock } = vi.hoisted(() => {
   const returningMock = vi.fn();
   const onConflictDoUpdateMock = vi.fn(() => ({ returning: returningMock }));
-  const valuesMock = vi.fn(() => ({ onConflictDoUpdate: onConflictDoUpdateMock }));
+  const valuesMock = vi.fn((_values: Record<string, unknown>) => ({ onConflictDoUpdate: onConflictDoUpdateMock }));
   const insertMock = vi.fn(() => ({ values: valuesMock }));
   return { insertMock, valuesMock, onConflictDoUpdateMock, returningMock };
 });
