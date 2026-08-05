@@ -89,7 +89,7 @@ vi.mock('../../src/core/database/index.js', () => ({
 }));
 
 vi.mock('../../src/core/logger.js', () => ({
-  createModuleLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
+  createModuleLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }),
 }));
 
 vi.mock('../../src/core/execution-policy.js', () => ({
@@ -201,6 +201,21 @@ describe('executeSurpassPlans — GAP-07', () => {
       expect.any(String),
       expect.objectContaining({ dryRun: true }),
     );
+  });
+
+  it('rolls advanced gap statuses back to planned when the Vercel deploy fails (saga)', async () => {
+    // A gap advanced to 'executing' on the strength of real dispatched edits.
+    // If the batched deploy throws, the compensation registry must revert the
+    // status to 'planned' so the next run re-selects and retries the work.
+    mockTriggerDeploy.mockRejectedValueOnce(new Error('deploy 500'));
+    const { executeSurpassPlans } = await import('../../src/services/plan-executor.js');
+    const mockJob = { data: { clientId: 'client-1', clientDomain: 'test.com' } } as any;
+
+    await expect(executeSurpassPlans(mockJob)).rejects.toThrow('deploy 500');
+
+    // Forward move then compensating move, both observed on the update mock.
+    expect(mockUpdateSet).toHaveBeenCalledWith({ status: 'executing' });
+    expect(mockUpdateSet).toHaveBeenCalledWith({ status: 'planned' });
   });
 
   it('does NOT dispatch a write for faq_content_update (G3 — no FAQ payload)', async () => {

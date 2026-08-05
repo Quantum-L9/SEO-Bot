@@ -49,6 +49,38 @@ No code changes remain on this repo's side.
 
 ---
 
+## 3. Wire `AgentBudgetGuard` to a live per-call USD cost signal
+
+**Status:** deferred — class merged and unit-tested, not yet enforcing on a real
+spend path.
+**Where:** `src/core/budget-guard.ts` (the `AgentBudgetGuard` class).
+
+`AgentBudgetGuard` implements the ADR-0008 USD admission → reserve → reconcile →
+enforce loop with the documented mode thresholds, and has full unit coverage
+(`tests/core/budget-guard.test.ts`). `CompensationRegistry` — the other half of
+ADR-0008's runtime controls — **is** now wired and proven in
+`serp:execute-surpass-plans` (see `tests/services/plan-executor.test.ts`, the
+deploy-failure rollback saga).
+
+**Deliberately NOT wired.** The guard needs a *real* per-call USD cost to
+`reserve()`/`reconcile()` against. The surpass-plan executor path performs no
+metered LLM spend of its own (its dispatchers are file edits + a Vercel deploy),
+so wiring the guard there would require inventing per-action cost figures — an
+unverified fabrication. The genuine USD signal lives in the LLM service
+(`src/services/llm.ts` `getDailySpend()` / the router cost log), which is a
+different, un-audited integration seam.
+
+**Unblock trigger:** a metered high-cost job handler exposes real per-call USD
+(e.g. the gap-analysis/LLM generation path threads `router` call costs into a
+per-job guard) **or** the approved remediation plan specifies the exact seam →
+then `open()` at admission, `reserve()` before each LLM call, `reconcile()` on
+each response, and persist `budget_violations` / `agent_jobs` rows for evidence.
+
+**Interim safety:** per-run token limits are still enforced by the existing
+`TokenBudget` circuit breaker in `src/core/scheduler.ts` (RUNBOOK Scenario A).
+
+---
+
 ## Related (other repo)
 
 - **P4b — Website-Bot `infisical run` wrap:** see `TODO.md` in `Quantum-L9/Website-Bot`.
