@@ -13,7 +13,7 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import Fastify from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import formBody from '@fastify/formbody';
@@ -29,7 +29,13 @@ import { getConfig } from '../core/config.js';
 
 const logger = createModuleLogger('api');
 
-export async function startApiServer(port: number = 3100): Promise<void> {
+/**
+ * Build the fully-configured Fastify instance WITHOUT binding a port. Extracted
+ * from startApiServer so the routes (security, projections, manual trigger) are
+ * injectable in tests via `app.inject` — behavior is identical to the listening
+ * server; only the `listen` call is separated out.
+ */
+export async function buildApiServer(): Promise<FastifyInstance> {
   // trustProxy so request.ip (and the per-IP rate limiter) use X-Forwarded-For
   // when deployed behind a reverse proxy / tunnel. Explicit + configurable.
   const app = Fastify({ logger: false, trustProxy: getConfig().TRUST_PROXY });
@@ -181,6 +187,11 @@ export async function startApiServer(port: number = 3100): Promise<void> {
     return { date: today, month: today.slice(0, 7), todayActions: outcomes.length, message: 'Detailed token tracking available in logs' };
   });
 
+  return app;
+}
+
+export async function startApiServer(port: number = 3100): Promise<void> {
+  const app = await buildApiServer();
   try {
     await app.listen({ port, host: '0.0.0.0' });
     logger.info({ port }, 'API server started (Fastify — sole HTTP server)');

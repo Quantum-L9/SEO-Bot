@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EnrichedWebsiteFactoryContractV2 } from '../../src/contracts/website_factory_v2.js';
 import { verifyMaintenanceReadiness } from '../../src/services/maintenance-readiness.js';
 
@@ -115,5 +115,68 @@ describe('verifyMaintenanceReadiness', () => {
       fetchImpl: githubFetch(),
       env: {},
     })).rejects.toMatchObject({ code: 'SECRET_UNRESOLVED' });
+  });
+});
+
+// ── GAP-002: assert the HTTP transport envelope, not just semantic outcomes ────
+// The existing tests only choose a mock response by URL and never inspect the
+// request init. A regression that dropped the Authorization header, omitted the
+// API-version header, switched to POST, or removed the AbortSignal.timeout would
+// still pass them. These tests capture the second fetch argument and the timeout.
+describe('verifyMaintenanceReadiness — GitHub request envelope (GAP-002)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  /** A fetch that records (url, init) for every call and returns the same happy
+   *  responses as githubFetch so verification reaches all probe requests. */
+  function capturingFetch(calls: Array<{ url: string; init?: RequestInit }>): typeof fetch {
+    return (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, init });
+      if (url.endsWith('/repos/Quantum-L9/client-site')) {
+        return Response.json({ id: 123, full_name: 'Quantum-L9/client-site' }, { status: 200 });
+      }
+      if (url.includes('/git/ref/heads/main')) return Response.json({ object: { sha: commit } });
+      if (url.includes('/contents/')) return Response.json({ sha: 'file-sha' });
+      return Response.json({ message: 'unexpected' }, { status: 500 });
+    }) as typeof fetch;
+  }
+
+  it('sends GET with Bearer auth, the GitHub Accept + API-version headers on every probe', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    await verifyMaintenanceReadiness(contract(), {
+      fetchImpl: capturingFetch(calls),
+      env: { CLIENT_GITHUB_TOKEN: 'token', CLIENT_VERCEL_HOOK: 'https://hook.example.com' },
+    });
+
+    // repo + branch + 2 required paths = 4 GitHub calls, all identically enveloped.
+    expect(calls.length).toBe(4);
+    for (const { init } of calls) {
+      expect(init?.method).toBe('GET');
+      const headers = init?.headers as Record<string, string>;
+      expect(headers.Authorization).toBe('Bearer token');
+      expect(headers.Accept).toBe('application/vnd.github+json');
+      expect(headers['X-GitHub-Api-Version']).toBe('2022-11-28');
+    }
+  });
+
+  it('bounds every probe with a 15s AbortSignal.timeout forwarded into fetch', async () => {
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const timeoutSpy = vi
+      .spyOn(AbortSignal, 'timeout')
+      .mockImplementation((ms: number) => realTimeout(ms));
+
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    await verifyMaintenanceReadiness(contract(), {
+      fetchImpl: capturingFetch(calls),
+      env: { CLIENT_GITHUB_TOKEN: 'token', CLIENT_VERCEL_HOOK: 'https://hook.example.com' },
+    });
+
+    // Every probe requested a 15_000ms timeout...
+    expect(timeoutSpy).toHaveBeenCalled();
+    expect(timeoutSpy.mock.calls.every(([ms]) => ms === 15_000)).toBe(true);
+    // ...and the resulting signal was actually attached to each fetch call.
+    for (const { init } of calls) {
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+    }
   });
 });

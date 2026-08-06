@@ -197,3 +197,59 @@ describe('updateMetaTitle — explicit config overrides env', () => {
     expect(result).toMatchObject({ dryRun: true, success: true });
   });
 });
+
+// ── GAP-003: the GitHub Contents PUT is only safe if its BODY is asserted ──────
+// The existing test proves the PUT targets the right repo, but never inspects the
+// body. A regression that wrote plaintext instead of base64, dropped the `sha`
+// optimistic-concurrency precondition, or hardcoded `branch: 'main'` over the
+// tenant branch would still pass. These pin the full write envelope.
+describe('site-deployment write — GitHub Contents PUT body (GAP-003)', () => {
+  const explicit: SiteDeploymentConfig = {
+    githubToken: 'ghp_write',
+    vercelDeployHook: '',
+    websiteBotRepo: 'Quantum-L9/tenant-site',
+    sourceBranch: 'release', // NON-default branch — proves branch is threaded, not hardcoded.
+    dryRun: false,
+  };
+
+  it('base64-encodes content, sends the read SHA as precondition, on the tenant branch', async () => {
+    const original = 'title: old\ndescription: keep\n';
+    getMock.mockResolvedValue({ data: { content: Buffer.from(original).toString('base64'), sha: 'orig-sha-42' } });
+    putMock.mockResolvedValue({ data: { content: { sha: 'new-sha' }, commit: { html_url: 'https://gh/commit/x' } } });
+
+    await updateMetaTitle('src/pages/services/index.astro', 'Best Roofer "Austin"', 'tenant.com', explicit);
+
+    expect(putMock).toHaveBeenCalledTimes(1);
+    const [url, body] = putMock.mock.calls[0];
+    expect(url).toBe('https://api.github.com/repos/Quantum-L9/tenant-site/contents/src/pages/services/index.astro');
+
+    // The written content is the MUTATED file, base64-encoded (never plaintext).
+    const expectedContent = original.replace(/^title:.*$/m, 'title: "Best Roofer \\"Austin\\""');
+    expect(body.content).toBe(Buffer.from(expectedContent, 'utf-8').toString('base64'));
+    expect(Buffer.from(body.content, 'base64').toString('utf-8')).toContain('title: "Best Roofer \\"Austin\\""');
+
+    // Optimistic-concurrency precondition = the SHA read from GET (not undefined).
+    expect(body.sha).toBe('orig-sha-42');
+    // Commit lands on the tenant's configured branch, not a hardcoded 'main'.
+    expect(body.branch).toBe('release');
+    expect(body.message).toContain('tenant.com');
+  });
+
+  it('sends Bearer auth + GitHub Accept/API-version headers and a bounded timeout', async () => {
+    getMock.mockResolvedValue({ data: { content: Buffer.from('title: old\n').toString('base64'), sha: 's1' } });
+    putMock.mockResolvedValue({ data: { content: { sha: 's2' }, commit: { html_url: 'https://gh/c' } } });
+
+    await updateMetaTitle('src/pages/index.astro', 'New Title', 'tenant.com', explicit);
+
+    const [, , opts] = putMock.mock.calls[0];
+    expect(opts.headers.Authorization).toBe('Bearer ghp_write');
+    expect(opts.headers.Accept).toBe('application/vnd.github.v3+json');
+    expect(opts.headers['X-GitHub-Api-Version']).toBe('2022-11-28');
+    expect(opts.timeout).toBe(15_000);
+
+    // The GET read is likewise bounded and authenticated.
+    const [, getOpts] = getMock.mock.calls[0];
+    expect(getOpts.headers.Authorization).toBe('Bearer ghp_write');
+    expect(getOpts.timeout).toBe(15_000);
+  });
+});

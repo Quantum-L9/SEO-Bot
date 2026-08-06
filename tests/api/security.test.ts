@@ -91,3 +91,86 @@ describe('operator auth hook', () => {
     expect(res.statusCode).toBe(401);
   });
 });
+
+// ── GAP-004: the rate limiter is classified but never behaviorally enforced ────
+// The pre-existing tests only assert `isStrictRateLimited()` returns the right
+// booleans — the entire onRequest hook could be deleted and they'd stay green.
+// These drive requests across both thresholds and assert 429 + Retry-After,
+// per-IP isolation, strict/default bucket independence, and window reset.
+describe('rate limiter enforcement (GAP-004)', () => {
+  let app: FastifyInstance;
+
+  // trustProxy so X-Forwarded-For controls request.ip → distinct per-IP buckets.
+  beforeEach(async () => {
+    _resetRateLimiter();
+    cfg.current = { OPERATOR_API_KEY: 'topsecret' };
+    app = Fastify({ trustProxy: true });
+    registerApiSecurity(app);
+    // Both routes are auth-exempt, so only the rate limiter gates them.
+    app.get('/health', async () => ({ ok: true }));                  // default bucket (max 120)
+    app.post('/api/clients/register', async () => ({ ok: true }));   // strict bucket (max 10)
+    await app.ready();
+  });
+
+  const strictReq = (ip: string) =>
+    app.inject({ method: 'POST', url: '/api/clients/register', headers: { 'x-forwarded-for': ip } });
+  const defaultReq = (ip: string) =>
+    app.inject({ method: 'GET', url: '/health', headers: { 'x-forwarded-for': ip } });
+
+  it('allows the 10th strict request and 429s the 11th', async () => {
+    for (let i = 1; i <= 10; i++) {
+      const res = await strictReq('10.0.0.1');
+      expect(res.statusCode).toBe(200);
+    }
+    const overflow = await strictReq('10.0.0.1');
+    expect(overflow.statusCode).toBe(429);
+    expect(overflow.json()).toEqual({ error: 'rate limit exceeded' });
+  });
+
+  it('allows the 120th default request and 429s the 121st', async () => {
+    for (let i = 1; i <= 120; i++) {
+      const res = await defaultReq('10.0.0.2');
+      expect(res.statusCode).toBe(200);
+    }
+    const overflow = await defaultReq('10.0.0.2');
+    expect(overflow.statusCode).toBe(429);
+  });
+
+  it('emits a positive Retry-After header on the 429', async () => {
+    for (let i = 1; i <= 10; i++) await strictReq('10.0.0.3');
+    const overflow = await strictReq('10.0.0.3');
+    expect(overflow.statusCode).toBe(429);
+    const retryAfter = Number(overflow.headers['retry-after']);
+    expect(Number.isFinite(retryAfter)).toBe(true);
+    expect(retryAfter).toBeGreaterThan(0);
+    expect(retryAfter).toBeLessThanOrEqual(60);
+  });
+
+  it('isolates buckets per IP — one IP exhausting does not throttle another', async () => {
+    for (let i = 1; i <= 10; i++) await strictReq('10.0.0.4');
+    expect((await strictReq('10.0.0.4')).statusCode).toBe(429); // exhausted
+    // A different IP still has its full quota.
+    expect((await strictReq('10.0.0.5')).statusCode).toBe(200);
+  });
+
+  it('keeps strict and default buckets independent for the same IP', async () => {
+    // Exhaust the strict bucket for this IP.
+    for (let i = 1; i <= 10; i++) await strictReq('10.0.0.6');
+    expect((await strictReq('10.0.0.6')).statusCode).toBe(429);
+    // The default bucket for the SAME IP is untouched.
+    expect((await defaultReq('10.0.0.6')).statusCode).toBe(200);
+  });
+
+  it('resets the window after it elapses', async () => {
+    vi.useFakeTimers({ now: 1_700_000_000_000 });
+    try {
+      for (let i = 1; i <= 10; i++) await strictReq('10.0.0.7');
+      expect((await strictReq('10.0.0.7')).statusCode).toBe(429);
+      // Advance past the 60s window → the stale bucket is replaced, quota restored.
+      vi.advanceTimersByTime(60_001);
+      expect((await strictReq('10.0.0.7')).statusCode).toBe(200);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

@@ -64,3 +64,58 @@ describe('siteConfigFromStoredClient', () => {
     expect(config.dryRun).toBe(true);
   });
 });
+
+// ── GAP-009: every provenance prerequisite must fail closed independently ──────
+// Live site mutation is only permitted when EVERY provenance field is present and
+// well-formed. The pre-existing suite covered schemaVersion, verifiedCommitSha,
+// contractDigest, and the unresolved credential. This table corrupts each of the
+// REMAINING prerequisites one at a time and proves each alone forces dry-run —
+// so deleting any single check (e.g. `sd.editableRoot === 'src/pages'`) is caught.
+describe('siteConfigFromStoredClient — fail-closed provenance table (GAP-009)', () => {
+  // Env resolves the credential refs so the ONLY reason for dry-run is the field
+  // under test. No NODE_ENV/SITE_DEPLOY_DRY_RUN here → the code's own guard is
+  // what's exercised.
+  const resolvingEnv: NodeJS.ProcessEnv = {
+    TENANT_GITHUB_TOKEN: 'gh-token',
+    TENANT_DEPLOY_HOOK: 'https://api.vercel.com/hook',
+  };
+
+  function withSd(overrides: Record<string, unknown>) {
+    return { site_deployment: { ...canonical.site_deployment, ...overrides } };
+  }
+
+  it('control: a fully-valid contract yields dryRun:false (guards the negatives)', () => {
+    expect(siteConfigFromStoredClient(canonical, resolvingEnv).dryRun).toBe(false);
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['status not ready', { status: 'inactive' }],
+    ['schemaVersion not 2.0', { schemaVersion: '1.0' }],
+    ['verifiedCommitSha missing', { verifiedCommitSha: undefined }],
+    ['verifiedCommitSha malformed (not 40 hex)', { verifiedCommitSha: 'z'.repeat(40) }],
+    ['verifiedCommitSha wrong length', { verifiedCommitSha: 'a'.repeat(39) }],
+    ['sourceDigest missing', { sourceDigest: undefined }],
+    ['sourceDigest malformed (not 64 hex)', { sourceDigest: 'nothex' }],
+    ['contractId blank', { contractId: '' }],
+    ['contractDigest missing', { contractDigest: undefined }],
+    ['contractDigest malformed', { contractDigest: 'g'.repeat(64) }],
+    ['verifiedAt missing', { verifiedAt: undefined }],
+    ['verifiedAt unparseable', { verifiedAt: 'not-a-date' }],
+    ['managedManifestPath wrong', { managedManifestPath: '.l9/other.json' }],
+    ['editableRoot wrong', { editableRoot: 'pages' }],
+    ['pagePathStrategy wrong', { pagePathStrategy: 'flat' }],
+    ['websiteBotRepo blank', { websiteBotRepo: '   ' }],
+  ])('fails closed when %s', (_label, override) => {
+    expect(siteConfigFromStoredClient(withSd(override), resolvingEnv).dryRun).toBe(true);
+  });
+
+  it('honors the explicit SITE_DEPLOY_DRY_RUN env kill even with a complete contract', () => {
+    const config = siteConfigFromStoredClient(canonical, { ...resolvingEnv, SITE_DEPLOY_DRY_RUN: 'true' });
+    expect(config.dryRun).toBe(true);
+  });
+
+  it('honors NODE_ENV=test even with a complete contract', () => {
+    const config = siteConfigFromStoredClient(canonical, { ...resolvingEnv, NODE_ENV: 'test' });
+    expect(config.dryRun).toBe(true);
+  });
+});
