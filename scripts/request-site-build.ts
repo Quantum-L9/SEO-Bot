@@ -22,7 +22,7 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import { loadSecrets } from '../src/core/secrets.js';
+import { hydrateSecretsIfConfigured } from '../src/core/secrets.js';
 import { requestSiteBuild } from '../src/services/site-deployment.js';
 
 async function main() {
@@ -37,7 +37,7 @@ async function main() {
     process.exit(1);
   }
 
-  await loadSecrets();
+  await hydrateSecretsIfConfigured();
 
   const result = await requestSiteBuild({ clientId, specPath });
 

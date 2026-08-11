@@ -5,7 +5,7 @@
  * version: 2.1.0
  */
 import { eq } from 'drizzle-orm';
-import { loadSecrets } from './core/secrets.js';
+import { hydrateSecretsIfConfigured } from './core/secrets.js';
 import { loadConfig } from './core/config.js';
 import { createModuleLogger } from './core/logger.js';
 import { closeDb, getDb, schema } from './core/database/index.js';
@@ -33,7 +33,11 @@ async function initializeActiveClientBudgets(): Promise<void> {
 }
 
 async function main() {
-  await loadSecrets();
+  const secretsMeta = await hydrateSecretsIfConfigured();
+  logger.info(
+    { source_mode: secretsMeta.source_mode, bootstrap_present: secretsMeta.bootstrap_present },
+    'Secrets plane ready',
+  );
   const config = loadConfig();
   logger.info('Configuration validated');
   await initializeActiveClientBudgets();

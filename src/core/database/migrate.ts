@@ -22,7 +22,7 @@ import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { sql } from 'drizzle-orm';
 import { getDb, closeDb } from './index.js';
 import { createModuleLogger } from '../logger.js';
-import { loadSecrets } from '../secrets.js';
+import { hydrateSecretsIfConfigured } from '../secrets.js';
 
 const logger = createModuleLogger('migrate');
 
@@ -82,7 +82,7 @@ async function runMigrations(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  await loadSecrets();
+  await hydrateSecretsIfConfigured();
 
   const checkOnly = process.argv.includes('--check');
 

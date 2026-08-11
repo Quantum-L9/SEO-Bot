@@ -150,7 +150,23 @@ Do **not** ask humans for a second PAT when AWS `openclaw-igorbot/github#token` 
 
 ## Infisical
 
-Secrets hydrate via `src/core/secrets.ts` → `@quantum-l9/infisical-config` (same contract as Website-Bot ADR-0009).
+Secrets hydrate via `src/core/secrets.ts` → `@quantum-l9/infisical-config`
+(`hydrateSecretsIfConfigured`, `overwrite: false` — same contract as Website-Bot ADR-0009).
+See `adr/ADR-0009-infisical-secrets-plane.md`.
+
+**Bootstrap (required for vault hydration):** `INFISICAL_CLIENT_ID`,
+`INFISICAL_CLIENT_SECRET`, `INFISICAL_PROJECT_ID` (+ optional `INFISICAL_ENV=prod`).
+
+| Surface | Source |
+|---|---|
+| GitHub Actions | Repo secrets `INFISICAL_*` injected into `autonomy-ops.yml` (and any runtime job) |
+| Agents / local | AWS `openclaw-igorbot/infisical-seo-bot#client_id|client_secret|project_id` via `l9-aws-secrets` → export `INFISICAL_*` |
+| Vault contents | SEO-Bot Infisical project only — **not** the Website-Bot project |
+
+After creating or rotating the Infisical project in the UI, update Actions
+`INFISICAL_PROJECT_ID` and the AWS secret `project_id` to match. Upsert secret
+**names** that match app env vars (`POSTHOG_PERSONAL_API_KEY`, `DATABASE_URL`, …).
+Caller-set Actions env still wins until you remove those keys from the workflow.
 Bootstrap for vault hydration: `INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET`, `INFISICAL_PROJECT_ID`
 (AWS `openclaw-igorbot/infisical-seo-bot#…`). Put shared `POSTHOG_PERSONAL_API_KEY` in the
 SEO-Bot Infisical project (`prod`); agents resolve bootstrap via `l9-aws-secrets` — do not paste PostHog values by hand when resolve works.

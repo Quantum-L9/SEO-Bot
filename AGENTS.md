@@ -44,7 +44,10 @@ points at a `seed.ts` that does not exist. Follow the code; don't propagate the 
 - **Start:** `src/index.ts` (entry) → `src/core/` (config, scheduler, logger, secrets, database) →
   `src/modules/*` (the 5 job-handler pillars) → `src/services/*` → `src/api/*`.
 - **Env/config:** `src/core/config.ts` (Zod `envSchema`, `getConfig()`) is the only config gateway;
-  `.env.example` is the template. Secrets hydrate first via `src/core/secrets.ts (`@quantum-l9/infisical-config` adapter)` (Infisical).
+  `.env.example` is the template. Secrets plane: Infisical via
+  `hydrateSecretsIfConfigured()` in `src/core/secrets.ts` (`@quantum-l9/infisical-config`,
+  ADR-0009). Bootstrap: `INFISICAL_CLIENT_ID` / `_SECRET` / `_PROJECT_ID`. Agents resolve
+  AWS `openclaw-igorbot/infisical-seo-bot` — do not ask humans for vault values when resolve works.
 - **DB schema:** `src/core/database/schema.ts` + `schema-extensions.ts` (Drizzle). `drizzle.config.ts`
   lists both.
 - **Webhook contract:** `contracts/website_factory_integration.yaml` + validator

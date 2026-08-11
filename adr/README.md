@@ -14,6 +14,7 @@ This directory contains the canonical Architecture Decision Records for the L9 S
 | [ADR-0006](ADR-0006-competitor-kill-chain.md) | Competitor Kill-Chain Pattern | accepted | 2026-06-14 |
 | [ADR-0007](ADR-0007-reproducible-assurance.md) | Reproducible Assurance | accepted | 2026-07-19 |
 | [ADR-0008](ADR-0008-autonomy-runtime-controls.md) | Autonomy Runtime Controls | proposed | 2026-07-15 |
+| [ADR-0009](ADR-0009-infisical-secrets-plane.md) | Infisical Secrets Plane | accepted | 2026-08-11 |
 
 ## Format
 

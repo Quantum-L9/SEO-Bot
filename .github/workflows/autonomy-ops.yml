@@ -61,6 +61,10 @@ jobs:
       - name: Verify all
         run: npm run verify:all
         env:
+          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+          INFISICAL_ENV: prod
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
 
@@ -75,6 +79,13 @@ jobs:
       issues: write
       packages: read
     env:
+      # Infisical bootstrap (Website-Bot ADR-0009 parity). Node hydrateSecretsIfConfigured()
+      # fills vault secrets; caller-set Actions env below still wins (overwrite:false).
+      INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+      INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+      INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+      INFISICAL_ENV: prod
+      # Not-yet-migrated / fallback Actions secrets (remove per-key as Infisical upserts land).
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       REDIS_URL: ${{ secrets.REDIS_URL }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
