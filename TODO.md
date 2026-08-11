@@ -1,5 +1,13 @@
 # TODO — Deferred / externally-gated work
 
+
+## Issue unblock (session reference)
+
+**Cluster:** SEO-Bot#5 (router drift) — closed 2026-08-11 as aligned `@quantum-l9/llm-router@1.1.1` with Website-Bot + LLM-Router SSOT
+**Owning fix:** none (evidence close)
+**Next:** SEO-Bot#17 still needs `NODE_AUTH_TOKEN` / GitHub Packages auth for agent sandboxes
+**Pickup:** Graphiti PICKUP written 2026-08-11
+
 Tracked items that are intentionally **not** done yet because they depend on an
 operational or external precondition (not on more code). Each lists the exact
 trigger that unblocks it.
