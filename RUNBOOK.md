@@ -147,3 +147,10 @@ npm ci --no-audit --no-fund --ignore-scripts
 
 CI already sets `NODE_AUTH_TOKEN` from `secrets.GITHUB_TOKEN` (`permissions.packages: read`).
 Do **not** ask humans for a second PAT when AWS `openclaw-igorbot/github#token` resolves.
+
+## Infisical
+
+Secrets hydrate via `src/core/secrets.ts` → `@quantum-l9/infisical-config` (same contract as Website-Bot ADR-0009).
+Bootstrap for vault hydration: `INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET`, `INFISICAL_PROJECT_ID`
+(AWS `openclaw-igorbot/infisical-seo-bot#…`). Put shared `POSTHOG_PERSONAL_API_KEY` in the
+SEO-Bot Infisical project (`prod`); agents resolve bootstrap via `l9-aws-secrets` — do not paste PostHog values by hand when resolve works.

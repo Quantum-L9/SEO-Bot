@@ -34,7 +34,7 @@ next cycle, and audit recent `gapAnalyses` rows at `status='executing'`.
 
 ---
 
-## 2. P4a — consume `@quantum-l9/infisical-config` (Infisical loader)
+## 2. P4a — consume `@quantum-l9/infisical-config` (DONE 2026-08-11) (Infisical loader)
 
 **Status:** coded; open as **draft PR #12**. CI red only because the package
 isn't published yet.
