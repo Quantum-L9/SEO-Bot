@@ -26,6 +26,7 @@ import { Scheduler } from '../../core/scheduler.js';
 import { getConfig } from '../../core/config.js';
 import { createModuleLogger } from '../../core/logger.js';
 import { getDb, schema } from '../../core/database/index.js';
+import { resolvePostHogQueryApiKey } from '../../core/posthog-auth.js';
 import { getNotificationService } from '../../services/notifications.js';
 
 const logger = createModuleLogger('web-vitals');
@@ -196,11 +197,14 @@ async function fetchRumFromPosthog(clientId: string, _domain: string): Promise<{
         },
       },
       {
-        // Query API needs a PostHog PERSONAL API key. client.posthogApiKey is
-        // the per-project ingestion key (used client-side in the tracking
-        // snippet) and would 401 here. All clients share one PostHog instance
-        // (per-client projects), so the global personal key can read any project.
-        headers: { Authorization: `Bearer ${config.POSTHOG_PERSONAL_API_KEY}` },
+        // Prefer per-client phx_* when stored; else shared POSTHOG_PERSONAL_API_KEY.
+        // Project ingestion keys (phc_*) are not valid Query API credentials (SEO-Bot#18).
+        headers: {
+          Authorization: `Bearer ${resolvePostHogQueryApiKey(
+            client.posthogApiKey,
+            config.POSTHOG_PERSONAL_API_KEY,
+          )}`,
+        },
         timeout: 30000,
       }
     );

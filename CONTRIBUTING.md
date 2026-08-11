@@ -37,6 +37,15 @@ We use ADRs to document significant design decisions. If you are adding a new mo
 - **Logging:** Do not use `console.log`. Use the structured logger from `src/core/logger.ts` (`logger.info`, `logger.error`).
 - **Error Handling:** Fail fast. If an API key is missing, crash on startup. Do not swallow errors in job handlers; let them bubble up so BullMQ can track the failure and apply backoff retries.
 
+## Local setup (private packages)
+
+```bash
+source scripts/ensure-npm-auth.sh   # AWS openclaw-igorbot/github#token → NODE_AUTH_TOKEN
+npm ci --no-audit --no-fund --ignore-scripts
+```
+
+See `RUNBOOK.md` § Private npm packages / Secrets model.
+
 ## Pull Request Process
 
 1. Create a feature branch from `main`.

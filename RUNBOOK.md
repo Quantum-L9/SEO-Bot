@@ -105,7 +105,8 @@ Backups are saved to `data/backups/` and the script automatically prunes backups
 
 ## Environment Variable Reference
 
-The system is configured entirely via `.env`.
+Runtime config is loaded from the environment / Infisical (see `src/core/secrets.ts`),
+not from committed files. Names below match `src/core/config.ts` and `.env.example`.
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
@@ -116,10 +117,33 @@ The system is configured entirely via `.env`.
 | `DATAFORSEO_LOGIN` | Yes | SERP tracking and competitor analysis |
 | `DATAFORSEO_PASSWORD` | Yes | SERP tracking and competitor analysis |
 | `HUNTER_API_KEY` | No | Email extraction for link building |
-| `POSTHOG_HOST` | Yes | Self-hosted PostHog instance URL |
-| `POSTHOG_PROJECT_KEY` | Yes | Project key for event ingestion |
+| `POSTHOG_API_URL` | Yes | Self-hosted PostHog base URL (Query API) |
+| `POSTHOG_PERSONAL_API_KEY` | Yes | Shared PostHog **personal** key (`phx_*`) for HogQL / Query API |
+| `NODE_AUTH_TOKEN` | Dev/agent | GitHub Packages token for `@quantum-l9/*` (see below) |
 | `SMTP_HOST` | No | Notification delivery |
 | `SMTP_USER` | No | Notification delivery |
 | `SMTP_PASS` | No | Notification delivery |
 | `TELEGRAM_BOT_TOKEN` | No | Emergency alerts |
 | `TELEGRAM_CHAT_ID` | No | Emergency alerts |
+
+### Secrets model (PostHog + packages)
+
+Keep credential planes separate (SEO-Bot#18 / #17):
+
+| Credential | Home | Notes |
+|---|---|---|
+| Per-client PostHog **project** key (`phc_*`) | DB `clients.posthog_api_key` | Tracking snippet + readiness gate; never returned by operator API |
+| Per-client PostHog **personal** key (`phx_*`) | Same column when tenant has its own PostHog org | Query API override via `resolvePostHogQueryApiKey` |
+| Shared `POSTHOG_PERSONAL_API_KEY` | Infisical + GitHub org/Actions secrets | Default Query API key for the shared self-hosted instance |
+| `NODE_AUTH_TOKEN` (GitHub Packages) | Agent: AWS `openclaw-igorbot/github#token` → env; CI: `GITHUB_TOKEN` with `packages: read` | Not committed; see `scripts/ensure-npm-auth.sh` |
+
+### Private npm packages (`@quantum-l9/*`)
+
+```bash
+# Preferred in governed agent environments (loads from AWS, never echoes the value):
+source scripts/ensure-npm-auth.sh
+npm ci --no-audit --no-fund --ignore-scripts
+```
+
+CI already sets `NODE_AUTH_TOKEN` from `secrets.GITHUB_TOKEN` (`permissions.packages: read`).
+Do **not** ask humans for a second PAT when AWS `openclaw-igorbot/github#token` resolves.

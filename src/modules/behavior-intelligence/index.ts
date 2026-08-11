@@ -38,6 +38,7 @@ import { Scheduler } from '../../core/scheduler.js';
 import { getConfig } from '../../core/config.js';
 import { createModuleLogger } from '../../core/logger.js';
 import { getDb, schema } from '../../core/database/index.js';
+import { resolvePostHogQueryApiKey } from '../../core/posthog-auth.js';
 import { getLlmService } from '../../services/llm.js';
 import { getNotificationService } from '../../services/notifications.js';
 
@@ -116,11 +117,14 @@ async function pullEngagementData(job: Job): Promise<void> {
     return;
   }
 
-  // Query API needs a PostHog PERSONAL API key. client.posthogApiKey is the
-  // per-project ingestion key (client-side snippet) and would 401 here. All
-  // clients share one PostHog instance, so the global personal key reads any
-  // project. The per-client key presence above just signals PostHog is configured.
-  const posthog = new PostHogClient(config.POSTHOG_API_URL, config.POSTHOG_PERSONAL_API_KEY);
+  // Query API needs a personal key (phx_*). Project ingestion keys (phc_*) in
+  // clients.posthog_api_key only gate readiness; multi-org tenants may store
+  // phx_* there to override the shared POSTHOG_PERSONAL_API_KEY (SEO-Bot#18).
+  const queryKey = resolvePostHogQueryApiKey(
+    client.posthogApiKey,
+    config.POSTHOG_PERSONAL_API_KEY,
+  );
+  const posthog = new PostHogClient(config.POSTHOG_API_URL, queryKey);
   const today = new Date().toISOString().split('T')[0];
 
   logger.info({ clientDomain }, 'Pulling engagement data from PostHog');

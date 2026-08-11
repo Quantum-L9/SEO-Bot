@@ -11,12 +11,19 @@
 # session, so every non-trivial step is guarded and we always `exit 0`.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Token gate — report, never crash. Without it the repo's committed .npmrc
-# cannot resolve @quantum-l9/*, and CI remains the validation gate.
-if [[ -z "$NODE_AUTH_TOKEN" ]]; then
-  echo "WARN: NODE_AUTH_TOKEN not injected — @quantum-l9 packages will not resolve."
-  echo "      Set a read:packages PAT as NODE_AUTH_TOKEN in the environment panel."
-  echo "      CI remains the authoritative validation gate until then."
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# Token gate — try AWS SSOT (openclaw-igorbot/github#token) when the panel did
+# not inject NODE_AUTH_TOKEN (SEO-Bot#17 / l9-aws-secrets). Soft-fail if absent.
+if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
+  # shellcheck disable=SC1091
+  source "${REPO_ROOT}/scripts/ensure-npm-auth.sh" 2>/dev/null || true
+fi
+
+if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
+  echo "WARN: NODE_AUTH_TOKEN not available — @quantum-l9 packages will not resolve."
+  echo "      Export NODE_AUTH_TOKEN, or ensure AWS can resolve openclaw-igorbot/github#token."
+  echo "      See RUNBOOK.md § Private npm packages. CI remains the validation gate."
   exit 0
 fi
 
@@ -24,7 +31,7 @@ fi
 # CLAUDE_ENV_FILE is provided to SessionStart hooks; guard in case it is empty.
 # Use printf %q so a token with shell-significant characters is safely quoted
 # for when the env file is later sourced (no breakage, no injection).
-if [[ -n "$CLAUDE_ENV_FILE" ]]; then
+if [[ -n "${CLAUDE_ENV_FILE:-}" ]]; then
   printf 'export NODE_AUTH_TOKEN=%q\n' "$NODE_AUTH_TOKEN" >> "$CLAUDE_ENV_FILE"
 fi
 
@@ -43,8 +50,9 @@ fi
 # redundant installs. package-lock.json is committed, so use `npm ci`
 # (version-locked, `--ignore-scripts` blocks dependency lifecycle scripts),
 # matching .github/workflows/ci.yml.
-if [[ -f "package.json" ]] && [[ ! -d "node_modules" ]]; then
-  npm ci --no-audit --no-fund --ignore-scripts || echo "WARN: npm ci failed — run it manually in-session."
+if [[ -f "${REPO_ROOT}/package.json" ]] && [[ ! -d "${REPO_ROOT}/node_modules" ]]; then
+  (cd "$REPO_ROOT" && npm ci --no-audit --no-fund --ignore-scripts) \
+    || echo "WARN: npm ci failed — run it manually in-session."
 fi
 
 exit 0
