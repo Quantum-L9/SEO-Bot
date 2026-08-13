@@ -50,9 +50,11 @@ points at a `seed.ts` that does not exist. Follow the code; don't propagate the 
   AWS `openclaw-igorbot/infisical-seo-bot` — do not ask humans for vault values when resolve works.
 - **DB schema:** `src/core/database/schema.ts` + `schema-extensions.ts` (Drizzle). `drizzle.config.ts`
   lists both.
-- **Webhook contract:** `contracts/website_factory_integration.yaml` + validator
-  `src/contracts/website_factory_v2.ts` (`schema_version` literal `'2.0'`). PostHog event names:
-  `src/contracts/posthog_events.ts`.
+- **Webhook contract:** live handoff is `@quantum-l9/bot-interop` `WebsiteFactoryHandoffV3`
+  (`schema_version: '3.0'`), validated by `assertWebsiteFactoryHandoffV3` on
+  `POST /api/clients/register`. `contracts/website_factory_integration.yaml` is a convenience
+  copy (archival `2.0` body). Do not recreate `src/contracts/website_factory_v2.ts`. PostHog
+  event names: `src/contracts/posthog_events.ts`.
 - **Decisions:** `adr/` (ADR-0001..0006, all accepted) + `adr/README.md`; `DECISION_LOG.md`.
 - **Do-not-edit / generated:** `drizzle/` migrations + `drizzle/meta/` (regenerate, never hand-edit),
   `dist/` (build output, gitignored), `validation/*.jsonl` (machine evidence).
@@ -98,8 +100,10 @@ points at a `seed.ts` that does not exist. Follow the code; don't propagate the 
 - **New integration:** add its env vars to the Zod schema in `src/core/config.ts`; never hardcode secrets.
 - **Schema change:** edit `schema.ts`/`schema-extensions.ts`, generate a migration
   (`npx drizzle-kit generate`), keep `migrate.ts` applying it. **Never edit an existing migration file.**
-- Keep `schema_version '2.0'` back-compat: `src/contracts/website_factory_v2.ts` is a cross-repo contract
-  Website-Bot mirrors — field renames are breaking. Update schema + migration + tests + contract together.
+- Keep `schema_version '3.0'` as the live handoff: `@quantum-l9/bot-interop`
+  `WebsiteFactoryHandoffV3` on `POST /api/clients/register`. Do not recreate
+  `src/contracts/website_factory_v2.ts`. Field renames are breaking. Update schema +
+  migration + tests + contract together.
 - **No browser automation** (Puppeteer/Playwright/OpenClaw) — the bot is headless/API-only.
 
 ## 8. Git & PR

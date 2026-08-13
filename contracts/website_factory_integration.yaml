@@ -1,5 +1,9 @@
 # Website Factory Integration Contract
-# Defines the handoff interface between the L9 Website Factory and the L9 SEO Bot.
+# CONVENIENCE COPY — not the live contract.
+# Live contract: @quantum-l9/bot-interop WebsiteFactoryHandoffV3 (schema_version: '3.0'),
+# validated by assertWebsiteFactoryHandoffV3 on POST /api/clients/register.
+# Do not recreate v2. The schema_version: "2.0" body below is archival convenience only.
+# Defines the historical handoff interface between the L9 Website Factory and the L9 SEO Bot.
 
 schema_version: "2.0"
 owner: "operator"

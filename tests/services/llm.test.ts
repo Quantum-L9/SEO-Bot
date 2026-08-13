@@ -183,7 +183,12 @@ describe('LlmService.execute — gate ordering + memory + usage (GAP-005)', () =
   });
 
   it('propagates BudgetExhaustedError with its distinct type (not a generic Error)', async () => {
-    executeMock.mockRejectedValueOnce(new BudgetExhaustedError('weekly ceiling hit'));
+    executeMock.mockRejectedValueOnce(new BudgetExhaustedError(
+      'weekly ceiling hit',
+      { clientId: 'c1', type: TaskType.SCORING, complexity: TaskComplexity.LOW },
+      {} as never,
+      {} as never,
+    ));
     const svc = new LlmService();
     await expect(
       svc.execute({ clientId: 'c1', type: TaskType.SCORING, complexity: TaskComplexity.LOW } as any, 'sys', 'user'),

@@ -1,19 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { EnrichedWebsiteFactoryContractV2 } from '../../src/contracts/website_factory_v2.js';
+import { sealWebsiteFactoryHandoff, type WebsiteFactoryHandoffV3 } from '@quantum-l9/bot-interop';
 import { verifyMaintenanceReadiness } from '../../src/services/maintenance-readiness.js';
 
 const commit = 'a'.repeat(40);
 const sourceDigest = 'b'.repeat(64);
 
-function contract(): EnrichedWebsiteFactoryContractV2 {
-  return {
-    schema_version: '2.0',
-    domain: 'client.example.com',
-    name: 'Client',
-    industry: 'services',
-    state: 'NC',
-    targetKeywords: [{ keyword: 'service nc', priority: 'high' }],
-    competitorUrls: [],
+function contract(): WebsiteFactoryHandoffV3 {
+  return sealWebsiteFactoryHandoff({
+    protocol: 'l9.website-factory.handoff',
+    schema_version: '3.0',
+    contract_id: `example-co:build:${commit}`,
+    emitted_at: '2026-07-20T12:00:00.000Z',
+    client: { id: 'example-co', domain: 'https://www.Example.com/', name: 'Example Co', industry: 'roofing', state: 'TX' },
+    seo: { target_keywords: [{ keyword: 'roof repair', priority: 'high' }], competitor_urls: [] },
     site: {
       repository: {
         provider: 'github',
@@ -28,22 +27,31 @@ function contract(): EnrichedWebsiteFactoryContractV2 {
       },
       deployment: {
         provider: 'vercel',
-        project_id: 'prj_1', deployment_id: 'dpl_1', deployment_url: 'https://client.example.com',
-        state: 'READY', requested_commit_sha: commit, observed_commit_sha: commit,
+        project_id: 'prj_1',
+        deployment_id: 'dpl_1',
+        deployment_url: 'https://example.com',
+        state: 'READY',
+        requested_commit_sha: commit,
+        observed_commit_sha: commit,
       },
       maintenance: {
-        enabled: true, transport: 'github-contents-api',
+        enabled: true,
+        transport: 'github-contents-api',
         github_credential_ref: 'env://CLIENT_GITHUB_TOKEN',
         vercel_deploy_hook_ref: 'env://CLIENT_VERCEL_HOOK',
         required_paths: ['.l9/generated-manifest.json', 'src/pages/index.astro'],
       },
     },
     proof: {
-      receipt_id: 'rcpt_1', receipt_status: 'succeeded', source_digest: sourceDigest,
-      dist_digest: 'c'.repeat(64), local_build_status: 'passed',
-      publication_status: 'passed', deployment_status: 'passed',
+      receipt_id: 'rcpt_1',
+      receipt_status: 'succeeded',
+      source_digest: sourceDigest,
+      dist_digest: 'c'.repeat(64),
+      local_build_status: 'passed',
+      publication_status: 'passed',
+      deployment_status: 'passed',
     },
-  };
+  });
 }
 
 function githubFetch(options: { repoStatus?: number; head?: string; missingPath?: string } = {}): typeof fetch {
@@ -129,7 +137,7 @@ describe('verifyMaintenanceReadiness — GitHub request envelope (GAP-002)', () 
   /** A fetch that records (url, init) for every call and returns the same happy
    *  responses as githubFetch so verification reaches all probe requests. */
   function capturingFetch(calls: Array<{ url: string; init?: RequestInit }>): typeof fetch {
-    return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = String(input);
       calls.push({ url, init });
       if (url.endsWith('/repos/Quantum-L9/client-site')) {

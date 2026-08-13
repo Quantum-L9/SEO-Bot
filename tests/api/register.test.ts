@@ -5,7 +5,7 @@ import { sealWebsiteFactoryHandoff } from '@quantum-l9/bot-interop';
 const { insertMock, valuesMock, onConflictDoUpdateMock, returningMock, initClientMock } = vi.hoisted(() => {
   const returningMock = vi.fn();
   const onConflictDoUpdateMock = vi.fn(() => ({ returning: returningMock }));
-  const valuesMock = vi.fn(() => ({ onConflictDoUpdate: onConflictDoUpdateMock }));
+  const valuesMock = vi.fn((..._args: unknown[]) => ({ onConflictDoUpdate: onConflictDoUpdateMock }));
   const insertMock = vi.fn(() => ({ values: valuesMock }));
   const initClientMock = vi.fn();
   return { insertMock, valuesMock, onConflictDoUpdateMock, returningMock, initClientMock };

@@ -21,11 +21,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── DB + logger stubs (logAction/approve/reject persist decisions) ─────────────
 const insertReturningMock = vi.fn().mockResolvedValue([{ id: 'action-uuid-1' }]);
-const insertValuesMock = vi.fn(() => ({ returning: insertReturningMock }));
+const insertValuesMock = vi.fn((..._args: unknown[]) => ({ returning: insertReturningMock }));
 const insertMock = vi.fn(() => ({ values: insertValuesMock }));
 
 const updateWhereMock = vi.fn().mockResolvedValue([]);
-const updateSetMock = vi.fn(() => ({ where: updateWhereMock }));
+const updateSetMock = vi.fn((..._args: unknown[]) => ({ where: updateWhereMock }));
 const updateMock = vi.fn(() => ({ set: updateSetMock }));
 
 vi.mock('../../src/core/database/index.js', () => ({
