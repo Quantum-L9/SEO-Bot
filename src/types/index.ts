@@ -316,7 +316,8 @@ export type ModuleName =
   | 'aeo-geo'
   | 'link-building'
   | 'behavior-intelligence'
-  | 'memory';
+  | 'memory'
+  | 'build-intelligence';
 
 export interface TokenBudget {
   maxFastTokensPerRun: number;

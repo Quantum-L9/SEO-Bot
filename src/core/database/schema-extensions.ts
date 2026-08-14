@@ -137,3 +137,25 @@ export const compensationLog = pgTable('compensation_log', {
   errorMessage: text('error_message'),
   compensatedAt: timestamp('compensated_at').notNull().defaultNow(),
 });
+
+// ─── Build-Intelligence Artifacts (l9.website-intelligence seam) ─────────────────
+// Single content-addressed store for the three sealed build-time artifacts
+// (CompetitiveLandscape, SEOContentBlueprint, StructuredContentPackage). The
+// artifact_id is `${artifact_type}:${payload_digest}` and is globally unique;
+// re-sealing identical content is idempotent, and an artifact is NEVER
+// overwritten with a different digest (fail-closed lineage).
+
+export const buildIntelligenceArtifacts = pgTable('build_intelligence_artifacts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  clientId: varchar('client_id', { length: 255 }).notNull(),
+  buildId: varchar('build_id', { length: 255 }).notNull(),
+  artifactType: varchar('artifact_type', { length: 64 }).notNull(),
+  artifactId: varchar('artifact_id', { length: 128 }).notNull().unique(),
+  payloadDigest: varchar('payload_digest', { length: 128 }).notNull(),
+  payload: jsonb('payload').notNull(),
+  producedAt: timestamp('produced_at').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => ({
+  clientBuildIdx: index('idx_build_intel_client_build').on(table.clientId, table.buildId),
+  typeIdx: index('idx_build_intel_type').on(table.artifactType),
+}));

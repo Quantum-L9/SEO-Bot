@@ -23,15 +23,14 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import axios from 'axios';
 import { Job } from 'bullmq';
 import { eq, desc } from 'drizzle-orm';
 import { Scheduler } from '../../core/scheduler.js';
-import { getConfig } from '../../core/config.js';
 import { createModuleLogger } from '../../core/logger.js';
 import { getDb, schema } from '../../core/database/index.js';
 import { getLlmService } from '../../services/llm.js';
 import { getNotificationService } from '../../services/notifications.js';
+import { getAnswerEnginePort } from './answer-engine-port.js';
 
 const logger = createModuleLogger('aeo-geo');
 
@@ -60,25 +59,14 @@ async function checkAiCitation(
   clientDomain: string,
   platform: 'perplexity' | 'chatgpt_search'
 ): Promise<CitationCheckResult> {
-  const config = getConfig();
-
   if (platform === 'perplexity') {
     try {
-      const response = await axios.post(
-        'https://api.perplexity.ai/chat/completions',
-        {
-          model: 'llama-3.1-sonar-small-128k-online',
-          messages: [{ role: 'user', content: query }],
-          return_citations: true,
-        },
-        {
-          headers: { Authorization: `Bearer ${config.PERPLEXITY_API_KEY}` },
-          timeout: 30000,
-        }
-      );
+      // Provider identity is legitimate here: the answer engine itself is the
+      // measurement subject. The call is confined behind AnswerEngineObservationPort.
+      const observation = await getAnswerEnginePort('perplexity').observe(query);
 
-      const content = response.data.choices?.[0]?.message?.content || '';
-      const citations = response.data.citations || [];
+      const content = observation.content;
+      const citations = observation.citations;
 
       const cited = citations.some((c: string) => c.includes(clientDomain.replace('www.', '')));
       const citedUrl = citations.find((c: string) => c.includes(clientDomain.replace('www.', ''))) || null;

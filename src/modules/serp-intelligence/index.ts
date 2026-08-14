@@ -22,129 +22,22 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import axios from 'axios';
 import { Job } from 'bullmq';
 import { eq, and, desc } from 'drizzle-orm';
 import { Scheduler } from '../../core/scheduler.js';
-import { getConfig } from '../../core/config.js';
 import { createModuleLogger } from '../../core/logger.js';
 import { getDb, schema } from '../../core/database/index.js';
 import { getLlmService } from '../../services/llm.js';
 import { getNotificationService } from '../../services/notifications.js';
+import { DataForSeoClient } from '../../services/dataforseo.js';
 import type { GapDimension, SurpassAction } from '../../types/index.js';
 
 const logger = createModuleLogger('serp-intelligence');
 
 // ─── DataForSEO Client ───────────────────────────────────────────────────────
-
-class DataForSeoClient {
-  private readonly baseUrl = 'https://api.dataforseo.com/v3';
-  private auth: string;
-
-  constructor() {
-    const config = getConfig();
-    this.auth = Buffer.from(`${config.DATAFORSEO_LOGIN}:${config.DATAFORSEO_PASSWORD}`).toString('base64');
-  }
-
-  private async request(endpoint: string, data: any[]): Promise<any> {
-    const response = await axios.post(`${this.baseUrl}${endpoint}`, data, {
-      headers: {
-        'Authorization': `Basic ${this.auth}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 30000,
-    });
-
-    if (response.data.status_code !== 20000) {
-      throw new Error(`DataForSEO error: ${response.data.status_message}`);
-    }
-
-    return response.data;
-  }
-
-  async getRankings(keyword: string, domain: string, location: string = 'United States'): Promise<{
-    position: number | null;
-    url: string | null;
-    serpFeatures: string[];
-    competitors: Array<{ domain: string; position: number; url: string; title: string; snippet: string }>;
-  }> {
-    const result = await this.request('/serp/google/organic/live/advanced', [{
-      keyword,
-      location_name: location,
-      language_name: 'English',
-      device: 'desktop',
-      depth: 20,
-    }]);
-
-    const items = result.tasks?.[0]?.result?.[0]?.items || [];
-    const serpFeatures = result.tasks?.[0]?.result?.[0]?.item_types || [];
-
-    let position: number | null = null;
-    let url: string | null = null;
-    const competitors: Array<{ domain: string; position: number; url: string; title: string; snippet: string }> = [];
-
-    for (const item of items) {
-      if (item.type !== 'organic') continue;
-
-      const itemDomain = new URL(item.url).hostname.replace('www.', '');
-
-      if (itemDomain === domain.replace('www.', '')) {
-        position = item.rank_absolute;
-        url = item.url;
-      } else {
-        competitors.push({
-          domain: itemDomain,
-          position: item.rank_absolute,
-          url: item.url,
-          title: item.title || '',
-          snippet: item.description || '',
-        });
-      }
-    }
-
-    return { position, url, serpFeatures, competitors };
-  }
-
-  async getBacklinkProfile(domain: string): Promise<{
-    totalBacklinks: number;
-    referringDomains: number;
-    domainRating: number;
-  }> {
-    const result = await this.request('/backlinks/summary/live', [{
-      target: domain,
-      internal_list_limit: 0,
-    }]);
-
-    const data = result.tasks?.[0]?.result?.[0] || {};
-    return {
-      totalBacklinks: data.total_backlinks || 0,
-      referringDomains: data.referring_domains || 0,
-      domainRating: data.rank || 0,
-    };
-  }
-
-  async getPageContent(url: string): Promise<{
-    wordCount: number;
-    headings: number;
-    images: number;
-    internalLinks: number;
-    externalLinks: number;
-  }> {
-    const result = await this.request('/on_page/instant_pages', [{
-      url,
-      load_resources: false,
-    }]);
-
-    const page = result.tasks?.[0]?.result?.[0]?.items?.[0] || {};
-    return {
-      wordCount: page.meta?.content?.plain_text_word_count || 0,
-      headings: (page.meta?.htags?.h1?.length || 0) + (page.meta?.htags?.h2?.length || 0) + (page.meta?.htags?.h3?.length || 0),
-      images: page.meta?.images_count || 0,
-      internalLinks: page.meta?.internal_links_count || 0,
-      externalLinks: page.meta?.external_links_count || 0,
-    };
-  }
-}
+// The single DataForSEO client now lives in src/services/dataforseo.ts (one
+// implementation, reused by the build-time CompetitiveLandscape producer). The
+// scheduled getRankings/getPageContent/getBacklinkProfile behavior is unchanged.
 
 // ─── Handler: Check Rankings (ZERO TOKENS) ───────────────────────────────────
 

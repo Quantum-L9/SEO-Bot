@@ -21,6 +21,7 @@ import { getDb, schema } from '../core/database/index.js';
 import { parseJsonFromLlm, parseScore } from './llm-parse.js';
 import type { ModuleName } from '../types/index.js';
 import { hydrateSeoContext } from './memory.js';
+import { seoImproveTask, type SeoImproveLlmOperation } from './improve-llm-policy.js';
 
 const logger = createModuleLogger('llm');
 
@@ -147,6 +148,59 @@ export class LlmService {
       userPrompt,
     );
     return response.content;
+  }
+
+  /**
+   * Execute a governed SEO-improve LLM operation whose output must be valid,
+   * schema-conformant JSON. Task cognition (STRATEGIC_REASONING /
+   * CONTENT_GENERATION / SCORING) and the hard search flag come entirely from
+   * {@link SEO_IMPROVE_LLM_POLICY} — the caller never chooses a task type,
+   * provider, or model. Parse+validate failures trigger EXACTLY ONE bounded
+   * repair scoped to the same operation; a second failure is terminal (the
+   * validator's error propagates). No infinite retry.
+   */
+  async executePolicyJson<T>(
+    operation: SeoImproveLlmOperation,
+    args: {
+      clientId: string;
+      module: ModuleName;
+      purpose: string;
+      systemPrompt: string;
+      userPrompt: string;
+      validate: (value: unknown) => T;
+    },
+  ): Promise<T> {
+    const task = seoImproveTask(operation, args.clientId, `[${args.module}] ${args.purpose}`);
+    const first = await this.execute(task, args.systemPrompt, args.userPrompt);
+    try {
+      return args.validate(parseJsonFromLlm<unknown>(first.content));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.warn({ operation, clientId: args.clientId, purpose: args.purpose, reason }, 'Policy JSON invalid; attempting one bounded repair');
+      const repairPrompt =
+        `${args.userPrompt}\n\n---\nYour previous response was rejected: ${reason}\n` +
+        `Respond again with ONLY a single valid JSON value that satisfies the required schema. No prose, no markdown fences.`;
+      const second = await this.execute(task, args.systemPrompt, repairPrompt);
+      // A second failure throws the validator's terminal error — no further retry.
+      return args.validate(parseJsonFromLlm<unknown>(second.content));
+    }
+  }
+
+  /**
+   * Strategic-reasoning JSON op (SEO_CONTENT_BLUEPRINT). Reasoning, not search:
+   * consumes normalized evidence and returns a validated strategic artifact.
+   * Task semantics describe cognition, not serialization — this is deliberately
+   * NOT the EXTRACTION path even though the output is JSON.
+   */
+  async strategizeJson<T>(args: {
+    clientId: string;
+    module: ModuleName;
+    purpose: string;
+    systemPrompt: string;
+    userPrompt: string;
+    validate: (value: unknown) => T;
+  }): Promise<T> {
+    return this.executePolicyJson('SEO_CONTENT_BLUEPRINT', args);
   }
 
   async research(

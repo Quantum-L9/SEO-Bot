@@ -24,6 +24,7 @@ import { getScheduler } from '../core/scheduler.js';
 import { getLlmService } from '../services/llm.js';
 import { registerDashboard } from './dashboard.js';
 import { registerClientRoutes } from './clients/register.js';
+import { registerBuildIntelligenceRoutes } from './build-intelligence.js';
 import { registerApiSecurity } from './security.js';
 import { getConfig } from '../core/config.js';
 
@@ -62,6 +63,7 @@ export async function buildApiServer(): Promise<FastifyInstance> {
 
   await registerDashboard(app);
   await registerClientRoutes(app);
+  await registerBuildIntelligenceRoutes(app);
 
   app.get('/health', async () => {
     const db = getDb();
