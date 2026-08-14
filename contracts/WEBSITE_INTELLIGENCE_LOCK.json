@@ -1,0 +1,84 @@
+{
+  "lock_version": 1,
+  "status": "ACCEPTED",
+  "locked_at": "2026-08-14",
+  "protocol": "l9.website-intelligence",
+  "protocol_version": "1.0",
+  "mode_scope": [
+    "REDESIGN_IMPROVE"
+  ],
+  "copy_mode": {
+    "behavior_change_allowed": false,
+    "existing_content_generation_preserved": true,
+    "existing_reconstruction_semantics_preserved": true
+  },
+  "packages": {
+    "@quantum-l9/bot-interop": "1.1.0",
+    "@quantum-l9/llm-router": "1.1.3"
+  },
+  "artifacts": {
+    "competitive_landscape": {
+      "version": 1,
+      "producer": "SEO-Bot",
+      "consumers": [
+        "Website-Bot",
+        "SEO-Bot"
+      ]
+    },
+    "website_build_blueprint": {
+      "version": 1,
+      "producer": "Website-Bot",
+      "consumers": [
+        "Website-Bot"
+      ]
+    },
+    "seo_content_blueprint": {
+      "version": 1,
+      "producer": "SEO-Bot",
+      "consumers": [
+        "Website-Bot",
+        "SEO-Bot"
+      ]
+    },
+    "page_content_contract": {
+      "version": 1,
+      "producer": "Website-Bot",
+      "producer_kind": "DETERMINISTIC_COMPILER",
+      "consumers": [
+        "Website-Bot",
+        "SEO-Bot"
+      ]
+    },
+    "structured_content_package": {
+      "version": 1,
+      "producer": "SEO-Bot",
+      "consumers": [
+        "Website-Bot"
+      ]
+    }
+  },
+  "authority": {
+    "serp_truth": "SEO-Bot",
+    "competitive_landscape": "SEO-Bot",
+    "visual_pattern_portfolio": "Website-Bot",
+    "website_build_blueprint": "Website-Bot",
+    "seo_content_blueprint": "SEO-Bot",
+    "page_contract_compilation": "Website-Bot",
+    "final_page_copy": "SEO-Bot",
+    "site_source_mutation": "Website-Bot",
+    "site_build": "Website-Bot",
+    "quality_delta": "Website-Bot",
+    "provider_selection": "LLM-Router"
+  },
+  "forbidden": [
+    "WEBSITE_BOT_IMPROVE_FINAL_COPY_GENERATION",
+    "SEO_BOT_SITE_SOURCE_MUTATION",
+    "LLM_PROVIDER_SELECTION_IN_APPLICATION_STAGE",
+    "RAW_COMPETITOR_COPY_REUSE",
+    "RAW_COMPETITOR_IMAGE_REUSE",
+    "RAW_COMPETITOR_MARKUP_REUSE",
+    "PERPLEXITY_AS_SERP_RANK_AUTHORITY",
+    "LLM_PAGE_CONTRACT_MERGE",
+    "COPY_MODE_BEHAVIOR_CHANGE"
+  ]
+}
