@@ -15,6 +15,15 @@ This directory contains the canonical Architecture Decision Records for the L9 S
 | [ADR-0007](ADR-0007-reproducible-assurance.md) | Reproducible Assurance | accepted | 2026-07-19 |
 | [ADR-0008](ADR-0008-autonomy-runtime-controls.md) | Autonomy Runtime Controls | proposed | 2026-07-15 |
 | [ADR-0009](ADR-0009-infisical-secrets-plane.md) | Infisical Secrets Plane | accepted | 2026-08-11 |
+| [ADR-0010](ADR-0010-build-time-website-intelligence-interface.md) | Build-Time Website Intelligence Interface | accepted | 2026-08-14 |
+| [ADR-0011](ADR-0011-search-reasoning-and-provider-isolation.md) | Search, Reasoning, and Provider Isolation | accepted | 2026-08-14 |
+| [ADR-0012](ADR-0012-competitive-landscape-authority.md) | CompetitiveLandscape Ranking Authority | accepted | 2026-08-14 |
+| [ADR-0013](ADR-0013-seo-content-blueprint-and-content-compiler.md) | SEOContentBlueprint and Strategic Content Compiler | accepted | 2026-08-14 |
+| [ADR-0014](ADR-0014-answer-engine-observation.md) | Answer Engine Observation Measurement Adapter | accepted | 2026-08-14 |
+
+> ADR-0010–ADR-0014 form the `redesign-improve/v1` architecture pack
+> (accepted 2026-08-14). They amend ADR-0001 and ADR-0003; ADR-0001 through
+> ADR-0009 remain in force except where explicitly amended.
 
 ## Format
 
