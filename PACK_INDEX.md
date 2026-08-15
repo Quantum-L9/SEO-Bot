@@ -7,6 +7,7 @@ This index provides a navigational map to all documentation and modules within t
 - `MANIFEST.md` - Complete file inventory and ownership.
 - `VALIDATION.md` - Testing requirements and fail-closed gates.
 - `RUNBOOK.md` - Daily operations, disaster recovery, and manual overrides.
+- `docs/runbooks/BIOME_INSTANTIATION.md` - Agent steps to finish Biome CI + Cursor plugin.
 - `AGENTS.md` - Rules for AI agents modifying this codebase.
 - `SECURITY.md` - Data isolation, safety governors, and credential management.
 - `CONTRIBUTING.md` - Rules for proposing changes and writing ADRs.

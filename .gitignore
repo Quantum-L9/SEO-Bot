@@ -9,3 +9,7 @@ validation/runs/
 
 # Local validation state
 .validation-tmp/
+
+# Governed IDE profile stamps (rewritten locally; do not commit)
+.vscode/.l9-ide-desired-hash
+.vscode/.l9-agentdocs-hash

@@ -43,13 +43,12 @@ jobs:
       - name: Typecheck
         run: node_modules/.bin/tsc --noEmit
 
-      - name: Lint (if configured)
+      # JS/TS/JSON lint+format is the Biome job in l9-lint-test.yml
+      # (advisory until enforce-biome: true). Do not run ESLint here — it is a
+      # second owner scheduled for removal. See docs/runbooks/BIOME_INSTANTIATION.md.
+      - name: Lint owner
         run: |
-          if ls eslint.config.* .eslintrc* >/dev/null 2>&1; then
-            npm run lint
-          else
-            echo "No ESLint config present — skipping lint"
-          fi
+          echo "Lint/format owner is Biome via l9-lint-test.yml (enforce-biome: false until the tree is clean)."
 
       # Hard gate: the unit tests (register route + v2 contract schema).
       - name: Test

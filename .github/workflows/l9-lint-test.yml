@@ -1,11 +1,16 @@
 # L9 Consumer Lint + Test — TypeScript Preset (LOCKED STRUCTURE)
 #
-# DO NOT EDIT workflow structure — only the env: block is consumer-configurable.
-# Managed by l9-ci-core presets/typescript.
+# DO NOT EDIT workflow structure — only the env: block and the biome job's
+# `with:` inputs are consumer-configurable. Managed by l9-ci-core
+# presets/typescript.
+#
+# Formatter/linter ownership: Biome owns JS/TS/JSON (format + lint) via the
+# SDK-owned reusable workflow below. ESLint is NOT a second formatter owner
+# here. Type checking (tsc) and the repository test suite stay in this repo.
 #
 # Conventions:
 #   - Immutable event-revision checkout (no floating action ref)
-#   - SHA-pinned external actions
+#   - SDK reusable workflow pinned to a full 40-char commit SHA
 #   - Least privilege (contents: read only)
 name: L9 Lint and Test
 on:
@@ -29,8 +34,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
-    name: Lint and Type Check
+  # Biome (format + lint + import organization) is owned by the SDK reusable
+  # workflow — a single read-only gate with a checksum-verified biome binary
+  # and zero external actions. Reusable-workflow inputs cannot read `env:`, so
+  # scan-path and the rollout flag are set literally here.
+  biome:
+    name: Biome (format + lint) — SDK-owned
+    permissions:
+      contents: read
+    uses: Quantum-L9/l9-ci-sdk/.github/workflows/l9-biome-scan.yml@f546f122d33601ea5a4b2592e3482c5c39eddd82
+    with:
+      scan-path: "."
+      # Advisory-to-blocking rollout: false = full scan + annotate + exit 0.
+      # Flip to true to make Biome findings blocking once the repo is clean.
+      # See docs/runbooks/BIOME_INSTANTIATION.md.
+      enforce-biome: false
+
+  typecheck:
+    name: Type Check (tsc --noEmit)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -45,23 +66,27 @@ jobs:
         run: |
           set -euo pipefail
           git init .
-          git remote add origin \
-            "https://x-access-token:${TOKEN}@github.com/${REPOSITORY}.git"
-          git -c protocol.version=2 fetch --depth=1 origin "${REVISION}"
+          git remote add origin "https://github.com/${REPOSITORY}.git"
+          # Authenticate with a per-fetch Authorization header instead of
+          # embedding the token in the remote URL, so the credential is never
+          # written to the remote URL or .git/config (mirrors actions/checkout).
+          auth_header="Authorization: Basic $(printf 'x-access-token:%s' "${TOKEN}" | base64 | tr -d '\n')"
+          git -c protocol.version=2 \
+            -c "http.https://github.com/.extraheader=${auth_header}" \
+            fetch --depth=1 origin "${REVISION}"
           git checkout --detach FETCH_HEAD
-          git remote set-url origin "https://github.com/${REPOSITORY}.git"
 
       - name: Set up Node
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444  # v5.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: ${{ env.PACKAGE_MANAGER }}
-          registry-url: "https://npm.pkg.github.com"
-          scope: "@quantum-l9"
+          registry-url: https://npm.pkg.github.com
+          scope: '@quantum-l9'
 
       - name: Install dependencies
         env:
-          NODE_AUTH_TOKEN: ${{ github.token }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           case "${PACKAGE_MANAGER}" in
@@ -70,15 +95,6 @@ jobs:
             yarn) corepack enable && yarn install --frozen-lockfile --ignore-scripts ;;
             *) echo "::error::unknown PACKAGE_MANAGER ${PACKAGE_MANAGER}" && exit 1 ;;
           esac
-
-      - name: eslint
-        run: |
-          set -euo pipefail
-          if [ -f package.json ] && node -e "process.exit(require('./package.json').scripts && require('./package.json').scripts.lint ? 0 : 1)" 2>/dev/null; then
-            ${PACKAGE_MANAGER} run lint
-          else
-            ./node_modules/.bin/eslint "${SOURCE_DIR}" --max-warnings=0
-          fi
 
       - name: tsc --noEmit
         if: env.HAS_TYPESCRIPT == 'true'
@@ -106,23 +122,27 @@ jobs:
         run: |
           set -euo pipefail
           git init .
-          git remote add origin \
-            "https://x-access-token:${TOKEN}@github.com/${REPOSITORY}.git"
-          git -c protocol.version=2 fetch --depth=1 origin "${REVISION}"
+          git remote add origin "https://github.com/${REPOSITORY}.git"
+          # Authenticate with a per-fetch Authorization header instead of
+          # embedding the token in the remote URL, so the credential is never
+          # written to the remote URL or .git/config (mirrors actions/checkout).
+          auth_header="Authorization: Basic $(printf 'x-access-token:%s' "${TOKEN}" | base64 | tr -d '\n')"
+          git -c protocol.version=2 \
+            -c "http.https://github.com/.extraheader=${auth_header}" \
+            fetch --depth=1 origin "${REVISION}"
           git checkout --detach FETCH_HEAD
-          git remote set-url origin "https://github.com/${REPOSITORY}.git"
 
       - name: Set up Node
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444  # v5.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: ${{ env.PACKAGE_MANAGER }}
-          registry-url: "https://npm.pkg.github.com"
-          scope: "@quantum-l9"
+          registry-url: https://npm.pkg.github.com
+          scope: '@quantum-l9'
 
       - name: Install dependencies
         env:
-          NODE_AUTH_TOKEN: ${{ github.token }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           case "${PACKAGE_MANAGER}" in

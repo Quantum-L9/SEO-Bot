@@ -2,6 +2,9 @@
 
 This document explains how to operate, maintain, and troubleshoot the L9 SEO Bot in production.
 
+Developer / agent tooling (Biome CI + Cursor plugin) is not an ops procedure.
+See `docs/runbooks/BIOME_INSTANTIATION.md`.
+
 ## Daily Operations
 
 The Bot is designed to be fully autonomous. Daily operations primarily consist of reviewing the weekly Friday report and approving/rejecting queued actions.

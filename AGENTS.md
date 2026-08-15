@@ -70,14 +70,19 @@ points at a `seed.ts` that does not exist. Follow the code; don't propagate the 
 | Preflight | `npm run verify:all` | preflight+source+build only — **not** typecheck/tests. A smoke check, not the gate. |
 | DB migrate | `npm run migrate` / `verify:db` (`--check`) | Mutates the DB — treat as stateful (§9). |
 | Dev | `npm run dev` | `tsx watch` |
+| Lint | `npm run lint` | `biome check .` — JS/TS/JSON owner. `lint:fix` writes. |
+| Lint (CI) | `.github/workflows/l9-lint-test.yml` job `biome` | Advisory until `enforce-biome: true`. |
 
 - **Private-dep auth:** installing `@quantum-l9/*` needs `NODE_AUTH_TOKEN`. Prefer
   `source scripts/ensure-npm-auth.sh` (resolves AWS `openclaw-igorbot/github#token` via
   Cursor-Governance) or inject the same PAT in the environment panel. SessionStart hook loads
   AWS when the panel is empty. Missing → deps don't install and CI stays the gate
   (`GITHUB_TOKEN` + `packages: read` in Actions).
-- **Lint is unconfigured** (`eslint src/` has no committed config → no-op/fails; CI skips it).
-  **Format is unwired** (no prettier dep/config). Do not claim "lint/format pass" — they don't run.
+- **Lint/format:** Biome owns JS/TS/JSON (`biome.json`, `@biomejs/biome@2.5.8`).
+  `npm run lint` is `biome check .`. Do not add ESLint or Prettier as a second
+  owner. Finish plugin + blocking CI + ESLint removal via
+  `docs/runbooks/BIOME_INSTANTIATION.md`. Do not claim the CI Biome job is
+  blocking while `enforce-biome` is `false`.
 
 ## 6. Validation
 
