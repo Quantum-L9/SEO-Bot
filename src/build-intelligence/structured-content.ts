@@ -242,5 +242,5 @@ function routePassed(verdict: RouteValidationVerdict): boolean {
 }
 
 function dedupe(values: string[]): string[] {
-  return [...new Set(values)].sort();
+  return [...new Set(values)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }

@@ -106,16 +106,124 @@ export async function createCompetitiveLandscape(
   const device = request.market.device ?? 'desktop';
   const locationName = request.market.location_name ?? request.market.country;
 
-  const queryPortfolio: CompetitiveLandscapeV1['query_portfolio'] = [];
-  const observations: CompetitiveLandscapeV1['observations'] = [];
-  const aggregates = new Map<string, DomainAggregate>();
-  let seenOrder = 0;
+  const state: QueryCollectionState = {
+    queryPortfolio: [],
+    observations: [],
+    aggregates: new Map<string, DomainAggregate>(),
+    seenOrder: 0,
+  };
+  await collectQueryObservations(request, dataForSeo, locationName, device, state);
 
+  // ── Exclusions: operator input first, then structural classification ──────────
+  const operatorExclusions = new Set(
+    (request.operator_exclusions ?? []).map(canonicalizeDomain).filter(Boolean),
+  );
+
+  // Deterministic domain ordering for all downstream lists: visibility desc,
+  // then first-seen order asc, then domain asc.
+  const orderedAggregates = [...state.aggregates.values()].sort(compareAggregates);
+
+  const { exclusions, excludedDomains } = applyExclusions(
+    orderedAggregates,
+    operatorExclusions,
+    state.aggregates,
+  );
+
+  const domains: CompetitiveLandscapeV1['domains'] = orderedAggregates.map((aggregate) => ({
+    domain: aggregate.domain,
+    aggregate_visibility: round(aggregate.visibility),
+    qualifying_query_ids: [...aggregate.queryIds].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+    observation_ids: aggregate.observationIds,
+  }));
+
+  const donorCandidates = orderedAggregates.filter((aggregate) => !excludedDomains.has(aggregate.domain));
+  const selectedDonors: CompetitiveLandscapeV1['selected_donors'] = donorCandidates
+    .slice(0, desiredDonorCount)
+    .map((aggregate) => ({
+      domain: aggregate.domain,
+      aggregate_visibility: round(aggregate.visibility),
+      observation_ids: aggregate.observationIds,
+    }));
+
+  // ── Evidence gate ────────────────────────────────────────────────────────────
+  // Every selected donor already resolves to >=1 observation (candidacy requires
+  // an aggregate, which requires an observation). Zero donors === no usable
+  // evidence: fail closed. A partial cohort is returned honestly with
+  // evidence_complete=false.
+  if (selectedDonors.length === 0) {
+    throw new CompetitiveEvidenceIncompleteError(
+      `No donor cohort could be formed from ${state.observations.length} observation(s) across ${request.seed_queries.length} seed queries.`,
+    );
+  }
+  const evidenceComplete = selectedDonors.length >= desiredDonorCount;
+
+  const payload: CompetitiveLandscapeV1 = {
+    schema: WEBSITE_INTELLIGENCE_SCHEMAS.competitiveLandscape,
+    market: {
+      niche: request.market.niche,
+      country: request.market.country,
+      language: request.market.language,
+      device,
+      ...(request.market.location_name ? { location_name: request.market.location_name } : {}),
+    },
+    query_portfolio: state.queryPortfolio,
+    observations: state.observations,
+    domains,
+    selected_donors: selectedDonors,
+    exclusions,
+    evidence_complete: evidenceComplete,
+  };
+
+  const artifact = sealIntelligenceArtifact({
+    artifact_type: 'competitive_landscape',
+    client_id: request.client_id,
+    build_id: request.build_id,
+    producer: PRODUCER,
+    payload,
+  });
+
+  logger.info(
+    {
+      clientId: request.client_id,
+      buildId: request.build_id,
+      donors: selectedDonors.length,
+      requested: desiredDonorCount,
+      observations: state.observations.length,
+      exclusions: exclusions.length,
+      evidenceComplete,
+      artifactId: artifact.artifact_id,
+    },
+    'CompetitiveLandscape sealed',
+  );
+
+  return artifact;
+}
+
+/** Mutable per-run collection state threaded through the query-collection helper. */
+interface QueryCollectionState {
+  queryPortfolio: CompetitiveLandscapeV1['query_portfolio'];
+  observations: CompetitiveLandscapeV1['observations'];
+  aggregates: Map<string, DomainAggregate>;
+  seenOrder: number;
+}
+
+/**
+ * Fetch organic SERP evidence for every seed query and fold it into the query
+ * portfolio, observations, and per-domain aggregates. A failed fetch degrades
+ * to zero observations for that query — it never fails the whole artifact.
+ */
+async function collectQueryObservations(
+  request: CompetitiveLandscapeRequest,
+  dataForSeo: DataForSeoOrganicPort,
+  locationName: string,
+  device: 'desktop' | 'mobile',
+  state: QueryCollectionState,
+): Promise<void> {
   for (let i = 0; i < request.seed_queries.length; i++) {
     const seed = request.seed_queries[i]!;
     const qid = queryId(i);
     const weight = typeof seed.weight === 'number' && seed.weight > 0 ? seed.weight : 1;
-    queryPortfolio.push({ query_id: qid, query: seed.query, intent: seed.intent, weight });
+    state.queryPortfolio.push({ query_id: qid, query: seed.query, intent: seed.intent, weight });
 
     let serp: OrganicSerpResult;
     try {
@@ -139,7 +247,7 @@ export async function createCompetitiveLandscape(
       const canonical = canonicalizeDomain(item.domain || item.url);
       if (!canonical) continue;
       const observationId = `${qid}-r${rank}`;
-      observations.push({
+      state.observations.push({
         observation_id: observationId,
         query_id: qid,
         rank,
@@ -149,27 +257,31 @@ export async function createCompetitiveLandscape(
         source: 'dataforseo',
       });
 
-      let aggregate = aggregates.get(canonical);
+      let aggregate = state.aggregates.get(canonical);
       if (!aggregate) {
-        aggregate = { domain: canonical, visibility: 0, queryIds: new Set(), observationIds: [], firstSeenOrder: seenOrder++ };
-        aggregates.set(canonical, aggregate);
+        aggregate = { domain: canonical, visibility: 0, queryIds: new Set(), observationIds: [], firstSeenOrder: state.seenOrder++ };
+        state.aggregates.set(canonical, aggregate);
       }
       aggregate.visibility += visibilityContribution(weight, rank);
       aggregate.queryIds.add(qid);
       aggregate.observationIds.push(observationId);
     }
   }
+}
 
-  // ── Exclusions: operator input first, then structural classification ──────────
-  const operatorExclusions = new Set(
-    (request.operator_exclusions ?? []).map(canonicalizeDomain).filter(Boolean),
-  );
+/**
+ * Classify the ordered aggregates into exclusions (operator input first, then
+ * structural reasons) and return the exclusions ledger plus the excluded set.
+ * Operator exclusions that never appeared in the SERP are still recorded, so
+ * the artifact is an honest ledger of what the operator asked to remove.
+ */
+function applyExclusions(
+  orderedAggregates: DomainAggregate[],
+  operatorExclusions: Set<string>,
+  aggregates: Map<string, DomainAggregate>,
+): { exclusions: CompetitiveLandscapeV1['exclusions']; excludedDomains: Set<string> } {
   const exclusions: CompetitiveLandscapeV1['exclusions'] = [];
   const excludedDomains = new Set<string>();
-
-  // Deterministic domain ordering for all downstream lists: visibility desc,
-  // then first-seen order asc, then domain asc.
-  const orderedAggregates = [...aggregates.values()].sort(compareAggregates);
 
   for (const aggregate of orderedAggregates) {
     if (operatorExclusions.has(aggregate.domain)) {
@@ -184,8 +296,6 @@ export async function createCompetitiveLandscape(
     }
   }
 
-  // Operator exclusions that never appeared in the SERP are still recorded, so
-  // the artifact is an honest ledger of what the operator asked to remove.
   for (const domain of operatorExclusions) {
     if (!aggregates.has(domain)) {
       exclusions.push({ domain, reason: 'operator_exclusion' });
@@ -193,74 +303,7 @@ export async function createCompetitiveLandscape(
     }
   }
 
-  const domains: CompetitiveLandscapeV1['domains'] = orderedAggregates.map((aggregate) => ({
-    domain: aggregate.domain,
-    aggregate_visibility: round(aggregate.visibility),
-    qualifying_query_ids: [...aggregate.queryIds].sort(),
-    observation_ids: aggregate.observationIds,
-  }));
-
-  const donorCandidates = orderedAggregates.filter((aggregate) => !excludedDomains.has(aggregate.domain));
-  const selectedDonors: CompetitiveLandscapeV1['selected_donors'] = donorCandidates
-    .slice(0, desiredDonorCount)
-    .map((aggregate) => ({
-      domain: aggregate.domain,
-      aggregate_visibility: round(aggregate.visibility),
-      observation_ids: aggregate.observationIds,
-    }));
-
-  // ── Evidence gate ────────────────────────────────────────────────────────────
-  // Every selected donor already resolves to >=1 observation (candidacy requires
-  // an aggregate, which requires an observation). Zero donors === no usable
-  // evidence: fail closed. A partial cohort is returned honestly with
-  // evidence_complete=false.
-  if (selectedDonors.length === 0) {
-    throw new CompetitiveEvidenceIncompleteError(
-      `No donor cohort could be formed from ${observations.length} observation(s) across ${request.seed_queries.length} seed queries.`,
-    );
-  }
-  const evidenceComplete = selectedDonors.length >= desiredDonorCount;
-
-  const payload: CompetitiveLandscapeV1 = {
-    schema: WEBSITE_INTELLIGENCE_SCHEMAS.competitiveLandscape,
-    market: {
-      niche: request.market.niche,
-      country: request.market.country,
-      language: request.market.language,
-      device,
-      ...(request.market.location_name ? { location_name: request.market.location_name } : {}),
-    },
-    query_portfolio: queryPortfolio,
-    observations,
-    domains,
-    selected_donors: selectedDonors,
-    exclusions,
-    evidence_complete: evidenceComplete,
-  };
-
-  const artifact = sealIntelligenceArtifact({
-    artifact_type: 'competitive_landscape',
-    client_id: request.client_id,
-    build_id: request.build_id,
-    producer: PRODUCER,
-    payload,
-  });
-
-  logger.info(
-    {
-      clientId: request.client_id,
-      buildId: request.build_id,
-      donors: selectedDonors.length,
-      requested: desiredDonorCount,
-      observations: observations.length,
-      exclusions: exclusions.length,
-      evidenceComplete,
-      artifactId: artifact.artifact_id,
-    },
-    'CompetitiveLandscape sealed',
-  );
-
-  return artifact;
+  return { exclusions, excludedDomains };
 }
 
 function compareAggregates(a: DomainAggregate, b: DomainAggregate): number {

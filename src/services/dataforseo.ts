@@ -59,7 +59,7 @@ export interface OrganicSerpResult {
 
 export class DataForSeoClient {
   private readonly baseUrl = 'https://api.dataforseo.com/v3';
-  private auth: string;
+  private readonly auth: string;
 
   constructor() {
     const config = getConfig();

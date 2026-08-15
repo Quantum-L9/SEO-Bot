@@ -185,35 +185,49 @@ async function gatherDonorEvidence(
       .map((id) => observationById.get(id))
       .filter((obs): obs is NonNullable<typeof obs> => Boolean(obs))
       .sort((a, b) => a.rank - b.rank);
-
-    let perDonor = 0;
-    for (const obs of donorObservations) {
-      if (perDonor >= MAX_URLS_PER_DONOR || evidence.length >= MAX_TOTAL_URLS) break;
-      if (seenUrls.has(obs.url)) continue;
-      seenUrls.add(obs.url);
-      perDonor += 1;
-      try {
-        const metrics = await dataForSeo.getPageContent(obs.url);
-        evidence.push({
-          domain: donor.domain,
-          aggregate_visibility: donor.aggregate_visibility,
-          ranking_url: obs.url,
-          organic_rank: obs.rank,
-          word_count: metrics.wordCount,
-          headings: metrics.headings,
-          images: metrics.images,
-          internal_links: metrics.internalLinks,
-          external_links: metrics.externalLinks,
-        });
-      } catch (error) {
-        logger.warn(
-          { url: obs.url, error: error instanceof Error ? error.message : String(error) },
-          'Donor page-content pull failed; skipping this URL',
-        );
-      }
-    }
+    await collectDonorMetrics(donor, donorObservations, dataForSeo, seenUrls, evidence);
   }
   return evidence;
+}
+
+/**
+ * Pull page-content metrics for one donor's ranked URLs, honoring the
+ * per-donor and total URL caps. Individual fetch failures are skipped with a
+ * warning so evidence gathering never fails the whole blueprint.
+ */
+async function collectDonorMetrics(
+  donor: CompetitiveLandscapeArtifact['payload']['selected_donors'][number],
+  donorObservations: Array<{ url: string; rank: number }>,
+  dataForSeo: PageContentPort,
+  seenUrls: Set<string>,
+  evidence: NormalizedDonorEvidence[],
+): Promise<void> {
+  let perDonor = 0;
+  for (const obs of donorObservations) {
+    if (perDonor >= MAX_URLS_PER_DONOR || evidence.length >= MAX_TOTAL_URLS) break;
+    if (seenUrls.has(obs.url)) continue;
+    seenUrls.add(obs.url);
+    perDonor += 1;
+    try {
+      const metrics = await dataForSeo.getPageContent(obs.url);
+      evidence.push({
+        domain: donor.domain,
+        aggregate_visibility: donor.aggregate_visibility,
+        ranking_url: obs.url,
+        organic_rank: obs.rank,
+        word_count: metrics.wordCount,
+        headings: metrics.headings,
+        images: metrics.images,
+        internal_links: metrics.internalLinks,
+        external_links: metrics.externalLinks,
+      });
+    } catch (error) {
+      logger.warn(
+        { url: obs.url, error: error instanceof Error ? error.message : String(error) },
+        'Donor page-content pull failed; skipping this URL',
+      );
+    }
+  }
 }
 
 /**
