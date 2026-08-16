@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // ── @quantum-l9/llm-router mock: capture constructor config + execute calls ────
 const routerCtor = vi.hoisted(() => ({ calls: [] as any[] }));
 const executeMock = vi.hoisted(() => vi.fn());
+const initClientMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 
 vi.mock('@quantum-l9/llm-router', () => {
   class BudgetExhaustedError extends Error {
@@ -35,7 +36,7 @@ vi.mock('@quantum-l9/llm-router', () => {
     constructor(config: unknown) { routerCtor.calls.push(config); }
     execute = executeMock;
     planVisualQA() { return []; }
-    initClient = vi.fn().mockResolvedValue(undefined);
+    initClient = initClientMock;
     getCallLog() { return []; }
   }
   return { L9LLMRouter, TaskType, TaskComplexity, BudgetExhaustedError };
@@ -123,6 +124,13 @@ describe('LlmService.execute — gate ordering + memory + usage (GAP-005)', () =
     ).rejects.toThrow('clientId is required');
     expect(hydrateMock).not.toHaveBeenCalled();
     expect(executeMock).not.toHaveBeenCalled();
+  });
+
+  it('initializes an unregistered client before dispatch so build-time calls work', async () => {
+    const svc = new LlmService();
+    await svc.execute({ clientId: 'safehavenrr', type: TaskType.SCORING, complexity: TaskComplexity.LOW } as any, 'sys', 'user');
+    expect(initClientMock).toHaveBeenCalledWith('safehavenrr', undefined);
+    expect(executeMock).toHaveBeenCalledTimes(1);
   });
 
   it('enforces the daily cap BEFORE hydrating memory or calling the provider', async () => {

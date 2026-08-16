@@ -105,10 +105,20 @@ export class DataForSeoClient {
       depth: params.depth ?? 20,
     }]);
 
-    const task = result.tasks?.[0]?.result?.[0];
+    // Task-level errors (e.g. invalid location_name) return `result: null` with a
+    // top-level 20000. Treat them as failures instead of silently producing zero
+    // organic items — a real provider error must not masquerade as "no results".
+    const taskContainer = result.tasks?.[0];
+    if (taskContainer?.status_code !== undefined && taskContainer.status_code !== 20000) {
+      throw new Error(`DataForSEO task error: ${taskContainer.status_message ?? 'unknown'} (status ${taskContainer.status_code})`);
+    }
+    if (!Array.isArray(taskContainer?.result) || taskContainer.result.length === 0) {
+      throw new Error(`DataForSEO task error: ${taskContainer?.status_message ?? 'no result returned'} (status ${taskContainer?.status_code ?? 'unknown'})`);
+    }
+    const task = taskContainer.result[0];
     const rawItems = task?.items || [];
     const serpFeatures: string[] = task?.item_types || [];
-    const observedAt = normalizeSerpDatetime(task?.datetime) ?? result.tasks?.[0]?.time ?? '';
+    const observedAt = normalizeSerpDatetime(task?.datetime) ?? taskContainer.time ?? '';
 
     const items: OrganicSerpItem[] = [];
     for (const item of rawItems) {

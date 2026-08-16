@@ -65,6 +65,9 @@ export class LlmService {
     options?: { images?: string[]; assistantContext?: string; consensus?: boolean },
   ): Promise<LLMResponse> {
     if (!task.clientId) throw new Error('LLM task clientId is required');
+    // Idempotent: registered clients keep their persisted budget state; build-time
+    // clients (pre-registration intelligence calls) get the default budget account.
+    await this.initClient(task.clientId);
     await this.enforceDailyCap(task);
     try {
       const memoryContext = await hydrateSeoContext(

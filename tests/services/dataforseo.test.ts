@@ -23,6 +23,7 @@ describe('DataForSeoClient.getOrganicSerp', () => {
         status_code: 20000,
         tasks: [{
           time: '0.3 sec',
+          status_code: 20000,
           result: [{
             datetime: '2024-01-02 12:00:00 +00:00',
             item_types: ['organic', 'paid', 'people_also_ask'],
@@ -50,6 +51,30 @@ describe('DataForSeoClient.getOrganicSerp', () => {
   it('surfaces DataForSEO API errors', async () => {
     post.mockResolvedValue({ data: { status_code: 40000, status_message: 'bad' } });
     await expect(new DataForSeoClient().getOrganicSerp({ keyword: 'x' })).rejects.toThrow(/DataForSEO error: bad/);
+  });
+
+  it('rejects task-level errors (invalid location) instead of returning zero items', async () => {
+    // Observed live: location_name "Charlotte, NC" yields a top-level 20000 with
+    // tasks[0].status_code 40501, status_message "Invalid Field: 'location_name'.", result: null.
+    post.mockResolvedValue({
+      data: {
+        status_code: 20000,
+        tasks: [{ status_code: 40501, status_message: "Invalid Field: 'location_name'.", result: null }],
+      },
+    });
+    await expect(new DataForSeoClient().getOrganicSerp({ keyword: 'x' }))
+      .rejects.toThrow(/DataForSEO task error: Invalid Field: 'location_name'/);
+  });
+
+  it('rejects tasks that return no result array instead of returning zero items', async () => {
+    post.mockResolvedValue({
+      data: {
+        status_code: 20000,
+        tasks: [{ status_code: 20000, status_message: 'Ok.', result: [] }],
+      },
+    });
+    await expect(new DataForSeoClient().getOrganicSerp({ keyword: 'x' }))
+      .rejects.toThrow(/DataForSEO task error/);
   });
 });
 

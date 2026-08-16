@@ -135,4 +135,22 @@ describe('SEOContentBlueprint — strategic reasoning, exact lineage', () => {
     expect(artifact.input_refs).toHaveLength(1);
     expect(artifact.input_refs[0]!.artifact_type).toBe('competitive_landscape');
   });
+
+  it('prompts with the nested route_shape the schema enforces (regression: flat journey_stage contract made every live call fail schema validation)', async () => {
+    let capturedUserPrompt: string | null = null;
+    const llm = {
+      strategizeJson: async (args: { systemPrompt: string; userPrompt: string; validate: (v: unknown) => unknown }) => {
+        capturedUserPrompt = args.userPrompt;
+        return args.validate({ routes: [blueprintRoute('home', '/')] });
+      },
+    } as unknown as LlmService;
+    await createSEOContentBlueprint(
+      { client_id: 'client-1', build_id: 'build-1', competitive_landscape: makeLandscape(), routes: requestedRoutes, business_facts: [] },
+      { llm, dataForSeo: fakePages },
+    );
+    const contract = JSON.parse(capturedUserPrompt!).output_contract;
+    expect(contract.route_shape.search_intent.journey_stage).toContain('informational');
+    expect(contract.route_shape.targets.primary_query).toBeTruthy();
+    expect(contract.journey_stage).toBeUndefined();
+  });
 });

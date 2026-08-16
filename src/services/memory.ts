@@ -9,7 +9,7 @@ import {
   renderHydration,
   type MemoryClass,
 } from '@quantum-l9/graphiti-memory-client';
-import { and, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import { getConfig } from '../core/config.js';
 import { getDb, schema } from '../core/database/index.js';
 import { createModuleLogger } from '../core/logger.js';
@@ -36,14 +36,36 @@ function getMemoryClient(): GraphitiMemoryClient | null {
 
 
 async function canonicalClientId(databaseClientId: string): Promise<string> {
-  const [clientRow] = await getDb().select({ config: schema.clients.config })
-    .from(schema.clients)
-    .where(eq(schema.clients.id, databaseClientId))
-    .limit(1);
-  const config = clientRow?.config as { canonicalClientId?: unknown } | undefined;
-  return typeof config?.canonicalClientId === 'string' && config.canonicalClientId.trim()
-    ? config.canonicalClientId.trim()
-    : databaseClientId;
+  // Callers pass either the DB uuid (registered clients) or the canonical string id
+  // (build-time intelligence calls, which happen before registration). clients.id
+  // is a uuid, so comparing it to a canonical string raises a Postgres uuid parse
+  // error; resolve via the canonical id in config JSON and fall back to the input
+  // for unregistered clients instead of failing the whole LLM call.
+  const canonical = databaseClientId?.trim();
+  if (!canonical) return databaseClientId;
+  try {
+    const [clientRow] = await getDb().select({ config: schema.clients.config })
+      .from(schema.clients)
+      .where(
+        or(
+          // Cast the column (not the input): comparing the uuid column directly to a
+          // non-uuid string raises "invalid input syntax for type uuid" at parse time.
+          sql`${schema.clients.id}::text = ${canonical}`,
+          sql`${schema.clients.config}->>'canonicalClientId' = ${canonical}`,
+        ),
+      )
+      .limit(1);
+    const config = clientRow?.config as { canonicalClientId?: unknown } | undefined;
+    return typeof config?.canonicalClientId === 'string' && config.canonicalClientId.trim()
+      ? config.canonicalClientId.trim()
+      : databaseClientId;
+  } catch (error) {
+    logger.warn(
+      { error: error instanceof Error ? error.message : String(error), input: databaseClientId },
+      'canonical client id lookup failed; falling back to input id',
+    );
+    return databaseClientId;
+  }
 }
 
 async function guarded<T>(operation: string, fn: (memory: GraphitiMemoryClient) => Promise<T>): Promise<T | undefined> {
