@@ -2,17 +2,16 @@ import { sealWebsiteFactoryHandoff } from "@quantum-l9/bot-interop";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { insertMock, valuesMock, onConflictDoUpdateMock, returningMock, initClientMock } =
-  vi.hoisted(() => {
-    const returningMock = vi.fn();
-    const onConflictDoUpdateMock = vi.fn(() => ({ returning: returningMock }));
-    const valuesMock = vi.fn((..._args: unknown[]) => ({
-      onConflictDoUpdate: onConflictDoUpdateMock,
-    }));
-    const insertMock = vi.fn(() => ({ values: valuesMock }));
-    const initClientMock = vi.fn();
-    return { insertMock, valuesMock, onConflictDoUpdateMock, returningMock, initClientMock };
-  });
+const { insertMock, valuesMock, returningMock, initClientMock } = vi.hoisted(() => {
+  const returningMock = vi.fn();
+  const onConflictDoUpdateMock = vi.fn(() => ({ returning: returningMock }));
+  const valuesMock = vi.fn((..._args: unknown[]) => ({
+    onConflictDoUpdate: onConflictDoUpdateMock,
+  }));
+  const insertMock = vi.fn(() => ({ values: valuesMock }));
+  const initClientMock = vi.fn();
+  return { insertMock, valuesMock, returningMock, initClientMock };
+});
 
 vi.mock("../../src/core/database/index.js", () => ({
   getDb: () => ({ insert: insertMock }),
