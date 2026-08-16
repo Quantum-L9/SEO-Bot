@@ -90,6 +90,38 @@ describe('operator auth hook', () => {
     const res = await app.inject({ method: 'GET', url: '/api/clients', headers: { authorization: 'Bearer anything' } });
     expect(res.statusCode).toBe(401);
   });
+
+  it('accepts the machine secret (SEO_BOT_API_KEY) on build-intelligence routes', async () => {
+    cfg.current = { OPERATOR_API_KEY: 'topsecret', SEO_BOT_API_KEY: 'machine-secret' };
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/build-intelligence/competitive-landscape',
+      headers: { authorization: 'Bearer machine-secret' },
+    });
+    // Route isn't registered in this test app (404), but the auth hook passed —
+    // 401 would mean the machine secret was rejected.
+    expect(res.statusCode).not.toBe(401);
+  });
+
+  it('keeps operator routes machine-key-only-exempt (SEO_BOT_API_KEY rejected)', async () => {
+    cfg.current = { OPERATOR_API_KEY: 'topsecret', SEO_BOT_API_KEY: 'machine-secret' };
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/clients',
+      headers: { authorization: 'Bearer machine-secret' },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('fails closed (401) on build-intelligence when neither key is configured', async () => {
+    cfg.current = {};
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/build-intelligence/competitive-landscape',
+      headers: { authorization: 'Bearer anything' },
+    });
+    expect(res.statusCode).toBe(401);
+  });
 });
 
 // ── GAP-004: the rate limiter is classified but never behaviorally enforced ────

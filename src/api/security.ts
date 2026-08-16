@@ -124,15 +124,25 @@ export function registerApiSecurity(app: FastifyInstance): void {
     if (isAuthExempt(path)) return;
 
     const key = getConfig().OPERATOR_API_KEY;
-    if (!key) {
-      logger.error({ path }, 'OPERATOR_API_KEY not configured; operator API is locked');
+    // Build-intelligence routes also accept the SEO_BOT_API_KEY machine secret —
+    // Website-Bot is the named consumer of l9.website-intelligence/v1 and calls
+    // these endpoints at build time (WEBSITE_INTELLIGENCE_LOCK). Operator routes
+    // remain operator-key-only.
+    const machineKey = path.startsWith('/api/build-intelligence/')
+      ? getConfig().SEO_BOT_API_KEY
+      : undefined;
+    if (!key && !machineKey) {
+      logger.error({ path }, 'No operator or machine key configured; API is locked');
       reply.header('WWW-Authenticate', 'Basic realm="L9 SEO Bot"');
-      return reply.status(401).send({ error: 'operator authentication not configured' });
+      return reply.status(401).send({ error: 'authentication not configured' });
     }
 
     const presented = parseAuthSecret(request.headers.authorization);
-    if (!presented || !constantTimeEqual(presented, key)) {
-      logger.warn({ ip: request.ip, path }, 'Rejected unauthenticated operator request');
+    const accepted = Boolean(presented)
+      && ((key ? constantTimeEqual(presented, key) : false)
+        || (machineKey ? constantTimeEqual(presented, machineKey) : false));
+    if (!accepted) {
+      logger.warn({ ip: request.ip, path }, 'Rejected unauthenticated request');
       reply.header('WWW-Authenticate', 'Basic realm="L9 SEO Bot"');
       return reply.status(401).send({ error: 'unauthorized' });
     }
