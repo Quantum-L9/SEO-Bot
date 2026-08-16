@@ -7,11 +7,11 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════════
  * L9 SEO Bot - Operator Dashboard
- * 
+ *
  * Server-rendered HTML dashboard (no frontend framework required).
  * One dashboard to rule them all — portfolio view + client drill-down.
  * Password-protected, operator-only access.
- * 
+ *
  * Routes:
  *   GET /dashboard              → Portfolio overview (all clients)
  *   GET /dashboard/:clientId    → Client drill-down
@@ -21,12 +21,12 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import { FastifyInstance } from 'fastify';
-import { eq, and, desc, gte, sql } from 'drizzle-orm';
-import { getDb, schema } from '../core/database/index.js';
-import { createModuleLogger } from '../core/logger.js';
+import { and, desc, eq, gte, sql } from "drizzle-orm";
+import type { FastifyInstance } from "fastify";
+import { getDb, schema } from "../core/database/index.js";
+import { createModuleLogger } from "../core/logger.js";
 
-const logger = createModuleLogger('dashboard');
+const logger = createModuleLogger("dashboard");
 
 /**
  * HTML-escape any interpolated value. DB/LLM-derived strings (client names,
@@ -37,15 +37,15 @@ const logger = createModuleLogger('dashboard');
  */
 export function escapeHtml(value: unknown): string {
   let str: string;
-  if (value == null) str = '';
-  else if (typeof value === 'object') str = JSON.stringify(value);
+  if (value == null) str = "";
+  else if (typeof value === "object") str = JSON.stringify(value);
   else str = String(value);
   return str
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 const esc = escapeHtml;
 
@@ -54,204 +54,238 @@ const esc = escapeHtml;
 // statement (keeps template literals flat and readable).
 
 function healthBadgeClass(rating: unknown): string {
-  if (rating === 'good') return 'good';
-  if (rating === 'needs-improvement') return 'warning';
-  return 'critical';
+  if (rating === "good") return "good";
+  if (rating === "needs-improvement") return "warning";
+  return "critical";
 }
 
 function riskBadgeClass(level: unknown): string {
-  if (level === 'low') return 'good';
-  if (level === 'medium') return 'warning';
-  return 'critical';
+  if (level === "low") return "good";
+  if (level === "medium") return "warning";
+  return "critical";
 }
 
 function rankDeltaColor(position: number | undefined, previous: number | undefined): string {
-  if (!position || !previous) return '#94a3b8';
-  if (position < previous) return '#6ee7b7';
-  if (position > previous) return '#fca5a5';
-  return '#94a3b8';
+  if (!position || !previous) return "#94a3b8";
+  if (position < previous) return "#6ee7b7";
+  if (position > previous) return "#fca5a5";
+  return "#94a3b8";
 }
 
 function rankDeltaText(position: number | undefined, previous: number | undefined): string {
-  if (!position || !previous) return '—';
+  if (!position || !previous) return "—";
   if (position < previous) return `+${previous - position}`;
   if (position > previous) return `-${position - previous}`;
-  return '=';
+  return "=";
 }
 
 // ─── Dashboard Registration ───────────────────────────────────────────────────
 
 export async function registerDashboard(app: FastifyInstance): Promise<void> {
-
   // ─── Portfolio Overview ───────────────────────────────────────────────────
 
-  app.get('/dashboard', async (request, reply) => {
+  app.get("/dashboard", async (request, reply) => {
     const db = getDb();
 
-    const clients = await db.select()
+    const clients = await db
+      .select()
       .from(schema.clients)
       .where(eq(schema.clients.active, true))
       .orderBy(schema.clients.name);
 
     // Get pending approval count
-    const pendingResult = await db.select({
-      count: sql<number>`COUNT(*)`,
-    }).from(schema.actionLog)
-      .where(eq(schema.actionLog.status, 'pending_approval'));
+    const pendingResult = await db
+      .select({
+        count: sql<number>`COUNT(*)`,
+      })
+      .from(schema.actionLog)
+      .where(eq(schema.actionLog.status, "pending_approval"));
 
     const pendingCount = pendingResult[0]?.count || 0;
 
     // Get today's global spend
-    const today = new Date().toISOString().split('T')[0];
-    const spendResult = await db.select({
-      total: sql<number>`COALESCE(SUM(cost), 0)`,
-    }).from(schema.llmUsage)
+    const today = new Date().toISOString().split("T")[0];
+    const spendResult = await db
+      .select({
+        total: sql<number>`COALESCE(SUM(cost), 0)`,
+      })
+      .from(schema.llmUsage)
       .where(gte(schema.llmUsage.timestamp, new Date(today)));
 
     const todaySpend = spendResult[0]?.total || 0;
 
     // Get per-client health scores (simplified: based on latest vitals rating)
-    const clientSummaries = await Promise.all(clients.map(async (client) => {
-      const [latestVital] = await db.select()
-        .from(schema.webVitals)
-        .where(eq(schema.webVitals.clientId, client.id))
-        .orderBy(desc(schema.webVitals.measuredAt))
-        .limit(1);
+    const clientSummaries = await Promise.all(
+      clients.map(async (client) => {
+        const [latestVital] = await db
+          .select()
+          .from(schema.webVitals)
+          .where(eq(schema.webVitals.clientId, client.id))
+          .orderBy(desc(schema.webVitals.measuredAt))
+          .limit(1);
 
-      const [latestRanking] = await db.select({
-        avgPos: sql<number>`AVG(position)`,
-      }).from(schema.serpRankings)
-        .where(eq(schema.serpRankings.clientId, client.id));
+        const [latestRanking] = await db
+          .select({
+            avgPos: sql<number>`AVG(position)`,
+          })
+          .from(schema.serpRankings)
+          .where(eq(schema.serpRankings.clientId, client.id));
 
-      const clientPending = await db.select({
-        count: sql<number>`COUNT(*)`,
-      }).from(schema.actionLog)
-        .where(and(
-          eq(schema.actionLog.clientId, client.id),
-          eq(schema.actionLog.status, 'pending_approval'),
-        ));
+        const clientPending = await db
+          .select({
+            count: sql<number>`COUNT(*)`,
+          })
+          .from(schema.actionLog)
+          .where(
+            and(
+              eq(schema.actionLog.clientId, client.id),
+              eq(schema.actionLog.status, "pending_approval"),
+            ),
+          );
 
-      return {
-        ...client,
-        healthRating: latestVital?.rating || 'unknown',
-        avgPosition: latestRanking?.avgPos ? Math.round(latestRanking.avgPos * 10) / 10 : null,
-        pendingApprovals: clientPending[0]?.count || 0,
-      };
-    }));
+        return {
+          ...client,
+          healthRating: latestVital?.rating || "unknown",
+          avgPosition: latestRanking?.avgPos ? Math.round(latestRanking.avgPos * 10) / 10 : null,
+          pendingApprovals: clientPending[0]?.count || 0,
+        };
+      }),
+    );
 
     const html = renderPortfolio(clientSummaries, pendingCount, todaySpend);
-    reply.type('text/html').send(html);
+    reply.type("text/html").send(html);
   });
 
   // ─── Client Drill-Down ────────────────────────────────────────────────────
 
-  app.get<{ Params: { clientId: string } }>('/dashboard/:clientId', async (request, reply) => {
+  app.get<{ Params: { clientId: string } }>("/dashboard/:clientId", async (request, reply) => {
     const db = getDb();
     const { clientId } = request.params;
 
-    const [client] = await db.select()
+    const [client] = await db
+      .select()
       .from(schema.clients)
       .where(eq(schema.clients.id, clientId))
       .limit(1);
 
     if (!client) {
-      reply.status(404).send('Client not found');
+      reply.status(404).send("Client not found");
       return;
     }
 
     const oneWeekAgo = new Date(Date.now() - 7 * 86400000);
 
     // Rankings
-    const rankings = await db.select()
+    const rankings = await db
+      .select()
       .from(schema.serpRankings)
-      .where(and(
-        eq(schema.serpRankings.clientId, clientId),
-        gte(schema.serpRankings.checkedAt, oneWeekAgo),
-      ))
+      .where(
+        and(
+          eq(schema.serpRankings.clientId, clientId),
+          gte(schema.serpRankings.checkedAt, oneWeekAgo),
+        ),
+      )
       .orderBy(desc(schema.serpRankings.checkedAt))
       .limit(20);
 
     // Actions taken
-    const actions = await db.select()
+    const actions = await db
+      .select()
       .from(schema.actionLog)
-      .where(and(
-        eq(schema.actionLog.clientId, clientId),
-        gte(schema.actionLog.createdAt, oneWeekAgo),
-      ))
+      .where(
+        and(eq(schema.actionLog.clientId, clientId), gte(schema.actionLog.createdAt, oneWeekAgo)),
+      )
       .orderBy(desc(schema.actionLog.createdAt))
       .limit(20);
 
     // Engagement
-    const engagement = await db.select()
+    const engagement = await db
+      .select()
       .from(schema.pageEngagement)
       .where(eq(schema.pageEngagement.clientId, clientId))
       .orderBy(desc(schema.pageEngagement.totalPageviews))
       .limit(10);
 
     const html = renderClientDetail(client, rankings, actions, engagement);
-    reply.type('text/html').send(html);
+    reply.type("text/html").send(html);
   });
 
   // ─── Pending Approvals ────────────────────────────────────────────────────
 
-  app.get('/dashboard/approvals', async (request, reply) => {
+  app.get("/dashboard/approvals", async (request, reply) => {
     const db = getDb();
 
-    const pending = await db.select()
+    const pending = await db
+      .select()
       .from(schema.actionLog)
-      .where(eq(schema.actionLog.status, 'pending_approval'))
+      .where(eq(schema.actionLog.status, "pending_approval"))
       .orderBy(desc(schema.actionLog.createdAt));
 
     // Enrich with client names
-    const enriched = await Promise.all(pending.map(async (action) => {
-      const [client] = await db.select({ name: schema.clients.name, domain: schema.clients.domain })
-        .from(schema.clients)
-        .where(eq(schema.clients.id, action.clientId))
-        .limit(1);
-      return { ...action, clientName: client?.name || 'Unknown', clientDomain: client?.domain || '' };
-    }));
+    const enriched = await Promise.all(
+      pending.map(async (action) => {
+        const [client] = await db
+          .select({ name: schema.clients.name, domain: schema.clients.domain })
+          .from(schema.clients)
+          .where(eq(schema.clients.id, action.clientId))
+          .limit(1);
+        return {
+          ...action,
+          clientName: client?.name || "Unknown",
+          clientDomain: client?.domain || "",
+        };
+      }),
+    );
 
     const html = renderApprovals(enriched);
-    reply.type('text/html').send(html);
+    reply.type("text/html").send(html);
   });
 
   // ─── Approve Action ───────────────────────────────────────────────────────
 
-  app.post<{ Params: { id: string }; Body: { option?: string } }>('/dashboard/approve/:id', async (request, reply) => {
-    const db = getDb();
-    const { id } = request.params;
-    const { option } = request.body as any || {};
+  app.post<{ Params: { id: string }; Body: { option?: string } }>(
+    "/dashboard/approve/:id",
+    async (request, reply) => {
+      const db = getDb();
+      const { id } = request.params;
+      const { option } = (request.body as any) || {};
 
-    await db.update(schema.actionLog)
-      .set({
-        status: 'approved',
-        approvedBy: 'operator-dashboard',
-        approvedAt: new Date(),
-        selectedOption: option || null,
-      })
-      .where(eq(schema.actionLog.id, id));
+      await db
+        .update(schema.actionLog)
+        .set({
+          status: "approved",
+          approvedBy: "operator-dashboard",
+          approvedAt: new Date(),
+          selectedOption: option || null,
+        })
+        .where(eq(schema.actionLog.id, id));
 
-    logger.info({ actionId: id, selectedOption: option }, 'Action approved via dashboard');
-    reply.redirect('/dashboard/approvals');
-  });
+      logger.info({ actionId: id, selectedOption: option }, "Action approved via dashboard");
+      reply.redirect("/dashboard/approvals");
+    },
+  );
 
   // ─── Reject Action ────────────────────────────────────────────────────────
 
-  app.post<{ Params: { id: string }; Body: { reason?: string } }>('/dashboard/reject/:id', async (request, reply) => {
-    const db = getDb();
-    const { id } = request.params;
-    const { reason } = request.body as any || {};
+  app.post<{ Params: { id: string }; Body: { reason?: string } }>(
+    "/dashboard/reject/:id",
+    async (request, reply) => {
+      const db = getDb();
+      const { id } = request.params;
+      const { reason } = (request.body as any) || {};
 
-    await db.update(schema.actionLog)
-      .set({
-        status: 'rejected',
-        rejectionReason: reason || 'Rejected by operator',
-      })
-      .where(eq(schema.actionLog.id, id));
+      await db
+        .update(schema.actionLog)
+        .set({
+          status: "rejected",
+          rejectionReason: reason || "Rejected by operator",
+        })
+        .where(eq(schema.actionLog.id, id));
 
-    logger.info({ actionId: id, reason }, 'Action rejected via dashboard');
-    reply.redirect('/dashboard/approvals');
-  });
+      logger.info({ actionId: id, reason }, "Action rejected via dashboard");
+      reply.redirect("/dashboard/approvals");
+    },
+  );
 }
 
 // ─── HTML Renderers ───────────────────────────────────────────────────────────
@@ -329,7 +363,7 @@ function renderPortfolio(clients: any[], pendingCount: number, todaySpend: numbe
       </div>
       <div class="card">
         <div class="label">Pending Approvals</div>
-        <div class="metric" style="color: ${pendingCount > 0 ? '#fbbf24' : '#6ee7b7'}">${pendingCount}</div>
+        <div class="metric" style="color: ${pendingCount > 0 ? "#fbbf24" : "#6ee7b7"}">${pendingCount}</div>
       </div>
       <div class="card">
         <div class="label">Today's Token Spend</div>
@@ -338,16 +372,20 @@ function renderPortfolio(clients: any[], pendingCount: number, todaySpend: numbe
     </div>
   `;
 
-  const clientRows = clients.map(c => `
+  const clientRows = clients
+    .map(
+      (c) => `
     <tr>
       <td><a href="/dashboard/${encodeURIComponent(c.id)}" class="btn-view" style="text-decoration: none;">${esc(c.name)}</a></td>
       <td>${esc(c.domain)}</td>
       <td>${esc(c.industry)}</td>
-      <td>${c.avgPosition ? `#${c.avgPosition}` : '—'}</td>
+      <td>${c.avgPosition ? `#${c.avgPosition}` : "—"}</td>
       <td><span class="badge badge-${healthBadgeClass(c.healthRating)}">${esc(c.healthRating)}</span></td>
-      <td>${c.pendingApprovals > 0 ? `<span class="badge badge-pending">${esc(c.pendingApprovals)} pending</span>` : '—'}</td>
+      <td>${c.pendingApprovals > 0 ? `<span class="badge badge-pending">${esc(c.pendingApprovals)} pending</span>` : "—"}</td>
     </tr>
-  `).join('');
+  `,
+    )
+    .join("");
 
   const content = `
     ${statsHtml}
@@ -367,34 +405,49 @@ function renderPortfolio(clients: any[], pendingCount: number, todaySpend: numbe
     </table>
   `;
 
-  return baseLayout('Portfolio', content);
+  return baseLayout("Portfolio", content);
 }
 
-function renderClientDetail(client: any, rankings: any[], actions: any[], _engagement: any[]): string {
-  const rankingRows = rankings.slice(0, 10).map(r => `
+function renderClientDetail(
+  client: any,
+  rankings: any[],
+  actions: any[],
+  _engagement: any[],
+): string {
+  const rankingRows = rankings
+    .slice(0, 10)
+    .map(
+      (r) => `
     <tr>
       <td>${esc(r.keyword)}</td>
-      <td>${r.position || '—'}</td>
-      <td>${r.previousPosition || '—'}</td>
+      <td>${r.position || "—"}</td>
+      <td>${r.previousPosition || "—"}</td>
       <td style="color: ${rankDeltaColor(r.position, r.previousPosition)}">
         ${rankDeltaText(r.position, r.previousPosition)}
       </td>
     </tr>
-  `).join('');
+  `,
+    )
+    .join("");
 
-  const actionRows = actions.slice(0, 10).map(a => `
+  const actionRows = actions
+    .slice(0, 10)
+    .map(
+      (a) => `
     <tr>
       <td>${esc(a.action)}</td>
       <td>${esc(a.description)}</td>
       <td><span class="badge badge-${riskBadgeClass(a.riskLevel)}">${esc(a.riskLevel)}</span></td>
-      <td><span class="badge badge-${a.status === 'auto_executed' ? 'good' : 'pending'}">${esc(a.status)}</span></td>
+      <td><span class="badge badge-${a.status === "auto_executed" ? "good" : "pending"}">${esc(a.status)}</span></td>
       <td style="font-style: italic; color: #94a3b8; font-size: 12px;">${esc(a.triggeredBy)}</td>
     </tr>
-  `).join('');
+  `,
+    )
+    .join("");
 
   const content = `
     <h2 style="margin-bottom: 8px; color: #f8fafc;">${esc(client.name)}</h2>
-    <p style="color: #94a3b8; margin-bottom: 24px;">${esc(client.domain)} | ${esc(client.industry)} | ${esc(client.city || '')}, ${esc(client.state || '')}</p>
+    <p style="color: #94a3b8; margin-bottom: 24px;">${esc(client.domain)} | ${esc(client.industry)} | ${esc(client.city || "")}, ${esc(client.state || "")}</p>
 
     <h3 style="margin-bottom: 12px; color: #f8fafc;">Rankings (Last 7 Days)</h3>
     <table>
@@ -420,64 +473,77 @@ function renderApprovals(pending: any[]): string {
         <p style="color: #6ee7b7; font-size: 18px;">All clear — no pending approvals.</p>
       </div>
     `;
-    return baseLayout('Approvals', content);
+    return baseLayout("Approvals", content);
   }
 
-  const approvalCards = pending.map(a => {
-    let options: any[] = [];
-    try {
-      const parsed = typeof a.options === 'string' ? JSON.parse(a.options) : a.options;
-      if (Array.isArray(parsed)) options = parsed;
-    } catch {
-      options = [];
-    }
-    const optionsHtml = options.length > 0 ? `
+  const approvalCards = pending
+    .map((a) => {
+      let options: any[] = [];
+      try {
+        const parsed = typeof a.options === "string" ? JSON.parse(a.options) : a.options;
+        if (Array.isArray(parsed)) options = parsed;
+      } catch {
+        options = [];
+      }
+      const optionsHtml =
+        options.length > 0
+          ? `
       <ul class="options-list">
-        ${options.map((o: any) => `
-          <li class="${o.recommended ? 'recommended' : ''}">
-            <strong>${esc(String(o.id ?? '').toUpperCase())})</strong> ${esc(o.label)} — ${esc(o.description)}
-            ${o.recommended ? '<span class="badge badge-good" style="margin-left: 8px;">AI Recommended</span>' : ''}
+        ${options
+          .map(
+            (o: any) => `
+          <li class="${o.recommended ? "recommended" : ""}">
+            <strong>${esc(String(o.id ?? "").toUpperCase())})</strong> ${esc(o.label)} — ${esc(o.description)}
+            ${o.recommended ? '<span class="badge badge-good" style="margin-left: 8px;">AI Recommended</span>' : ""}
             <span style="float: right; color: #94a3b8;">${((Number(o.confidence) || 0) * 100).toFixed(0)}% confidence</span>
           </li>
-        `).join('')}
+        `,
+          )
+          .join("")}
       </ul>
-    ` : '';
+    `
+          : "";
 
-    return `
+      return `
       <div class="approval-card">
         <div style="display: flex; justify-content: space-between; align-items: start;">
           <div>
             <h3 style="color: #fbbf24;">${esc(a.action)}</h3>
-            <p style="color: #94a3b8; font-size: 12px;">${esc(a.clientDomain)} | ${esc(a.module)} | ${esc(a.riskLevel)} risk${a.reversible ? '' : ' | IRREVERSIBLE'}</p>
+            <p style="color: #94a3b8; font-size: 12px;">${esc(a.clientDomain)} | ${esc(a.module)} | ${esc(a.riskLevel)} risk${a.reversible ? "" : " | IRREVERSIBLE"}</p>
           </div>
-          <span class="badge badge-${a.riskLevel === 'medium' ? 'warning' : 'critical'}">${esc(a.riskLevel)}</span>
+          <span class="badge badge-${a.riskLevel === "medium" ? "warning" : "critical"}">${esc(a.riskLevel)}</span>
         </div>
         <p style="margin: 12px 0;">${esc(a.description)}</p>
         <p style="margin: 8px 0; color: #94a3b8;"><strong>Rationale:</strong> ${esc(a.rationale)}</p>
         <p style="margin: 8px 0; color: #94a3b8;"><strong>Triggered by:</strong> ${esc(a.triggeredBy)}</p>
-        ${a.aiRecommendation ? `<p style="margin: 8px 0; color: #38bdf8;"><strong>AI Recommendation:</strong> ${esc(a.aiRecommendation)} (${((Number(a.aiConfidence) || 0) * 100).toFixed(0)}% confidence)</p>` : ''}
+        ${a.aiRecommendation ? `<p style="margin: 8px 0; color: #38bdf8;"><strong>AI Recommendation:</strong> ${esc(a.aiRecommendation)} (${((Number(a.aiConfidence) || 0) * 100).toFixed(0)}% confidence)</p>` : ""}
         ${optionsHtml}
         <div style="margin-top: 16px; display: flex; gap: 8px;">
-          ${options.map((o: any) => `
+          ${options
+            .map(
+              (o: any) => `
             <form method="POST" action="/dashboard/approve/${encodeURIComponent(a.id)}">
               <input type="hidden" name="option" value="${esc(o.id)}">
-              <button type="submit" class="btn ${o.recommended ? 'btn-approve' : 'btn-view'}">
-                Approve ${esc(String(o.id ?? '').toUpperCase())}${o.recommended ? ' (Recommended)' : ''}
+              <button type="submit" class="btn ${o.recommended ? "btn-approve" : "btn-view"}">
+                Approve ${esc(String(o.id ?? "").toUpperCase())}${o.recommended ? " (Recommended)" : ""}
               </button>
             </form>
-          `).join('')}
+          `,
+            )
+            .join("")}
           <form method="POST" action="/dashboard/reject/${encodeURIComponent(a.id)}">
             <button type="submit" class="btn btn-reject">Reject</button>
           </form>
         </div>
       </div>
     `;
-  }).join('');
+    })
+    .join("");
 
   const content = `
     <h2 style="margin-bottom: 16px; color: #f8fafc;">Pending Approvals (${pending.length})</h2>
     ${approvalCards}
   `;
 
-  return baseLayout('Approvals', content);
+  return baseLayout("Approvals", content);
 }

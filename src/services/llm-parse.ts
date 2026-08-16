@@ -39,7 +39,7 @@ class JsonStringScanner {
   consume(ch: string): boolean {
     if (this.inString) {
       if (this.escaped) this.escaped = false;
-      else if (ch === '\\') this.escaped = true;
+      else if (ch === "\\") this.escaped = true;
       else if (ch === '"') this.inString = false;
       return true;
     }
@@ -55,7 +55,7 @@ function firstJsonSpan(text: string): string | null {
   const start = text.search(/[{[]/);
   if (start < 0) return null;
   const open = text[start];
-  const close = open === '{' ? '}' : ']';
+  const close = open === "{" ? "}" : "]";
   let depth = 0;
   const scanner = new JsonStringScanner();
 
@@ -77,10 +77,10 @@ function firstJsonSpan(text: string): string | null {
  * Throws a clear, catchable, non-echoing error when no usable JSON is present.
  */
 export function parseJsonFromLlm<T>(raw: string): T {
-  const text = String(raw ?? '').trim();
+  const text = String(raw ?? "").trim();
   const unfenced = text
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/```$/i, '')
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/```$/i, "")
     .trim();
 
   try {
@@ -106,7 +106,7 @@ export function parseJsonFromLlm<T>(raw: string): T {
  * comparisons); clamps to the documented 0–100 range. Non-echoing error.
  */
 export function parseScore(raw: string): number {
-  const text = String(raw ?? '').trim();
+  const text = String(raw ?? "").trim();
   const n = Number.parseFloat(text);
   if (!Number.isFinite(n)) {
     throw new TypeError(`LLM did not return a numeric score (response length=${text.length})`);

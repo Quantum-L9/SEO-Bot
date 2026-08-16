@@ -18,11 +18,11 @@
  */
 
 export function isPostHogPersonalApiKey(key: string): boolean {
-  return key.trim().startsWith('phx_');
+  return key.trim().startsWith("phx_");
 }
 
 export function isPostHogProjectApiKey(key: string): boolean {
-  return key.trim().startsWith('phc_');
+  return key.trim().startsWith("phc_");
 }
 
 /**

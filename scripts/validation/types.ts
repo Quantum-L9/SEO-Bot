@@ -1,25 +1,25 @@
 export const VALIDATION_STATUSES = [
-  'PASS',
-  'PASS_WITH_FINDINGS',
-  'BLOCKED',
-  'FAIL',
-  'UNKNOWN',
+  "PASS",
+  "PASS_WITH_FINDINGS",
+  "BLOCKED",
+  "FAIL",
+  "UNKNOWN",
 ] as const;
 
 export type ValidationStatus = (typeof VALIDATION_STATUSES)[number];
-export type ValidationProfile = 'ci' | 'release' | 'production';
+export type ValidationProfile = "ci" | "release" | "production";
 export type GateClass =
-  | 'static'
-  | 'build'
-  | 'test'
-  | 'database'
-  | 'container'
-  | 'integration'
-  | 'operational'
-  | 'release';
+  | "static"
+  | "build"
+  | "test"
+  | "database"
+  | "container"
+  | "integration"
+  | "operational"
+  | "release";
 
-export type FindingSeverity = 'critical' | 'major' | 'minor' | 'info';
-export type AssertionResult = 'PASS' | 'FAIL' | 'UNKNOWN';
+export type FindingSeverity = "critical" | "major" | "minor" | "info";
+export type AssertionResult = "PASS" | "FAIL" | "UNKNOWN";
 
 export interface ValidationAssertion {
   id: string;
@@ -39,7 +39,7 @@ export interface ValidationFinding {
 }
 
 export interface ValidationBlocker {
-  type: 'credential' | 'service' | 'dependency' | 'approval' | 'environment';
+  type: "credential" | "service" | "dependency" | "approval" | "environment";
   name: string;
   reason: string;
 }
@@ -89,7 +89,7 @@ export interface EnvironmentRecord {
 }
 
 export interface GateEvidence {
-  schema_version: '1.0.0';
+  schema_version: "1.0.0";
   run_id: string;
   gate_id: string;
   gate_class: GateClass;
@@ -113,7 +113,7 @@ export interface GateEvidence {
 }
 
 export interface RunReport {
-  schema_version: '1.0.0';
+  schema_version: "1.0.0";
   policy_version: string;
   run_id: string;
   profile: ValidationProfile;
@@ -136,13 +136,13 @@ export interface RunReport {
 }
 
 export interface ReleaseReceipt {
-  schema_version: '1.0.0';
+  schema_version: "1.0.0";
   repository: RepositoryContext;
   image: { digest: string | null };
   validation_run_id: string;
-  profile: 'release' | 'production';
+  profile: "release" | "production";
   overall_status: ValidationStatus;
-  required_gates: RunReport['gates'];
+  required_gates: RunReport["gates"];
   blocking_findings: ValidationFinding[];
   unknowns: ValidationUnknown[];
   generated_at: string;
@@ -170,7 +170,7 @@ export interface ProfileDefinition {
 }
 
 export interface ValidationPolicy {
-  schema_version: '1.0.0';
+  schema_version: "1.0.0";
   policy_version: string;
   profiles: Record<ValidationProfile, ProfileDefinition>;
 }
@@ -184,30 +184,30 @@ const STATUS_PRECEDENCE: Record<ValidationStatus, number> = {
 };
 
 export function aggregateStatus(statuses: ValidationStatus[]): ValidationStatus {
-  if (statuses.length === 0) return 'UNKNOWN';
+  if (statuses.length === 0) return "UNKNOWN";
   return statuses.reduce<ValidationStatus>(
     (worst, current) => (STATUS_PRECEDENCE[current] > STATUS_PRECEDENCE[worst] ? current : worst),
-    'PASS',
+    "PASS",
   );
 }
 
 export function isProfilePassing(status: ValidationStatus, profile: ProfileDefinition): boolean {
-  if (status === 'PASS') return true;
-  if (status === 'PASS_WITH_FINDINGS') return profile.allow_pass_with_findings;
-  if (status === 'BLOCKED') return !profile.blocked_is_failure;
+  if (status === "PASS") return true;
+  if (status === "PASS_WITH_FINDINGS") return profile.allow_pass_with_findings;
+  if (status === "BLOCKED") return !profile.blocked_is_failure;
   return false;
 }
 
 export function exitCodeForStatus(status: ValidationStatus): number {
   switch (status) {
-    case 'PASS':
-    case 'PASS_WITH_FINDINGS':
+    case "PASS":
+    case "PASS_WITH_FINDINGS":
       return 0;
-    case 'FAIL':
+    case "FAIL":
       return 1;
-    case 'BLOCKED':
+    case "BLOCKED":
       return 2;
-    case 'UNKNOWN':
+    case "UNKNOWN":
       return 3;
   }
 }

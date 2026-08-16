@@ -1,7 +1,7 @@
-import { spawn } from 'node:child_process';
-import { performance } from 'node:perf_hooks';
-import { redactText } from './redact.js';
-import type { ExecutionRecord } from '../types.js';
+import { spawn } from "node:child_process";
+import { performance } from "node:perf_hooks";
+import type { ExecutionRecord } from "../types.js";
+import { redactText } from "./redact.js";
 
 export interface CommandOptions {
   cwd: string;
@@ -21,18 +21,20 @@ const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
 
 function appendBounded(current: string, chunk: Buffer, maxBytes: number): string {
-  const candidate = current + chunk.toString('utf8');
+  const candidate = current + chunk.toString("utf8");
   if (Buffer.byteLength(candidate) <= maxBytes) return candidate;
-  const marker = '\n[OUTPUT_TRUNCATED_BY_VALIDATOR]\n';
-  return Buffer.from(candidate)
-    .subarray(0, Math.max(0, maxBytes - Buffer.byteLength(marker)))
-    .toString('utf8') + marker;
+  const marker = "\n[OUTPUT_TRUNCATED_BY_VALIDATOR]\n";
+  return (
+    Buffer.from(candidate)
+      .subarray(0, Math.max(0, maxBytes - Buffer.byteLength(marker)))
+      .toString("utf8") + marker
+  );
 }
 
 function terminateProcessTree(pid: number | undefined, signal: NodeJS.Signals): void {
   if (!pid) return;
   try {
-    if (process.platform === 'win32') process.kill(pid, signal);
+    if (process.platform === "win32") process.kill(pid, signal);
     else process.kill(-pid, signal);
   } catch {
     // The process may already have exited between timeout detection and termination.
@@ -49,8 +51,8 @@ export async function runCommand(
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
   const environment = { ...process.env, ...options.env };
-  let stdout = '';
-  let stderr = '';
+  let stdout = "";
+  let stderr = "";
   let timedOut = false;
   let signal: string | null = null;
   let exitCode: number | null = null;
@@ -60,21 +62,29 @@ export async function runCommand(
       cwd: options.cwd,
       env: environment,
       shell: false,
-      detached: process.platform !== 'win32',
-      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"],
     });
-    child.stdout.on('data', (chunk: Buffer) => { stdout = appendBounded(stdout, chunk, maxOutputBytes); });
-    child.stderr.on('data', (chunk: Buffer) => { stderr = appendBounded(stderr, chunk, maxOutputBytes); });
-    child.on('error', (error) => {
-      stderr = appendBounded(stderr, Buffer.from(`${error.name}: ${error.message}\n`), maxOutputBytes);
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout = appendBounded(stdout, chunk, maxOutputBytes);
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr = appendBounded(stderr, chunk, maxOutputBytes);
+    });
+    child.on("error", (error) => {
+      stderr = appendBounded(
+        stderr,
+        Buffer.from(`${error.name}: ${error.message}\n`),
+        maxOutputBytes,
+      );
     });
     const timer = setTimeout(() => {
       timedOut = true;
-      terminateProcessTree(child.pid, 'SIGTERM');
-      setTimeout(() => terminateProcessTree(child.pid, 'SIGKILL'), 2_000).unref();
+      terminateProcessTree(child.pid, "SIGTERM");
+      setTimeout(() => terminateProcessTree(child.pid, "SIGKILL"), 2_000).unref();
     }, timeoutMs);
     timer.unref();
-    child.on('close', (code, closeSignal) => {
+    child.on("close", (code, closeSignal) => {
       clearTimeout(timer);
       exitCode = code;
       signal = closeSignal;

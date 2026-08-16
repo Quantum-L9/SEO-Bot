@@ -23,22 +23,22 @@
  */
 
 import {
-  refForArtifact,
-  sealIntelligenceArtifact,
-  WEBSITE_INTELLIGENCE_SCHEMAS,
   type CompetitiveLandscapeArtifact,
+  refForArtifact,
   type SEOContentBlueprintArtifact,
   type SEOContentBlueprintRoute,
   type SEOContentBlueprintV1,
+  sealIntelligenceArtifact,
   type VerifiedBusinessFact,
-} from '@quantum-l9/bot-interop';
-import { createModuleLogger } from '../core/logger.js';
-import { getLlmService, type LlmService } from '../services/llm.js';
-import { DataForSeoClient } from '../services/dataforseo.js';
-import { PRODUCER } from './producer.js';
-import { seoContentBlueprintRoutesSchema } from './schema-guards.js';
+  WEBSITE_INTELLIGENCE_SCHEMAS,
+} from "@quantum-l9/bot-interop";
+import { createModuleLogger } from "../core/logger.js";
+import { DataForSeoClient } from "../services/dataforseo.js";
+import { getLlmService, type LlmService } from "../services/llm.js";
+import { PRODUCER } from "./producer.js";
+import { seoContentBlueprintRoutesSchema } from "./schema-guards.js";
 
-const logger = createModuleLogger('build-intelligence:seo-content-blueprint');
+const logger = createModuleLogger("build-intelligence:seo-content-blueprint");
 
 /** Bounded, deterministic page-content metrics surface (injectable for tests). */
 export interface PageContentPort {
@@ -88,7 +88,7 @@ export async function createSEOContentBlueprint(
   deps: { llm?: LlmService; dataForSeo?: PageContentPort } = {},
 ): Promise<SEOContentBlueprintArtifact> {
   if (request.routes.length === 0) {
-    throw new Error('SEO_CONTENT_BLUEPRINT_NO_ROUTES: at least one route identity is required');
+    throw new Error("SEO_CONTENT_BLUEPRINT_NO_ROUTES: at least one route identity is required");
   }
   const llm = deps.llm ?? getLlmService();
   const dataForSeo = deps.dataForSeo ?? new DataForSeoClient();
@@ -97,38 +97,87 @@ export async function createSEOContentBlueprint(
   const evidence = await gatherDonorEvidence(landscape, dataForSeo);
 
   const systemPrompt =
-    'You are a senior SEO content strategist. You produce a STRATEGIC content ' +
-    'blueprint from normalized competitive evidence and verified business facts. ' +
-    'You decide search intent, supporting queries, topics, entities, questions, ' +
-    'competitive content gaps, content requirements, internal-link requirements, ' +
-    'AEO/GEO requirements, metadata requirements, forbidden claims, and acceptance ' +
-    'tests. You do NOT decide page layout, section order, component classes, visual ' +
-    'design, CTA placement, or final prose. Respond with ONLY a JSON object ' +
+    "You are a senior SEO content strategist. You produce a STRATEGIC content " +
+    "blueprint from normalized competitive evidence and verified business facts. " +
+    "You decide search intent, supporting queries, topics, entities, questions, " +
+    "competitive content gaps, content requirements, internal-link requirements, " +
+    "AEO/GEO requirements, metadata requirements, forbidden claims, and acceptance " +
+    "tests. You do NOT decide page layout, section order, component classes, visual " +
+    "design, CTA placement, or final prose. Respond with ONLY a JSON object " +
     '{"routes":[...]} — no markdown fences, no commentary.';
 
-  const userPrompt = JSON.stringify({
-    market: landscape.market,
-    query_portfolio: landscape.query_portfolio,
-    selected_donors: landscape.selected_donors,
-    normalized_donor_evidence: evidence,
-    routes: request.routes,
-    verified_business_facts: request.business_facts,
-    seo_config: request.seo_config ?? {},
-    output_contract: {
-      one_entry_per_route_id: request.routes.map((route) => route.route_id),
-      requirement_placement: ['FIRST_MATCH', 'ALL_MATCHES'],
-      journey_stage: ['informational', 'commercial', 'transactional'],
-      content_slots: [
-        'primary_offer', 'service_overview', 'differentiation', 'trust', 'process',
-        'project_proof', 'local_relevance', 'objection_handling', 'faq', 'conversion', 'metadata',
-      ],
-      note: 'Return exactly one route object per route_id above. Do not add layout, component, or prose fields.',
+  const userPrompt = JSON.stringify(
+    {
+      market: landscape.market,
+      query_portfolio: landscape.query_portfolio,
+      selected_donors: landscape.selected_donors,
+      normalized_donor_evidence: evidence,
+      routes: request.routes,
+      verified_business_facts: request.business_facts,
+      seo_config: request.seo_config ?? {},
+      output_contract: {
+        one_entry_per_route_id: request.routes.map((route) => route.route_id),
+        route_shape: {
+          search_intent: {
+            primary: "primary search intent (string)",
+            secondary: "string[]",
+            journey_stage: "one of: informational | commercial | transactional",
+          },
+          targets: {
+            primary_query: "string",
+            supporting_queries: "string[]",
+            topics: "string[]",
+            entities: "string[]",
+          },
+          requirements: {
+            requirement_id: "string",
+            target_slots: "content slot names (string[])",
+            placement: "one of: FIRST_MATCH | ALL_MATCHES",
+            required_topics: "string[]",
+            required_entities: "string[]",
+            questions: "string[]",
+            proof_needed: "string[]",
+            required: "boolean",
+          },
+          competitive_gaps: [
+            {
+              gap_id: "string",
+              description: "string",
+              donor_domains: "string[]",
+              opportunity: "string",
+            },
+          ],
+          internal_links: [
+            { target_route_id: "string (must be one of the route_ids above)", purpose: "string" },
+          ],
+          aeo_geo: { answer_targets: "string[]", schema_requirements: "string[]" },
+          metadata: { title_requirements: "string[]", description_requirements: "string[]" },
+          forbidden_claims: "string[]",
+          acceptance_tests: "string[]",
+        },
+        content_slots: [
+          "primary_offer",
+          "service_overview",
+          "differentiation",
+          "trust",
+          "process",
+          "project_proof",
+          "local_relevance",
+          "objection_handling",
+          "faq",
+          "conversion",
+          "metadata",
+        ],
+        note: "Return exactly one route object per route_id above, matching route_shape exactly. Do not add layout, component, or prose fields.",
+      },
     },
-  }, null, 2);
+    null,
+    2,
+  );
 
   const routes = await llm.strategizeJson<SEOContentBlueprintRoute[]>({
     clientId: request.client_id,
-    module: 'build-intelligence',
+    module: "build-intelligence",
     purpose: `seo-content-blueprint:${request.build_id}`,
     systemPrompt,
     userPrompt,
@@ -142,7 +191,7 @@ export async function createSEOContentBlueprint(
   };
 
   const artifact = sealIntelligenceArtifact({
-    artifact_type: 'seo_content_blueprint',
+    artifact_type: "seo_content_blueprint",
     client_id: request.client_id,
     build_id: request.build_id,
     producer: PRODUCER,
@@ -158,7 +207,7 @@ export async function createSEOContentBlueprint(
       competitiveLandscapeRef: payload.competitive_landscape_ref.artifact_id,
       artifactId: artifact.artifact_id,
     },
-    'SEOContentBlueprint sealed',
+    "SEOContentBlueprint sealed",
   );
 
   return artifact;
@@ -172,7 +221,7 @@ export async function createSEOContentBlueprint(
  * metrics) so evidence gathering never fails the whole blueprint.
  */
 async function gatherDonorEvidence(
-  landscape: CompetitiveLandscapeArtifact['payload'],
+  landscape: CompetitiveLandscapeArtifact["payload"],
   dataForSeo: PageContentPort,
 ): Promise<NormalizedDonorEvidence[]> {
   const observationById = new Map(landscape.observations.map((obs) => [obs.observation_id, obs]));
@@ -196,7 +245,7 @@ async function gatherDonorEvidence(
  * warning so evidence gathering never fails the whole blueprint.
  */
 async function collectDonorMetrics(
-  donor: CompetitiveLandscapeArtifact['payload']['selected_donors'][number],
+  donor: CompetitiveLandscapeArtifact["payload"]["selected_donors"][number],
   donorObservations: Array<{ url: string; rank: number }>,
   dataForSeo: PageContentPort,
   seenUrls: Set<string>,
@@ -224,7 +273,7 @@ async function collectDonorMetrics(
     } catch (error) {
       logger.warn(
         { url: obs.url, error: error instanceof Error ? error.message : String(error) },
-        'Donor page-content pull failed; skipping this URL',
+        "Donor page-content pull failed; skipping this URL",
       );
     }
   }
@@ -245,9 +294,11 @@ function reconcileRoutes(
   const byId = new Map(parsed.routes.map((route) => [route.route_id, route]));
 
   const requestedIds = new Set(requested.map((route) => route.route_id));
-  const unexpected = parsed.routes.map((route) => route.route_id).filter((id) => !requestedIds.has(id));
+  const unexpected = parsed.routes
+    .map((route) => route.route_id)
+    .filter((id) => !requestedIds.has(id));
   if (unexpected.length > 0) {
-    throw new Error(`Unexpected route_id(s) not in the requested set: ${unexpected.join(', ')}`);
+    throw new Error(`Unexpected route_id(s) not in the requested set: ${unexpected.join(", ")}`);
   }
 
   return requested.map((route) => {

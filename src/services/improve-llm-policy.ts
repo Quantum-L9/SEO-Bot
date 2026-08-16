@@ -1,8 +1,4 @@
-import {
-  TaskComplexity,
-  TaskType,
-  type TaskDescriptor,
-} from '@quantum-l9/llm-router';
+import { TaskComplexity, type TaskDescriptor, TaskType } from "@quantum-l9/llm-router";
 
 /**
  * SEO-Bot's LLM operations for the REDESIGN_IMPROVE seam.
@@ -14,13 +10,13 @@ import {
  * deterministic DataForSEO work, not an LLM task.
  */
 export type SeoImproveLlmOperation =
-  | 'SEO_GAP_EXTRACTION'
-  | 'SEO_CONTENT_BLUEPRINT'
-  | 'STRUCTURED_CONTENT_GENERATION'
-  | 'CONTENT_VALIDATION'
-  | 'FRESH_WEB_EVIDENCE';
+  | "SEO_GAP_EXTRACTION"
+  | "SEO_CONTENT_BLUEPRINT"
+  | "STRUCTURED_CONTENT_GENERATION"
+  | "CONTENT_VALIDATION"
+  | "FRESH_WEB_EVIDENCE";
 
-type PolicyEntry = Omit<TaskDescriptor, 'clientId' | 'description'>;
+type PolicyEntry = Omit<TaskDescriptor, "clientId" | "description">;
 
 export const SEO_IMPROVE_LLM_POLICY: Record<SeoImproveLlmOperation, PolicyEntry> = {
   SEO_GAP_EXTRACTION: {
@@ -78,10 +74,10 @@ export function seoImproveTask(
  */
 export function assertSeoImprovePolicy(): void {
   const forbiddenSearchOperations: SeoImproveLlmOperation[] = [
-    'SEO_GAP_EXTRACTION',
-    'SEO_CONTENT_BLUEPRINT',
-    'STRUCTURED_CONTENT_GENERATION',
-    'CONTENT_VALIDATION',
+    "SEO_GAP_EXTRACTION",
+    "SEO_CONTENT_BLUEPRINT",
+    "STRUCTURED_CONTENT_GENERATION",
+    "CONTENT_VALIDATION",
   ];
 
   for (const operation of forbiddenSearchOperations) {
@@ -94,8 +90,6 @@ export function assertSeoImprovePolicy(): void {
   }
 
   if (SEO_IMPROVE_LLM_POLICY.FRESH_WEB_EVIDENCE.requiresSearch !== true) {
-    throw new Error(
-      'LLM_POLICY_VIOLATION: FRESH_WEB_EVIDENCE must explicitly request search.',
-    );
+    throw new Error("LLM_POLICY_VIOLATION: FRESH_WEB_EVIDENCE must explicitly request search.");
   }
 }

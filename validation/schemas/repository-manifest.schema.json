@@ -13,12 +13,30 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["path", "owner", "purpose", "classification", "status", "generated", "source_of_generation"],
+        "required": [
+          "path",
+          "owner",
+          "purpose",
+          "classification",
+          "status",
+          "generated",
+          "source_of_generation"
+        ],
         "properties": {
           "path": { "type": "string", "minLength": 1 },
           "owner": { "type": "string", "minLength": 1 },
           "purpose": { "type": "string", "minLength": 1 },
-          "classification": { "enum": ["runtime", "tooling", "test", "schema", "documentation", "configuration", "generated"] },
+          "classification": {
+            "enum": [
+              "runtime",
+              "tooling",
+              "test",
+              "schema",
+              "documentation",
+              "configuration",
+              "generated"
+            ]
+          },
           "status": { "const": "active" },
           "generated": { "type": "boolean" },
           "source_of_generation": { "type": ["string", "null"] }

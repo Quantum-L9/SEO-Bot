@@ -4,7 +4,7 @@
  * status: active
  */
 
-import type { IntelligenceProducer } from '@quantum-l9/bot-interop';
+import type { IntelligenceProducer } from "@quantum-l9/bot-interop";
 
 /**
  * Producer identity stamped onto every sealed build-intelligence artifact.
@@ -14,6 +14,6 @@ import type { IntelligenceProducer } from '@quantum-l9/bot-interop';
  * determinism — it is provenance only.
  */
 export const PRODUCER: { repo: IntelligenceProducer; version: string } = {
-  repo: 'SEO-Bot',
-  version: '2.1.0',
+  repo: "SEO-Bot",
+  version: "2.1.0",
 };

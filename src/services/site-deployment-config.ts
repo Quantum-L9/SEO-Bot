@@ -1,4 +1,4 @@
-import { resolveSecretRef } from './secret-ref.js';
+import { resolveSecretRef } from "./secret-ref.js";
 
 /**
  * Resolve the persisted, non-secret v2 deployment provenance (stored in
@@ -39,27 +39,37 @@ export function siteConfigFromStoredClient(
   clientConfig: unknown,
   env: NodeJS.ProcessEnv = process.env,
 ): ResolvedSiteDeploymentConfig {
-  const sd = (clientConfig as { site_deployment?: CanonicalStoredSiteDeployment } | undefined)?.site_deployment;
-  const canonicalReady = sd?.schemaVersion === '2.0' && sd.status === 'ready';
+  const sd = (clientConfig as { site_deployment?: CanonicalStoredSiteDeployment } | undefined)
+    ?.site_deployment;
+  const canonicalReady = sd?.schemaVersion === "2.0" && sd.status === "ready";
 
-  let githubToken = '';
-  let vercelDeployHook = '';
+  let githubToken = "";
+  let vercelDeployHook = "";
   if (canonicalReady) {
-    try { githubToken = resolveSecretRef(sd.githubCredentialRef, env)?.value ?? ''; } catch { githubToken = ''; }
-    try { vercelDeployHook = resolveSecretRef(sd.vercelDeployHookRef, env)?.value ?? ''; } catch { vercelDeployHook = ''; }
+    try {
+      githubToken = resolveSecretRef(sd.githubCredentialRef, env)?.value ?? "";
+    } catch {
+      githubToken = "";
+    }
+    try {
+      vercelDeployHook = resolveSecretRef(sd.vercelDeployHookRef, env)?.value ?? "";
+    } catch {
+      vercelDeployHook = "";
+    }
   }
 
-  const websiteBotRepo = sd?.websiteBotRepo?.trim() ?? '';
-  const sourceBranch = sd?.sourceBranch?.trim() || 'main';
-  const contractComplete = canonicalReady
-    && /^[a-f0-9]{40}$/.test(sd?.verifiedCommitSha ?? '')
-    && /^[a-f0-9]{64}$/.test(sd?.sourceDigest ?? '')
-    && Boolean(sd?.contractId)
-    && /^[a-f0-9]{64}$/.test(sd?.contractDigest ?? '')
-    && Boolean(sd?.verifiedAt && !Number.isNaN(Date.parse(sd.verifiedAt)))
-    && sd?.managedManifestPath === '.l9/generated-manifest.json'
-    && sd?.editableRoot === 'src/pages'
-    && sd?.pagePathStrategy === 'directory-index-astro';
+  const websiteBotRepo = sd?.websiteBotRepo?.trim() ?? "";
+  const sourceBranch = sd?.sourceBranch?.trim() || "main";
+  const contractComplete =
+    canonicalReady &&
+    /^[a-f0-9]{40}$/.test(sd?.verifiedCommitSha ?? "") &&
+    /^[a-f0-9]{64}$/.test(sd?.sourceDigest ?? "") &&
+    Boolean(sd?.contractId) &&
+    /^[a-f0-9]{64}$/.test(sd?.contractDigest ?? "") &&
+    Boolean(sd?.verifiedAt && !Number.isNaN(Date.parse(sd.verifiedAt))) &&
+    sd?.managedManifestPath === ".l9/generated-manifest.json" &&
+    sd?.editableRoot === "src/pages" &&
+    sd?.pagePathStrategy === "directory-index-astro";
 
   return {
     githubToken,
@@ -67,10 +77,10 @@ export function siteConfigFromStoredClient(
     websiteBotRepo,
     sourceBranch,
     dryRun:
-      env.NODE_ENV === 'test'
-      || env.SITE_DEPLOY_DRY_RUN === 'true'
-      || !contractComplete
-      || !githubToken
-      || !websiteBotRepo,
+      env.NODE_ENV === "test" ||
+      env.SITE_DEPLOY_DRY_RUN === "true" ||
+      !contractComplete ||
+      !githubToken ||
+      !websiteBotRepo,
   };
 }

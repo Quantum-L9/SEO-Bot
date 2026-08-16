@@ -1,10 +1,17 @@
-import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import path from 'node:path';
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
-export type ManifestClassification = 'runtime' | 'tooling' | 'test' | 'schema' | 'documentation' | 'configuration' | 'generated';
+export type ManifestClassification =
+  | "runtime"
+  | "tooling"
+  | "test"
+  | "schema"
+  | "documentation"
+  | "configuration"
+  | "generated";
 export interface OwnershipRule {
   pattern: string;
   owner: string;
@@ -13,69 +20,85 @@ export interface OwnershipRule {
   generated?: boolean;
   source_of_generation?: string | null;
 }
-export interface OwnershipOverride extends Omit<OwnershipRule, 'pattern'> { path: string; }
-export interface OwnershipPolicy { schema_version: '1.0.0'; rules: OwnershipRule[]; overrides?: OwnershipOverride[]; }
+export interface OwnershipOverride extends Omit<OwnershipRule, "pattern"> {
+  path: string;
+}
+export interface OwnershipPolicy {
+  schema_version: "1.0.0";
+  rules: OwnershipRule[];
+  overrides?: OwnershipOverride[];
+}
 export interface RepositoryManifestEntry {
   path: string;
   owner: string;
   purpose: string;
   classification: ManifestClassification;
-  status: 'active';
+  status: "active";
   generated: boolean;
   source_of_generation: string | null;
 }
 export interface RepositoryManifest {
-  schema_version: '1.0.0';
-  repository: 'Quantum-L9/SEO-Bot';
+  schema_version: "1.0.0";
+  repository: "Quantum-L9/SEO-Bot";
   entries: RepositoryManifestEntry[];
   inventory_digest: string;
 }
 /** Fixed, unwriteable candidate locations for the git binary (SonarCloud S4036:
  * never resolve executables through a caller-controlled PATH). */
-const GIT_BINARY_CANDIDATES = ['/usr/bin/git', '/usr/local/bin/git', '/opt/homebrew/bin/git', '/bin/git'] as const;
+const GIT_BINARY_CANDIDATES = [
+  "/usr/bin/git",
+  "/usr/local/bin/git",
+  "/opt/homebrew/bin/git",
+  "/bin/git",
+] as const;
 function resolveGitBinary(): string {
   const found = GIT_BINARY_CANDIDATES.find((candidate) => existsSync(candidate));
-  if (!found) throw new Error(`git binary not found in fixed locations: ${GIT_BINARY_CANDIDATES.join(', ')}`);
+  if (!found)
+    throw new Error(`git binary not found in fixed locations: ${GIT_BINARY_CANDIDATES.join(", ")}`);
   return found;
 }
 function runGit(root: string, args: string[]): string {
-  const result = spawnSync(resolveGitBinary(), args, { cwd: root, encoding: 'utf8', shell: false });
-  if (result.status !== 0) throw new Error(result.stderr.trim() || `git ${args.join(' ')} failed`);
+  const result = spawnSync(resolveGitBinary(), args, { cwd: root, encoding: "utf8", shell: false });
+  if (result.status !== 0) throw new Error(result.stderr.trim() || `git ${args.join(" ")} failed`);
   return result.stdout;
 }
 function escapeRegex(character: string): string {
   return /[\\^$.*+?()[\]{}|]/.test(character) ? `\\${character}` : character;
 }
 export function globToRegExp(glob: string): RegExp {
-  let source = '^';
+  let source = "^";
   for (let index = 0; index < glob.length; index += 1) {
     const character = glob[index];
-    if (character === '*') {
+    if (character === "*") {
       const next = glob[index + 1];
-      if (next === '*') {
+      if (next === "*") {
         index += 1;
-        if (glob[index + 1] === '/') { index += 1; source += '(?:.*/)?'; }
-        else source += '.*';
-      } else source += '[^/]*';
-    } else if (character === '?') source += '[^/]';
+        if (glob[index + 1] === "/") {
+          index += 1;
+          source += "(?:.*/)?";
+        } else source += ".*";
+      } else source += "[^/]*";
+    } else if (character === "?") source += "[^/]";
     else source += escapeRegex(character);
   }
   return new RegExp(`${source}$`);
 }
 export async function loadOwnershipPolicy(root: string): Promise<OwnershipPolicy> {
-  const text = await readFile(path.join(root, 'manifest', 'ownership.yaml'), 'utf8');
+  const text = await readFile(path.join(root, "manifest", "ownership.yaml"), "utf8");
   const parsed = JSON.parse(text) as Partial<OwnershipPolicy>;
-  if (parsed.schema_version !== '1.0.0' || !Array.isArray(parsed.rules)) throw new Error('manifest/ownership.yaml is invalid');
+  if (parsed.schema_version !== "1.0.0" || !Array.isArray(parsed.rules))
+    throw new Error("manifest/ownership.yaml is invalid");
   return parsed as OwnershipPolicy;
 }
 export function listRepositoryFiles(root: string): string[] {
-  const output = runGit(root, ['ls-files', '--cached', '--others', '--exclude-standard', '-z']);
-  const files = output.split('\0').filter(Boolean);
-  for (const generatedPath of ['MANIFEST.json', 'MANIFEST.md']) if (!files.includes(generatedPath)) files.push(generatedPath);
+  const output = runGit(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]);
+  const files = output.split("\0").filter(Boolean);
+  for (const generatedPath of ["MANIFEST.json", "MANIFEST.md"])
+    if (!files.includes(generatedPath)) files.push(generatedPath);
   return [...new Set(files)]
-    .filter((file) => !file.startsWith('validation/runs/'))
-    .filter((file) => !file.startsWith('node_modules/'))
-    .filter((file) => !file.startsWith('dist/'))
+    .filter((file) => !file.startsWith("validation/runs/"))
+    .filter((file) => !file.startsWith("node_modules/"))
+    .filter((file) => !file.startsWith("dist/"))
     .sort((left, right) => left.localeCompare(right));
 }
 function resolveOwnership(file: string, policy: OwnershipPolicy): OwnershipRule {
@@ -83,11 +106,14 @@ function resolveOwnership(file: string, policy: OwnershipPolicy): OwnershipRule 
   if (exact) return { ...exact, pattern: exact.path };
   const matches = policy.rules.filter((rule) => globToRegExp(rule.pattern).test(file));
   if (matches.length === 0) throw new Error(`Unowned repository path: ${file}`);
-  if (matches.length > 1) throw new Error(`Repository path ${file} matches multiple ownership rules: ${matches.map((item) => item.pattern).join(', ')}`);
+  if (matches.length > 1)
+    throw new Error(
+      `Repository path ${file} matches multiple ownership rules: ${matches.map((item) => item.pattern).join(", ")}`,
+    );
   return matches[0];
 }
 function digestEntries(entries: RepositoryManifestEntry[]): string {
-  return createHash('sha256').update(JSON.stringify(entries)).digest('hex');
+  return createHash("sha256").update(JSON.stringify(entries)).digest("hex");
 }
 export async function buildManifest(root: string): Promise<RepositoryManifest> {
   const policy = await loadOwnershipPolicy(root);
@@ -98,27 +124,33 @@ export async function buildManifest(root: string): Promise<RepositoryManifest> {
       owner: rule.owner,
       purpose: rule.purpose,
       classification: rule.classification,
-      status: 'active' as const,
+      status: "active" as const,
       generated: rule.generated ?? false,
       source_of_generation: rule.source_of_generation ?? null,
     };
   });
   return {
-    schema_version: '1.0.0',
-    repository: 'Quantum-L9/SEO-Bot',
+    schema_version: "1.0.0",
+    repository: "Quantum-L9/SEO-Bot",
     entries,
     inventory_digest: digestEntries(entries),
   };
 }
 export function renderManifestMarkdown(manifest: RepositoryManifest): string {
-  const rows = manifest.entries.map((entry) =>
-    `| \`${entry.path}\` | ${entry.owner} | ${entry.classification} | ${entry.generated ? 'yes' : 'no'} | ${entry.purpose.replaceAll('|', String.raw`\|`)} |`,
+  const rows = manifest.entries.map(
+    (entry) =>
+      `| \`${entry.path}\` | ${entry.owner} | ${entry.classification} | ${entry.generated ? "yes" : "no"} | ${entry.purpose.replaceAll("|", String.raw`\|`)} |`,
   );
   return [
-    '# L9 SEO Bot Repository Manifest', '',
-    '> Generated by `npm run manifest:generate`. Do not hand-edit.', '',
-    `Inventory digest: \`${manifest.inventory_digest}\``, '',
-    '| Path | Owner | Classification | Generated | Purpose |',
-    '|---|---|---|---:|---|', ...rows, '',
-  ].join('\n');
+    "# L9 SEO Bot Repository Manifest",
+    "",
+    "> Generated by `npm run manifest:generate`. Do not hand-edit.",
+    "",
+    `Inventory digest: \`${manifest.inventory_digest}\``,
+    "",
+    "| Path | Owner | Classification | Generated | Purpose |",
+    "|---|---|---|---:|---|",
+    ...rows,
+    "",
+  ].join("\n");
 }

@@ -7,7 +7,7 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════════
  * L9 SEO Bot - Module 4: Autonomous Link Building
- * 
+ *
  * Emulates Pitchbox/Postaga/BuzzStream autonomously:
  * - Prospect discovery via DataForSEO backlink API
  * - Email extraction via Hunter.io
@@ -17,53 +17,53 @@
  * - Broken link reclamation
  * - Unlinked mention outreach
  * - HARO/Connectively response automation
- * 
+ *
  * Safety Controls:
  * - Link velocity governor (max links/week per client)
  * - Domain quality gate (minimum DR threshold)
  * - Circuit breaker (pauses if rankings drop >30%)
  * - Daily send limit enforcement
- * 
+ *
  * Token Budget:
  * - discoverProspects: ~1000 fast tokens (relevance scoring)
  * - processOutreach: ~3000 strategic tokens (pitch personalization)
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import axios from 'axios';
-import { Job } from 'bullmq';
-import { eq, and, desc, gte, sql } from 'drizzle-orm';
-import { velocityRunLimit } from './velocity.js';
-import { Scheduler } from '../../core/scheduler.js';
-import { getConfig } from '../../core/config.js';
-import { createModuleLogger } from '../../core/logger.js';
-import { getDb, schema } from '../../core/database/index.js';
-import { getLlmService } from '../../services/llm.js';
-import { getNotificationService } from '../../services/notifications.js';
+import axios from "axios";
+import type { Job } from "bullmq";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { getConfig } from "../../core/config.js";
+import { getDb, schema } from "../../core/database/index.js";
+import { createModuleLogger } from "../../core/logger.js";
+import type { Scheduler } from "../../core/scheduler.js";
+import { getLlmService } from "../../services/llm.js";
+import { getNotificationService } from "../../services/notifications.js";
+import { velocityRunLimit } from "./velocity.js";
 
-const logger = createModuleLogger('link-building');
+const logger = createModuleLogger("link-building");
 
 // ─── Safety Controls ─────────────────────────────────────────────────────────
 
 const SAFETY = {
-  maxLinksPerWeek: 5,           // Conservative velocity
-  minDomainRating: 20,          // Minimum DR for prospects
-  maxEmailsPerDay: 10,          // Daily outreach cap
-  followUpDelayDays: 3,         // Days between follow-ups
-  maxFollowUps: 2,              // Max follow-up emails per prospect
-  circuitBreakerDropPct: 30,    // Pause if rankings drop 30%+
+  maxLinksPerWeek: 5, // Conservative velocity
+  minDomainRating: 20, // Minimum DR for prospects
+  maxEmailsPerDay: 10, // Daily outreach cap
+  followUpDelayDays: 3, // Days between follow-ups
+  maxFollowUps: 2, // Max follow-up emails per prospect
+  circuitBreakerDropPct: 30, // Pause if rankings drop 30%+
 };
 
 // ─── Tactic Definitions ──────────────────────────────────────────────────────
 
 type LinkTactic =
-  | 'guest_post'
-  | 'broken_link'
-  | 'unlinked_mention'
-  | 'resource_page'
-  | 'citation'
-  | 'content_syndication'
-  | 'haro_response';
+  | "guest_post"
+  | "broken_link"
+  | "unlinked_mention"
+  | "resource_page"
+  | "citation"
+  | "content_syndication"
+  | "haro_response";
 
 // ─── Hunter.io Email Finder ──────────────────────────────────────────────────
 
@@ -72,12 +72,12 @@ async function findEmail(domain: string): Promise<{ email: string | null; name: 
   if (!config.HUNTER_API_KEY) return { email: null, name: null };
 
   try {
-    const response = await axios.get('https://api.hunter.io/v2/domain-search', {
+    const response = await axios.get("https://api.hunter.io/v2/domain-search", {
       params: {
         domain,
         api_key: config.HUNTER_API_KEY,
         limit: 1,
-        type: 'personal',
+        type: "personal",
       },
       timeout: 15000,
     });
@@ -88,10 +88,10 @@ async function findEmail(domain: string): Promise<{ email: string | null; name: 
     const best = emails[0];
     return {
       email: best.value || null,
-      name: [best.first_name, best.last_name].filter(Boolean).join(' ') || null,
+      name: [best.first_name, best.last_name].filter(Boolean).join(" ") || null,
     };
   } catch (error: any) {
-    logger.debug({ domain, error: error.message }, 'Hunter.io lookup failed');
+    logger.debug({ domain, error: error.message }, "Hunter.io lookup failed");
     return { email: null, name: null };
   }
 }
@@ -100,66 +100,69 @@ async function findEmail(domain: string): Promise<{ email: string | null; name: 
 
 async function discoverBacklinkProspects(
   competitorDomain: string,
-  clientDomain: string
-): Promise<Array<{
-  targetUrl: string;
-  targetDomain: string;
-  domainRating: number;
-  anchorText: string;
-  tactic: LinkTactic;
-}>> {
+  clientDomain: string,
+): Promise<
+  Array<{
+    targetUrl: string;
+    targetDomain: string;
+    domainRating: number;
+    anchorText: string;
+    tactic: LinkTactic;
+  }>
+> {
   const config = getConfig();
-  const auth = Buffer.from(`${config.DATAFORSEO_LOGIN}:${config.DATAFORSEO_PASSWORD}`).toString('base64');
+  const auth = Buffer.from(`${config.DATAFORSEO_LOGIN}:${config.DATAFORSEO_PASSWORD}`).toString(
+    "base64",
+  );
 
   try {
     // Get competitor's backlinks that client doesn't have
     const response = await axios.post(
-      'https://api.dataforseo.com/v3/backlinks/backlinks/live',
-      [{
-        target: competitorDomain,
-        mode: 'as_is',
-        limit: 50,
-        order_by: ['rank,desc'],
-        filters: [
-          ['dofollow', '=', true],
-          'and',
-          ['rank', '>=', SAFETY.minDomainRating],
-        ],
-      }],
+      "https://api.dataforseo.com/v3/backlinks/backlinks/live",
+      [
+        {
+          target: competitorDomain,
+          mode: "as_is",
+          limit: 50,
+          order_by: ["rank,desc"],
+          filters: [["dofollow", "=", true], "and", ["rank", ">=", SAFETY.minDomainRating]],
+        },
+      ],
       {
-        headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
         timeout: 30000,
-      }
+      },
     );
 
     const items = response.data.tasks?.[0]?.result?.[0]?.items || [];
 
     return items
       .filter((item: any) => {
-        const refDomain = item.referring_main_domain || '';
-        return !refDomain.includes(clientDomain.replace('www.', ''));
+        const refDomain = item.referring_main_domain || "";
+        return !refDomain.includes(clientDomain.replace("www.", ""));
       })
       .map((item: any) => ({
-        targetUrl: item.url_from || '',
-        targetDomain: item.referring_main_domain || '',
+        targetUrl: item.url_from || "",
+        targetDomain: item.referring_main_domain || "",
         domainRating: item.rank || 0,
-        anchorText: item.anchor || '',
+        anchorText: item.anchor || "",
         tactic: classifyTactic(item),
       }))
       .slice(0, 20);
   } catch (error: any) {
-    logger.error({ competitorDomain, error: error.message }, 'Backlink discovery failed');
+    logger.error({ competitorDomain, error: error.message }, "Backlink discovery failed");
     return [];
   }
 }
 
 function classifyTactic(backlink: any): LinkTactic {
-  const url = (backlink.url_from || '').toLowerCase();
+  const url = (backlink.url_from || "").toLowerCase();
 
-  if (url.includes('/resources') || url.includes('/links') || url.includes('/tools')) return 'resource_page';
-  if (url.includes('/blog/') || url.includes('/guest')) return 'guest_post';
-  if (backlink.is_broken) return 'broken_link';
-  return 'guest_post'; // Default tactic
+  if (url.includes("/resources") || url.includes("/links") || url.includes("/tools"))
+    return "resource_page";
+  if (url.includes("/blog/") || url.includes("/guest")) return "guest_post";
+  if (backlink.is_broken) return "broken_link";
+  return "guest_post"; // Default tactic
 }
 
 // ─── Handler: Discover Prospects ─────────────────────────────────────────────
@@ -172,17 +175,18 @@ async function discoverProspects(job: Job): Promise<void> {
   const llm = getLlmService();
 
   // Get top competitors from recent SERP data
-  const competitors = await db.selectDistinct({ domain: schema.competitorSnapshots.competitorDomain })
+  const competitors = await db
+    .selectDistinct({ domain: schema.competitorSnapshots.competitorDomain })
     .from(schema.competitorSnapshots)
     .where(eq(schema.competitorSnapshots.clientId, clientId))
     .limit(3);
 
   if (!competitors.length) {
-    logger.info({ clientDomain }, 'No competitor data yet — skipping prospect discovery');
+    logger.info({ clientDomain }, "No competitor data yet — skipping prospect discovery");
     return;
   }
 
-  logger.info({ clientDomain, competitorCount: competitors.length }, 'Discovering link prospects');
+  logger.info({ clientDomain, competitorCount: competitors.length }, "Discovering link prospects");
 
   let totalProspects = 0;
 
@@ -191,12 +195,15 @@ async function discoverProspects(job: Job): Promise<void> {
 
     for (const prospect of prospects) {
       // Check if already in DB
-      const existing = await db.select()
+      const existing = await db
+        .select()
         .from(schema.linkProspects)
-        .where(and(
-          eq(schema.linkProspects.clientId, clientId),
-          eq(schema.linkProspects.targetUrl, prospect.targetUrl),
-        ))
+        .where(
+          and(
+            eq(schema.linkProspects.clientId, clientId),
+            eq(schema.linkProspects.targetUrl, prospect.targetUrl),
+          ),
+        )
         .limit(1);
 
       if (existing.length > 0) continue;
@@ -204,15 +211,15 @@ async function discoverProspects(job: Job): Promise<void> {
       // Score relevance with fast LLM
       const relevanceScore = await llm.extractJson<{ score: number }>(
         `Score the relevance (0.0 to 1.0) of this link prospect for the client.
-Client: ${clientDomain} (${clientConfig?.industry || 'local service'})
+Client: ${clientDomain} (${clientConfig?.industry || "local service"})
 Prospect URL: ${prospect.targetUrl}
 Prospect Domain: ${prospect.targetDomain}
 Domain Rating: ${prospect.domainRating}
 Anchor context: ${prospect.anchorText}
 Return JSON: { "score": 0.X }`,
         clientId,
-        'link-building',
-        `relevance-score:${prospect.targetDomain}`
+        "link-building",
+        `relevance-score:${prospect.targetDomain}`,
       );
 
       if (relevanceScore.score < 0.3) continue; // Skip low-relevance
@@ -229,15 +236,15 @@ Return JSON: { "score": 0.X }`,
         domainRating: prospect.domainRating,
         relevanceScore: relevanceScore.score,
         tactic: prospect.tactic,
-        status: contact.email ? 'ready' : 'needs_email',
+        status: contact.email ? "ready" : "needs_email",
       });
 
       totalProspects++;
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
 
-  logger.info({ clientDomain, newProspects: totalProspects }, 'Prospect discovery complete');
+  logger.info({ clientDomain, newProspects: totalProspects }, "Prospect discovery complete");
 }
 
 // ─── Handler: Process Outreach ───────────────────────────────────────────────
@@ -252,25 +259,28 @@ async function processOutreach(job: Job): Promise<void> {
   const notifications = getNotificationService();
 
   // Check circuit breaker: are rankings stable?
-  const recentRankings = await db.select()
+  const recentRankings = await db
+    .select()
     .from(schema.serpRankings)
     .where(eq(schema.serpRankings.clientId, clientId))
     .orderBy(desc(schema.serpRankings.checkedAt))
     .limit(10);
 
-  const significantDrops = recentRankings.filter(r =>
-    r.previousPosition && r.position &&
-    ((r.position - r.previousPosition) / r.previousPosition * 100) > SAFETY.circuitBreakerDropPct
+  const significantDrops = recentRankings.filter(
+    (r) =>
+      r.previousPosition &&
+      r.position &&
+      ((r.position - r.previousPosition) / r.previousPosition) * 100 > SAFETY.circuitBreakerDropPct,
   );
 
   if (significantDrops.length > 2) {
-    logger.warn({ clientDomain }, 'Circuit breaker: rankings dropping — pausing outreach');
+    logger.warn({ clientDomain }, "Circuit breaker: rankings dropping — pausing outreach");
     await notifications.sendAlert({
       title: `Link Building Paused: ${clientDomain}`,
-      message: 'Rankings show significant drops. Outreach paused until stabilization.',
-      severity: 'warning',
+      message: "Rankings show significant drops. Outreach paused until stabilization.",
+      severity: "warning",
       clientDomain,
-      module: 'link-building',
+      module: "link-building",
     });
     return;
   }
@@ -279,36 +289,42 @@ async function processOutreach(job: Job): Promise<void> {
   // maxLinksPerWeek. Count prospects moved to outreach_queued in the last 7
   // days; the daily cap alone (10/day) would otherwise allow ~70/week.
   const oneWeekAgo = new Date(Date.now() - 7 * 86400000);
-  const sentThisWeekRows = await db.select({ count: sql<number>`COUNT(*)` })
+  const sentThisWeekRows = await db
+    .select({ count: sql<number>`COUNT(*)` })
     .from(schema.linkProspects)
-    .where(and(
-      eq(schema.linkProspects.clientId, clientId),
-      eq(schema.linkProspects.status, 'outreach_queued'),
-      gte(schema.linkProspects.updatedAt, oneWeekAgo),
-    ));
+    .where(
+      and(
+        eq(schema.linkProspects.clientId, clientId),
+        eq(schema.linkProspects.status, "outreach_queued"),
+        gte(schema.linkProspects.updatedAt, oneWeekAgo),
+      ),
+    );
   const sentThisWeek = Number(sentThisWeekRows[0]?.count ?? 0);
   const runLimit = velocityRunLimit(sentThisWeek, SAFETY.maxLinksPerWeek, SAFETY.maxEmailsPerDay);
   if (runLimit === 0) {
-    logger.info({ clientDomain, sentThisWeek }, 'Weekly link velocity cap reached — skipping outreach');
+    logger.info(
+      { clientDomain, sentThisWeek },
+      "Weekly link velocity cap reached — skipping outreach",
+    );
     return;
   }
 
   // Get ready prospects (have email, not yet contacted)
-  const readyProspects = await db.select()
+  const readyProspects = await db
+    .select()
     .from(schema.linkProspects)
-    .where(and(
-      eq(schema.linkProspects.clientId, clientId),
-      eq(schema.linkProspects.status, 'ready'),
-    ))
+    .where(
+      and(eq(schema.linkProspects.clientId, clientId), eq(schema.linkProspects.status, "ready")),
+    )
     .orderBy(desc(schema.linkProspects.relevanceScore))
     .limit(runLimit);
 
   if (!readyProspects.length) {
-    logger.info({ clientDomain }, 'No ready prospects — skipping outreach');
+    logger.info({ clientDomain }, "No ready prospects — skipping outreach");
     return;
   }
 
-  logger.info({ clientDomain, prospectCount: readyProspects.length }, 'Processing outreach');
+  logger.info({ clientDomain, prospectCount: readyProspects.length }, "Processing outreach");
 
   let sentCount = 0;
 
@@ -331,40 +347,41 @@ RULES:
 - Sign off with the client's name/brand
 
 TACTIC: ${prospect.tactic}`,
-        `Client: ${clientDomain} (${clientConfig?.industry || 'local service'}, ${clientConfig?.city || ''})
+        `Client: ${clientDomain} (${clientConfig?.industry || "local service"}, ${clientConfig?.city || ""})
 Prospect: ${prospect.targetUrl}
-Contact: ${prospect.contactName || 'there'}
+Contact: ${prospect.contactName || "there"}
 Domain Rating: ${prospect.domainRating}
 Relevance: ${(prospect.relevanceScore! * 100).toFixed(0)}%
 
 Write the outreach email:`,
         clientId,
-        'link-building',
-        `outreach-pitch:${prospect.targetUrl}`
+        "link-building",
+        `outreach-pitch:${prospect.targetUrl}`,
       );
 
       // Store the outreach sequence
       const sequence = [
         {
-          type: 'initial',
+          type: "initial",
           subject: `Quick question about ${new URL(prospect.targetUrl).hostname}`,
           body: pitch,
           scheduledFor: new Date().toISOString(),
           sent: false,
         },
         {
-          type: 'follow_up_1',
+          type: "follow_up_1",
           subject: `Re: Quick question`,
-          body: '[Auto-generated follow-up based on initial pitch]',
+          body: "[Auto-generated follow-up based on initial pitch]",
           scheduledFor: new Date(Date.now() + SAFETY.followUpDelayDays * 86400000).toISOString(),
           sent: false,
         },
       ];
 
       // Update prospect status
-      await db.update(schema.linkProspects)
+      await db
+        .update(schema.linkProspects)
         .set({
-          status: 'outreach_queued',
+          status: "outreach_queued",
           outreachSequence: sequence,
           updatedAt: new Date(),
         })
@@ -377,28 +394,30 @@ Write the outreach email:`,
         await notifications.sendAlert({
           title: `Outreach Ready: ${prospect.targetUrl}`,
           message: `Pitch generated for ${prospect.contactName || prospect.contactEmail}.\n\nSubject: ${sequence[0].subject}\n\nBody preview: ${pitch.slice(0, 200)}...`,
-          severity: 'info',
+          severity: "info",
           clientDomain,
-          module: 'link-building',
+          module: "link-building",
           data: { prospect: prospect.targetUrl, email: prospect.contactEmail },
         });
       }
 
       sentCount++;
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     } catch (error: any) {
-      logger.error({ prospect: prospect.targetUrl, error: error.message }, 'Outreach processing failed');
+      logger.error(
+        { prospect: prospect.targetUrl, error: error.message },
+        "Outreach processing failed",
+      );
     }
   }
 
-  logger.info({ clientDomain, processed: sentCount }, 'Outreach processing complete');
+  logger.info({ clientDomain, processed: sentCount }, "Outreach processing complete");
 }
 
 // ─── Register Handlers ───────────────────────────────────────────────────────
 
 export function registerLinkHandlers(scheduler: Scheduler): void {
-  scheduler.registerHandler('links:discover-prospects', discoverProspects);
-  scheduler.registerHandler('links:process-outreach', processOutreach);
-  logger.info('Link Building handlers registered');
+  scheduler.registerHandler("links:discover-prospects", discoverProspects);
+  scheduler.registerHandler("links:process-outreach", processOutreach);
+  logger.info("Link Building handlers registered");
 }

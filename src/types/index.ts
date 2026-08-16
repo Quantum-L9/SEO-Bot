@@ -58,9 +58,9 @@ export interface ClientSiteDeploymentConfig {
   // When `schemaVersion === '2.0'` and `status === 'ready'`, credentials are
   // resolved from env:// references (githubCredentialRef / vercelDeployHookRef)
   // rather than raw tokens, and the deploy target is treated as verified.
-  schemaVersion?: '2.0';
-  status?: 'unverified' | 'ready';
-  transport?: 'github-contents-api';
+  schemaVersion?: "2.0";
+  status?: "unverified" | "ready";
+  transport?: "github-contents-api";
   githubCredentialRef?: string;
   vercelDeployHookRef?: string;
   repositoryId?: string;
@@ -79,7 +79,7 @@ export interface ClientSiteDeploymentConfig {
 
 export interface TargetKeyword {
   keyword: string;
-  priority: 'critical' | 'high' | 'medium' | 'low';
+  priority: "critical" | "high" | "medium" | "low";
   targetPosition: number;
   currentPosition: number | null;
   pageUrl: string;
@@ -123,7 +123,7 @@ export interface GapAnalysis {
 }
 
 export interface GapDimension {
-  dimension: 'content_depth' | 'schema' | 'backlinks' | 'speed' | 'freshness' | 'serp_features';
+  dimension: "content_depth" | "schema" | "backlinks" | "speed" | "freshness" | "serp_features";
   clientScore: number;
   competitorScore: number;
   delta: number;
@@ -133,10 +133,10 @@ export interface GapDimension {
 export interface SurpassAction {
   priority: number;
   action: string;
-  effort: 'low' | 'medium' | 'high';
-  impact: 'low' | 'medium' | 'high';
+  effort: "low" | "medium" | "high";
+  impact: "low" | "medium" | "high";
   autonomous: boolean;
-  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  status: "pending" | "in_progress" | "completed" | "failed";
 }
 
 // ─── Web Vitals ──────────────────────────────────────────────────────────────
@@ -144,7 +144,7 @@ export interface SurpassAction {
 export interface WebVitalsReport {
   clientId: string;
   url: string;
-  source: 'psi' | 'crux' | 'rum' | 'search_console';
+  source: "psi" | "crux" | "rum" | "search_console";
   metrics: {
     lcp: number | null;
     inp: number | null;
@@ -152,8 +152,8 @@ export interface WebVitalsReport {
     fcp: number | null;
     ttfb: number | null;
   };
-  rating: 'good' | 'needs_improvement' | 'poor';
-  device: 'mobile' | 'desktop';
+  rating: "good" | "needs_improvement" | "poor";
+  device: "mobile" | "desktop";
   measuredAt: Date;
 }
 
@@ -164,7 +164,7 @@ export interface VitalsAlert {
   threshold: number;
   actual: number;
   sources: string[];
-  severity: 'warning' | 'critical';
+  severity: "warning" | "critical";
   createdAt: Date;
 }
 
@@ -173,7 +173,7 @@ export interface VitalsAlert {
 export interface AeoCitationCheck {
   clientId: string;
   query: string;
-  platform: 'chatgpt' | 'perplexity' | 'google_ai';
+  platform: "chatgpt" | "perplexity" | "google_ai";
   cited: boolean;
   citedUrl: string | null;
   competitorCited: string | null;
@@ -190,10 +190,10 @@ export interface FaqOptimization {
 
 export interface FaqItem {
   question: string;
-  answerBlock: string;       // 40-60 word extractable citation block
-  expandedAnswer: string;    // Full contextual depth
-  dataPoints: number;        // Count of statistics included
-  targetQuery: string;       // Conversational query this targets
+  answerBlock: string; // 40-60 word extractable citation block
+  expandedAnswer: string; // Full contextual depth
+  dataPoints: number; // Count of statistics included
+  targetQuery: string; // Conversational query this targets
 }
 
 // ─── Link Building ───────────────────────────────────────────────────────────
@@ -233,30 +233,30 @@ export interface LinkProspect {
 }
 
 export type LinkTactic =
-  | 'guest_post'
-  | 'resource_page'
-  | 'broken_link'
-  | 'unlinked_mention'
-  | 'citation'
-  | 'content_syndication'
-  | 'haro_response'
-  | 'scholarship';
+  | "guest_post"
+  | "resource_page"
+  | "broken_link"
+  | "unlinked_mention"
+  | "citation"
+  | "content_syndication"
+  | "haro_response"
+  | "scholarship";
 
 export type ProspectStatus =
-  | 'discovered'
-  | 'qualified'
-  | 'outreach_sent'
-  | 'follow_up_1'
-  | 'follow_up_2'
-  | 'follow_up_3'
-  | 'replied_positive'
-  | 'replied_negative'
-  | 'link_acquired'
-  | 'archived';
+  | "discovered"
+  | "qualified"
+  | "outreach_sent"
+  | "follow_up_1"
+  | "follow_up_2"
+  | "follow_up_3"
+  | "replied_positive"
+  | "replied_negative"
+  | "link_acquired"
+  | "archived";
 
 export interface OutreachStep {
   step: number;
-  type: 'initial' | 'follow_up';
+  type: "initial" | "follow_up";
   subject: string;
   body: string;
   sentAt: Date | null;
@@ -270,15 +270,15 @@ export interface PageEngagement {
   clientId: string;
   pageUrl: string;
   pagePath: string;
-  avgTimeOnPage: number;      // seconds
-  avgScrollDepth: number;     // percentage 0-100
-  bounceRate: number;         // percentage 0-100
-  exitRate: number;           // percentage 0-100
+  avgTimeOnPage: number; // seconds
+  avgScrollDepth: number; // percentage 0-100
+  bounceRate: number; // percentage 0-100
+  exitRate: number; // percentage 0-100
   uniqueVisitors: number;
   totalPageviews: number;
   topEntrySource: string;
   topExitDestination: string;
-  period: string;             // e.g., "2026-06-01_2026-06-07"
+  period: string; // e.g., "2026-06-01_2026-06-07"
 }
 
 export interface NavigationFlow {
@@ -286,16 +286,16 @@ export interface NavigationFlow {
   fromPage: string;
   toPage: string;
   transitionCount: number;
-  conversionRate: number;     // % of visitors on this path who convert
+  conversionRate: number; // % of visitors on this path who convert
   period: string;
 }
 
 export interface ConversionPath {
   clientId: string;
-  path: string[];             // ordered list of pages visited
+  path: string[]; // ordered list of pages visited
   frequency: number;
   conversionRate: number;
-  avgTimeToConvert: number;   // seconds
+  avgTimeToConvert: number; // seconds
 }
 
 // ─── Job System ──────────────────────────────────────────────────────────────
@@ -305,24 +305,24 @@ export interface JobDefinition {
   module: ModuleName;
   cron: string;
   handler: string;
-  clientScoped: boolean;      // true = runs once per client
+  clientScoped: boolean; // true = runs once per client
   tokenBudget: TokenBudget;
   enabled: boolean;
 }
 
 export type ModuleName =
-  | 'serp-intelligence'
-  | 'web-vitals'
-  | 'aeo-geo'
-  | 'link-building'
-  | 'behavior-intelligence'
-  | 'memory'
-  | 'build-intelligence';
+  | "serp-intelligence"
+  | "web-vitals"
+  | "aeo-geo"
+  | "link-building"
+  | "behavior-intelligence"
+  | "memory"
+  | "build-intelligence";
 
 export interface TokenBudget {
   maxFastTokensPerRun: number;
   maxStrategicTokensPerRun: number;
-  cooldownMinutes: number;    // min time between LLM calls for this job
+  cooldownMinutes: number; // min time between LLM calls for this job
 }
 
 // ─── Notifications ───────────────────────────────────────────────────────────
@@ -331,7 +331,7 @@ export interface NotificationConfig {
   email: boolean;
   telegram: boolean;
   weeklyReport: boolean;
-  alertOnRankDrop: number;    // alert if position drops by this many
+  alertOnRankDrop: number; // alert if position drops by this many
   alertOnVitalsDegradation: boolean;
 }
 
@@ -343,7 +343,7 @@ export interface OperatorReport {
     avgPositionChange: number;
     linksAcquired: number;
     contentPublished: number;
-    vitalsStatus: 'all_good' | 'needs_attention' | 'critical';
+    vitalsStatus: "all_good" | "needs_attention" | "critical";
     topPages: string[];
     worstPages: string[];
   };
@@ -357,7 +357,7 @@ export interface OperatorReport {
 
 // ─── LLM Integration ─────────────────────────────────────────────────────────
 
-export type LlmTier = 'fast' | 'strategic';
+export type LlmTier = "fast" | "strategic";
 
 export interface LlmCall {
   tier: LlmTier;

@@ -13,36 +13,38 @@
  * leak.
  */
 
-import { describe, it, expect } from 'vitest';
-import { resolveRoute, Provider } from '@quantum-l9/llm-router';
+import { Provider, resolveRoute } from "@quantum-l9/llm-router";
+import { describe, expect, it } from "vitest";
 import {
-  seoImproveTask,
   assertSeoImprovePolicy,
   type SeoImproveLlmOperation,
-} from '../../src/services/improve-llm-policy.js';
+  seoImproveTask,
+} from "../../src/services/improve-llm-policy.js";
 
 const NON_SEARCH_OPS: SeoImproveLlmOperation[] = [
-  'SEO_GAP_EXTRACTION',
-  'SEO_CONTENT_BLUEPRINT',
-  'STRUCTURED_CONTENT_GENERATION',
-  'CONTENT_VALIDATION',
+  "SEO_GAP_EXTRACTION",
+  "SEO_CONTENT_BLUEPRINT",
+  "STRUCTURED_CONTENT_GENERATION",
+  "CONTENT_VALIDATION",
 ];
 
-describe('build-intelligence routing enforcement (real LLM-Router)', () => {
-  it('reasoning/generation/validation ops never resolve to a Perplexity/search route', () => {
+describe("build-intelligence routing enforcement (real LLM-Router)", () => {
+  it("reasoning/generation/validation ops never resolve to a Perplexity/search route", () => {
     for (const op of NON_SEARCH_OPS) {
-      const decision = resolveRoute(seoImproveTask(op, 'client-1', `[build-intelligence] ${op}`));
+      const decision = resolveRoute(seoImproveTask(op, "client-1", `[build-intelligence] ${op}`));
       expect(decision.provider).not.toBe(Provider.PERPLEXITY);
       expect(decision.provider).toBe(Provider.OPENROUTER);
     }
   });
 
-  it('FRESH_WEB_EVIDENCE resolves to a search-capable (Perplexity) route', () => {
-    const decision = resolveRoute(seoImproveTask('FRESH_WEB_EVIDENCE', 'client-1', '[build-intelligence] evidence'));
+  it("FRESH_WEB_EVIDENCE resolves to a search-capable (Perplexity) route", () => {
+    const decision = resolveRoute(
+      seoImproveTask("FRESH_WEB_EVIDENCE", "client-1", "[build-intelligence] evidence"),
+    );
     expect(decision.provider).toBe(Provider.PERPLEXITY);
   });
 
-  it('the shipped policy passes its fail-closed invariant', () => {
+  it("the shipped policy passes its fail-closed invariant", () => {
     expect(() => assertSeoImprovePolicy()).not.toThrow();
   });
 });

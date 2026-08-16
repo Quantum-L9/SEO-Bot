@@ -12,8 +12,8 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import pino from 'pino';
-import { getConfig } from './config.js';
+import pino from "pino";
+import { getConfig } from "./config.js";
 
 let _logger: pino.Logger | null = null;
 
@@ -25,15 +25,15 @@ export function getLogger(): pino.Logger {
   _logger = pino({
     level: config.BOT_LOG_LEVEL,
     transport: {
-      target: 'pino-pretty',
+      target: "pino-pretty",
       options: {
         colorize: process.stdout.isTTY,
-        translateTime: 'SYS:standard',
-        ignore: 'pid,hostname',
+        translateTime: "SYS:standard",
+        ignore: "pid,hostname",
       },
     },
     base: {
-      service: 'l9-seo-bot',
+      service: "l9-seo-bot",
     },
   });
 

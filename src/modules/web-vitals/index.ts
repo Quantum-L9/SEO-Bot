@@ -7,63 +7,68 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════════
  * L9 SEO Bot - Module 2: Web Vitals Multi-Signal Tracker
- * 
+ *
  * Four independent data sources for triangulated performance monitoring:
  * 1. PageSpeed Insights API (lab data - Lighthouse)
  * 2. Chrome UX Report API (real field data from Chrome users)
  * 3. Self-hosted RUM via web-vitals.js (real-time per-visit, stored in PostHog)
  * 4. Google Search Console API (how Google sees it for ranking)
- * 
+ *
  * Token Budget: ZERO — this module is 100% deterministic API calls + DB writes.
  * Alerts are threshold-based, not AI-generated.
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import axios from 'axios';
-import { Job } from 'bullmq';
-import { eq } from 'drizzle-orm';
-import { Scheduler } from '../../core/scheduler.js';
-import { getConfig } from '../../core/config.js';
-import { createModuleLogger } from '../../core/logger.js';
-import { getDb, schema } from '../../core/database/index.js';
-import { resolvePostHogQueryApiKey } from '../../core/posthog-auth.js';
-import { getNotificationService } from '../../services/notifications.js';
+import axios from "axios";
+import type { Job } from "bullmq";
+import { eq } from "drizzle-orm";
+import { getConfig } from "../../core/config.js";
+import { getDb, schema } from "../../core/database/index.js";
+import { createModuleLogger } from "../../core/logger.js";
+import { resolvePostHogQueryApiKey } from "../../core/posthog-auth.js";
+import type { Scheduler } from "../../core/scheduler.js";
+import { getNotificationService } from "../../services/notifications.js";
 
-const logger = createModuleLogger('web-vitals');
+const logger = createModuleLogger("web-vitals");
 
 // ─── Thresholds (Google's Core Web Vitals standards) ─────────────────────────
 
 const THRESHOLDS = {
-  lcp: { good: 2500, poor: 4000 },     // ms
-  inp: { good: 200, poor: 500 },       // ms
-  cls: { good: 0.1, poor: 0.25 },      // score
-  fcp: { good: 1800, poor: 3000 },     // ms
-  ttfb: { good: 800, poor: 1800 },     // ms
+  lcp: { good: 2500, poor: 4000 }, // ms
+  inp: { good: 200, poor: 500 }, // ms
+  cls: { good: 0.1, poor: 0.25 }, // score
+  fcp: { good: 1800, poor: 3000 }, // ms
+  ttfb: { good: 800, poor: 1800 }, // ms
 };
 
-function rateMetric(metric: string, value: number): 'good' | 'needs_improvement' | 'poor' {
+function rateMetric(metric: string, value: number): "good" | "needs_improvement" | "poor" {
   const threshold = THRESHOLDS[metric as keyof typeof THRESHOLDS];
-  if (!threshold) return 'good';
-  if (value <= threshold.good) return 'good';
-  if (value >= threshold.poor) return 'poor';
-  return 'needs_improvement';
+  if (!threshold) return "good";
+  if (value <= threshold.good) return "good";
+  if (value >= threshold.poor) return "poor";
+  return "needs_improvement";
 }
 
-function overallRating(metrics: Record<string, number | null>): 'good' | 'needs_improvement' | 'poor' {
+function overallRating(
+  metrics: Record<string, number | null>,
+): "good" | "needs_improvement" | "poor" {
   const ratings = new Set(
     Object.entries(metrics)
       .filter(([_, v]) => v !== null)
       .map(([k, v]) => rateMetric(k, v!)),
   );
 
-  if (ratings.has('poor')) return 'poor';
-  if (ratings.has('needs_improvement')) return 'needs_improvement';
-  return 'good';
+  if (ratings.has("poor")) return "poor";
+  if (ratings.has("needs_improvement")) return "needs_improvement";
+  return "good";
 }
 
 // ─── Source 1: PageSpeed Insights API ────────────────────────────────────────
 
-async function fetchPageSpeedInsights(url: string, device: 'mobile' | 'desktop'): Promise<{
+async function fetchPageSpeedInsights(
+  url: string,
+  device: "mobile" | "desktop",
+): Promise<{
   lcp: number | null;
   inp: number | null;
   cls: number | null;
@@ -73,12 +78,12 @@ async function fetchPageSpeedInsights(url: string, device: 'mobile' | 'desktop')
   const config = getConfig();
 
   try {
-    const response = await axios.get('https://www.googleapis.com/pagespeedonline/v5/runPagespeed', {
+    const response = await axios.get("https://www.googleapis.com/pagespeedonline/v5/runPagespeed", {
       params: {
         url,
         key: config.PAGESPEED_API_KEY,
         strategy: device,
-        category: 'performance',
+        category: "performance",
       },
       timeout: 60000,
     });
@@ -87,21 +92,24 @@ async function fetchPageSpeedInsights(url: string, device: 'mobile' | 'desktop')
     if (!metrics) return null;
 
     return {
-      lcp: metrics['largest-contentful-paint']?.numericValue || null,
-      inp: metrics['interaction-to-next-paint']?.numericValue || null,
-      cls: metrics['cumulative-layout-shift']?.numericValue || null,
-      fcp: metrics['first-contentful-paint']?.numericValue || null,
-      ttfb: metrics['server-response-time']?.numericValue || null,
+      lcp: metrics["largest-contentful-paint"]?.numericValue || null,
+      inp: metrics["interaction-to-next-paint"]?.numericValue || null,
+      cls: metrics["cumulative-layout-shift"]?.numericValue || null,
+      fcp: metrics["first-contentful-paint"]?.numericValue || null,
+      ttfb: metrics["server-response-time"]?.numericValue || null,
     };
   } catch (error: any) {
-    logger.error({ url, device, error: error.message }, 'PSI fetch failed');
+    logger.error({ url, device, error: error.message }, "PSI fetch failed");
     return null;
   }
 }
 
 // ─── Source 2: Chrome UX Report (CrUX) API ───────────────────────────────────
 
-async function fetchCruxData(origin: string, device: 'PHONE' | 'DESKTOP'): Promise<{
+async function fetchCruxData(
+  origin: string,
+  device: "PHONE" | "DESKTOP",
+): Promise<{
   lcp: number | null;
   inp: number | null;
   cls: number | null;
@@ -117,14 +125,14 @@ async function fetchCruxData(origin: string, device: 'PHONE' | 'DESKTOP'): Promi
         origin,
         formFactor: device,
         metrics: [
-          'largest_contentful_paint',
-          'interaction_to_next_paint',
-          'cumulative_layout_shift',
-          'first_contentful_paint',
-          'experimental_time_to_first_byte',
+          "largest_contentful_paint",
+          "interaction_to_next_paint",
+          "cumulative_layout_shift",
+          "first_contentful_paint",
+          "experimental_time_to_first_byte",
         ],
       },
-      { timeout: 30000 }
+      { timeout: 30000 },
     );
 
     const record = response.data.record?.metrics;
@@ -145,9 +153,9 @@ async function fetchCruxData(origin: string, device: 'PHONE' | 'DESKTOP'): Promi
   } catch (error: any) {
     // CrUX returns 404 for sites without enough traffic data
     if (error.response?.status === 404) {
-      logger.debug({ origin }, 'No CrUX data available (insufficient traffic)');
+      logger.debug({ origin }, "No CrUX data available (insufficient traffic)");
     } else {
-      logger.error({ origin, error: error.message }, 'CrUX fetch failed');
+      logger.error({ origin, error: error.message }, "CrUX fetch failed");
     }
     return null;
   }
@@ -155,7 +163,10 @@ async function fetchCruxData(origin: string, device: 'PHONE' | 'DESKTOP'): Promi
 
 // ─── Source 3: PostHog RUM (web-vitals.js events) ────────────────────────────
 
-async function fetchRumFromPosthog(clientId: string, _domain: string): Promise<{
+async function fetchRumFromPosthog(
+  clientId: string,
+  _domain: string,
+): Promise<{
   lcp: number | null;
   inp: number | null;
   cls: number | null;
@@ -166,13 +177,14 @@ async function fetchRumFromPosthog(clientId: string, _domain: string): Promise<{
   const db = getDb();
 
   // Get client's PostHog project details
-  const [client] = await db.select()
+  const [client] = await db
+    .select()
     .from(schema.clients)
     .where(eq(schema.clients.id, clientId))
     .limit(1);
 
   if (!client?.posthogApiKey || !client?.posthogProjectId) {
-    logger.debug({ clientId }, 'No PostHog config — skipping RUM');
+    logger.debug({ clientId }, "No PostHog config — skipping RUM");
     return null;
   }
 
@@ -182,7 +194,7 @@ async function fetchRumFromPosthog(clientId: string, _domain: string): Promise<{
       `${config.POSTHOG_API_URL}/api/projects/${client.posthogProjectId}/query`,
       {
         query: {
-          kind: 'HogQLQuery',
+          kind: "HogQLQuery",
           query: `
             SELECT
               avg(toFloat64OrNull(JSONExtractString(properties, 'lcp'))) as avg_lcp,
@@ -206,7 +218,7 @@ async function fetchRumFromPosthog(clientId: string, _domain: string): Promise<{
           )}`,
         },
         timeout: 30000,
-      }
+      },
     );
 
     const results = response.data?.results?.[0];
@@ -220,7 +232,7 @@ async function fetchRumFromPosthog(clientId: string, _domain: string): Promise<{
       ttfb: results[4] || null,
     };
   } catch (error: any) {
-    logger.error({ clientId, error: error.message }, 'PostHog RUM fetch failed');
+    logger.error({ clientId, error: error.message }, "PostHog RUM fetch failed");
     return null;
   }
 }
@@ -236,7 +248,7 @@ async function fetchSearchConsoleVitals(domain: string): Promise<{
   // This is a simplified implementation — full implementation would use
   // google-auth-library with the service account JSON.
   // For now, we rely on PSI + CrUX as primary sources.
-  logger.debug({ domain }, 'GSC vitals: using PSI/CrUX as proxy (service account not configured)');
+  logger.debug({ domain }, "GSC vitals: using PSI/CrUX as proxy (service account not configured)");
   return null;
 }
 
@@ -250,42 +262,60 @@ async function checkAllSources(job: Job): Promise<void> {
   const notifications = getNotificationService();
   const url = `https://${clientDomain}`;
 
-  logger.info({ clientDomain }, 'Running multi-signal vitals check');
+  logger.info({ clientDomain }, "Running multi-signal vitals check");
 
   const sources: Array<{ name: string; device: string; data: any }> = [];
 
   // Source 1: PSI (Mobile)
-  const psiMobile = await fetchPageSpeedInsights(url, 'mobile');
+  const psiMobile = await fetchPageSpeedInsights(url, "mobile");
   if (psiMobile) {
-    sources.push({ name: 'psi', device: 'mobile', data: psiMobile });
+    sources.push({ name: "psi", device: "mobile", data: psiMobile });
     await db.insert(schema.webVitals).values({
-      clientId, url, source: 'psi', device: 'mobile',
-      lcp: psiMobile.lcp, inp: psiMobile.inp, cls: psiMobile.cls,
-      fcp: psiMobile.fcp, ttfb: psiMobile.ttfb,
+      clientId,
+      url,
+      source: "psi",
+      device: "mobile",
+      lcp: psiMobile.lcp,
+      inp: psiMobile.inp,
+      cls: psiMobile.cls,
+      fcp: psiMobile.fcp,
+      ttfb: psiMobile.ttfb,
       rating: overallRating(psiMobile),
     });
   }
 
   // Source 1b: PSI (Desktop)
-  const psiDesktop = await fetchPageSpeedInsights(url, 'desktop');
+  const psiDesktop = await fetchPageSpeedInsights(url, "desktop");
   if (psiDesktop) {
-    sources.push({ name: 'psi', device: 'desktop', data: psiDesktop });
+    sources.push({ name: "psi", device: "desktop", data: psiDesktop });
     await db.insert(schema.webVitals).values({
-      clientId, url, source: 'psi', device: 'desktop',
-      lcp: psiDesktop.lcp, inp: psiDesktop.inp, cls: psiDesktop.cls,
-      fcp: psiDesktop.fcp, ttfb: psiDesktop.ttfb,
+      clientId,
+      url,
+      source: "psi",
+      device: "desktop",
+      lcp: psiDesktop.lcp,
+      inp: psiDesktop.inp,
+      cls: psiDesktop.cls,
+      fcp: psiDesktop.fcp,
+      ttfb: psiDesktop.ttfb,
       rating: overallRating(psiDesktop),
     });
   }
 
   // Source 2: CrUX (Mobile)
-  const cruxMobile = await fetchCruxData(url, 'PHONE');
+  const cruxMobile = await fetchCruxData(url, "PHONE");
   if (cruxMobile) {
-    sources.push({ name: 'crux', device: 'mobile', data: cruxMobile });
+    sources.push({ name: "crux", device: "mobile", data: cruxMobile });
     await db.insert(schema.webVitals).values({
-      clientId, url, source: 'crux', device: 'mobile',
-      lcp: cruxMobile.lcp, inp: cruxMobile.inp, cls: cruxMobile.cls,
-      fcp: cruxMobile.fcp, ttfb: cruxMobile.ttfb,
+      clientId,
+      url,
+      source: "crux",
+      device: "mobile",
+      lcp: cruxMobile.lcp,
+      inp: cruxMobile.inp,
+      cls: cruxMobile.cls,
+      fcp: cruxMobile.fcp,
+      ttfb: cruxMobile.ttfb,
       rating: overallRating(cruxMobile),
     });
   }
@@ -293,11 +323,17 @@ async function checkAllSources(job: Job): Promise<void> {
   // Source 3: PostHog RUM
   const rum = await fetchRumFromPosthog(clientId, clientDomain);
   if (rum) {
-    sources.push({ name: 'rum', device: 'all', data: rum });
+    sources.push({ name: "rum", device: "all", data: rum });
     await db.insert(schema.webVitals).values({
-      clientId, url, source: 'rum', device: 'mobile',
-      lcp: rum.lcp, inp: rum.inp, cls: rum.cls,
-      fcp: rum.fcp, ttfb: rum.ttfb,
+      clientId,
+      url,
+      source: "rum",
+      device: "mobile",
+      lcp: rum.lcp,
+      inp: rum.inp,
+      cls: rum.cls,
+      fcp: rum.fcp,
+      ttfb: rum.ttfb,
       rating: overallRating(rum),
     });
   }
@@ -305,58 +341,65 @@ async function checkAllSources(job: Job): Promise<void> {
   // Source 4: GSC
   const gsc = await fetchSearchConsoleVitals(clientDomain);
   if (gsc) {
-    sources.push({ name: 'search_console', device: 'mobile', data: gsc });
+    sources.push({ name: "search_console", device: "mobile", data: gsc });
     await db.insert(schema.webVitals).values({
-      clientId, url, source: 'search_console', device: 'mobile',
-      lcp: gsc.lcp, inp: gsc.inp, cls: gsc.cls,
-      fcp: null, ttfb: null,
+      clientId,
+      url,
+      source: "search_console",
+      device: "mobile",
+      lcp: gsc.lcp,
+      inp: gsc.inp,
+      cls: gsc.cls,
+      fcp: null,
+      ttfb: null,
       rating: overallRating(gsc),
     });
   }
 
   // ─── Cross-Source Disagreement Detection ─────────────────────────────────
   // If two sources disagree on rating, flag for investigation
-  const ratings = sources.map(s => ({ source: s.name, rating: overallRating(s.data) }));
-  const hasDisagreement = ratings.some(r => r.rating === 'poor') && ratings.some(r => r.rating === 'good');
+  const ratings = sources.map((s) => ({ source: s.name, rating: overallRating(s.data) }));
+  const hasDisagreement =
+    ratings.some((r) => r.rating === "poor") && ratings.some((r) => r.rating === "good");
 
   if (hasDisagreement) {
-    logger.warn({ clientDomain, ratings }, 'Source disagreement detected');
+    logger.warn({ clientDomain, ratings }, "Source disagreement detected");
     await notifications.sendAlert({
-      title: 'Vitals Source Disagreement',
+      title: "Vitals Source Disagreement",
       message: `Multiple sources disagree on performance rating for ${clientDomain}. Manual investigation recommended.`,
-      severity: 'warning',
+      severity: "warning",
       clientDomain,
-      module: 'web-vitals',
+      module: "web-vitals",
       data: { ratings },
     });
   }
 
   // ─── Critical Alert: Any source reports "poor" ───────────────────────────
-  const poorSources = sources.filter(s => overallRating(s.data) === 'poor');
+  const poorSources = sources.filter((s) => overallRating(s.data) === "poor");
   if (poorSources.length > 0) {
-    const worstMetrics = poorSources.flatMap(s => {
+    const worstMetrics = poorSources.flatMap((s) => {
       const metrics = s.data;
       return Object.entries(metrics)
-        .filter(([_, v]) => v !== null && rateMetric(_, v as number) === 'poor')
+        .filter(([_, v]) => v !== null && rateMetric(_, v as number) === "poor")
         .map(([k, v]) => `${k}: ${v}`);
     });
 
     await notifications.sendAlert({
       title: `Poor Core Web Vitals: ${clientDomain}`,
-      message: `${poorSources.length} source(s) report POOR performance.\nFailing metrics: ${worstMetrics.join(', ')}`,
-      severity: 'critical',
+      message: `${poorSources.length} source(s) report POOR performance.\nFailing metrics: ${worstMetrics.join(", ")}`,
+      severity: "critical",
       clientDomain,
-      module: 'web-vitals',
-      data: { poorSources: poorSources.map(s => s.name), metrics: worstMetrics },
+      module: "web-vitals",
+      data: { poorSources: poorSources.map((s) => s.name), metrics: worstMetrics },
     });
   }
 
-  logger.info({ clientDomain, sourcesChecked: sources.length, ratings }, 'Vitals check complete');
+  logger.info({ clientDomain, sourcesChecked: sources.length, ratings }, "Vitals check complete");
 }
 
 // ─── Register Handlers ───────────────────────────────────────────────────────
 
 export function registerVitalsHandlers(scheduler: Scheduler): void {
-  scheduler.registerHandler('vitals:check-all-sources', checkAllSources);
-  logger.info('Web Vitals handlers registered');
+  scheduler.registerHandler("vitals:check-all-sources", checkAllSources);
+  logger.info("Web Vitals handlers registered");
 }

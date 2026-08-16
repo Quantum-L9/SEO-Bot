@@ -16,18 +16,18 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import { eq } from 'drizzle-orm';
-import type { WebsiteIntelligenceArtifact } from '@quantum-l9/bot-interop';
-import { getDb, schema } from '../core/database/index.js';
-import { createModuleLogger } from '../core/logger.js';
+import type { WebsiteIntelligenceArtifact } from "@quantum-l9/bot-interop";
+import { eq } from "drizzle-orm";
+import { getDb, schema } from "../core/database/index.js";
+import { createModuleLogger } from "../core/logger.js";
 
-const logger = createModuleLogger('build-intelligence:store');
+const logger = createModuleLogger("build-intelligence:store");
 
 export class ArtifactDigestConflictError extends Error {
-  readonly code = 'CONTENT_CONTRACT_HASH_MISMATCH';
+  readonly code = "CONTENT_CONTRACT_HASH_MISMATCH";
   constructor(artifactId: string) {
     super(`Refusing to overwrite artifact ${artifactId} with a different payload digest`);
-    this.name = 'ArtifactDigestConflictError';
+    this.name = "ArtifactDigestConflictError";
   }
 }
 
@@ -56,15 +56,18 @@ export async function persistIntelligenceArtifact(
     return { persisted: false, idempotent: true };
   }
 
-  await db.insert(table).values({
-    clientId: artifact.client_id,
-    buildId: artifact.build_id,
-    artifactType: artifact.artifact_type,
-    artifactId: artifact.artifact_id,
-    payloadDigest: artifact.integrity.payload_digest,
-    payload: artifact.payload as unknown as Record<string, unknown>,
-    producedAt: new Date(artifact.produced_at),
-  }).onConflictDoNothing({ target: table.artifactId });
+  await db
+    .insert(table)
+    .values({
+      clientId: artifact.client_id,
+      buildId: artifact.build_id,
+      artifactType: artifact.artifact_type,
+      artifactId: artifact.artifact_id,
+      payloadDigest: artifact.integrity.payload_digest,
+      payload: artifact.payload as unknown as Record<string, unknown>,
+      producedAt: new Date(artifact.produced_at),
+    })
+    .onConflictDoNothing({ target: table.artifactId });
 
   logger.info(
     {
@@ -73,7 +76,7 @@ export async function persistIntelligenceArtifact(
       artifactType: artifact.artifact_type,
       artifactId: artifact.artifact_id,
     },
-    'Build-intelligence artifact persisted',
+    "Build-intelligence artifact persisted",
   );
   return { persisted: true, idempotent: false };
 }

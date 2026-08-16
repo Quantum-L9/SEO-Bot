@@ -28,12 +28,12 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import axios from 'axios';
-import { createModuleLogger } from '../core/logger.js';
-import type { ClientConfig } from '../types/index.js';
-import { siteConfigFromStoredClient } from './site-deployment-config.js';
+import axios from "axios";
+import { createModuleLogger } from "../core/logger.js";
+import type { ClientConfig } from "../types/index.js";
+import { siteConfigFromStoredClient } from "./site-deployment-config.js";
 
-const logger = createModuleLogger('site-deployment');
+const logger = createModuleLogger("site-deployment");
 
 // Every outbound call gets a bounded timeout so a hung GitHub/Vercel endpoint
 // can't stall a BullMQ worker slot indefinitely.
@@ -46,17 +46,19 @@ const REQUEST_TIMEOUT_MS = 15_000;
  * an arbitrary extra frontmatter key. Collapse newlines and escape `\` and `"`.
  */
 export function yamlDoubleQuoted(value: string | null | undefined): string {
-  const oneLine = String(value ?? '').replace(/[\r\n]+/g, ' ').trim();
-  const escaped = oneLine.replaceAll('\\', String.raw`\\`).replaceAll('"', String.raw`\"`);
+  const oneLine = String(value ?? "")
+    .replace(/[\r\n]+/g, " ")
+    .trim();
+  const escaped = oneLine.replaceAll("\\", String.raw`\\`).replaceAll('"', String.raw`\"`);
   return `"${escaped}"`;
 }
 
 export interface SiteDeploymentConfig {
   githubToken: string;
   vercelDeployHook: string;
-  websiteBotRepo: string;   // e.g. 'Quantum-L9/Website-Bot'
-  sourceBranch: string;     // e.g. 'main'
-  dryRun?: boolean;         // true in CI/test — logs mutations, writes nothing
+  websiteBotRepo: string; // e.g. 'Quantum-L9/Website-Bot'
+  sourceBranch: string; // e.g. 'main'
+  dryRun?: boolean; // true in CI/test — logs mutations, writes nothing
 }
 
 export interface FileUpdateResult {
@@ -68,7 +70,7 @@ export interface FileUpdateResult {
 }
 
 class GitHubContentClient {
-  private readonly baseUrl = 'https://api.github.com';
+  private readonly baseUrl = "https://api.github.com";
   private config: SiteDeploymentConfig;
 
   constructor(config: SiteDeploymentConfig) {
@@ -78,8 +80,8 @@ class GitHubContentClient {
   private get headers() {
     return {
       Authorization: `Bearer ${this.config.githubToken}`,
-      Accept: 'application/vnd.github.v3+json',
-      'X-GitHub-Api-Version': '2022-11-28',
+      Accept: "application/vnd.github.v3+json",
+      "X-GitHub-Api-Version": "2022-11-28",
     };
   }
 
@@ -91,28 +93,37 @@ class GitHubContentClient {
     // an empty sentinel lets the mutation run harmlessly and writeFile (already
     // dry-run guarded) return the dry-run result.
     if (this.config.dryRun) {
-      logger.info({ filePath }, '[DRY-RUN] Would read file');
-      return { content: '', sha: '' };
+      logger.info({ filePath }, "[DRY-RUN] Would read file");
+      return { content: "", sha: "" };
     }
     const url = `${this.baseUrl}/repos/${this.config.websiteBotRepo}/contents/${filePath}?ref=${this.config.sourceBranch}`;
     const response = await axios.get(url, { headers: this.headers, timeout: REQUEST_TIMEOUT_MS });
-    const content = Buffer.from(response.data.content, 'base64').toString('utf-8');
+    const content = Buffer.from(response.data.content, "base64").toString("utf-8");
     return { content, sha: response.data.sha };
   }
 
-  async writeFile(filePath: string, content: string, sha: string, commitMessage: string): Promise<FileUpdateResult> {
+  async writeFile(
+    filePath: string,
+    content: string,
+    sha: string,
+    commitMessage: string,
+  ): Promise<FileUpdateResult> {
     if (this.config.dryRun) {
-      logger.info({ filePath, commitMessage }, '[DRY-RUN] Would write file');
-      return { success: true, path: filePath, sha, commitUrl: 'dry-run', dryRun: true };
+      logger.info({ filePath, commitMessage }, "[DRY-RUN] Would write file");
+      return { success: true, path: filePath, sha, commitUrl: "dry-run", dryRun: true };
     }
 
     const url = `${this.baseUrl}/repos/${this.config.websiteBotRepo}/contents/${filePath}`;
-    const response = await axios.put(url, {
-      message: commitMessage,
-      content: Buffer.from(content, 'utf-8').toString('base64'),
-      sha,
-      branch: this.config.sourceBranch,
-    }, { headers: this.headers, timeout: REQUEST_TIMEOUT_MS });
+    const response = await axios.put(
+      url,
+      {
+        message: commitMessage,
+        content: Buffer.from(content, "utf-8").toString("base64"),
+        sha,
+        branch: this.config.sourceBranch,
+      },
+      { headers: this.headers, timeout: REQUEST_TIMEOUT_MS },
+    );
 
     return {
       success: true,
@@ -125,15 +136,15 @@ class GitHubContentClient {
 
   async triggerVercelDeploy(): Promise<void> {
     if (this.config.dryRun) {
-      logger.info('[DRY-RUN] Would trigger Vercel deploy hook');
+      logger.info("[DRY-RUN] Would trigger Vercel deploy hook");
       return;
     }
     if (!this.config.vercelDeployHook) {
-      logger.warn('VERCEL_DEPLOY_HOOK not set — skipping Vercel deploy trigger');
+      logger.warn("VERCEL_DEPLOY_HOOK not set — skipping Vercel deploy trigger");
       return;
     }
     await axios.post(this.config.vercelDeployHook, {}, { timeout: REQUEST_TIMEOUT_MS });
-    logger.info('Vercel deploy hook triggered');
+    logger.info("Vercel deploy hook triggered");
   }
 }
 
@@ -142,19 +153,19 @@ class GitHubContentClient {
 
 /** Build the single-tenant transport config from environment variables. */
 export function siteConfigFromEnv(): SiteDeploymentConfig {
-  const githubToken = process.env.GITHUB_TOKEN ?? '';
-  const websiteBotRepo = process.env.WEBSITE_BOT_REPO ?? '';
+  const githubToken = process.env.GITHUB_TOKEN ?? "";
+  const websiteBotRepo = process.env.WEBSITE_BOT_REPO ?? "";
   if (!githubToken || !websiteBotRepo) {
-    logger.warn('GITHUB_TOKEN or WEBSITE_BOT_REPO not set — site-deployment forced to dry-run');
+    logger.warn("GITHUB_TOKEN or WEBSITE_BOT_REPO not set — site-deployment forced to dry-run");
   }
   return {
     githubToken,
-    vercelDeployHook: process.env.VERCEL_DEPLOY_HOOK ?? '',
+    vercelDeployHook: process.env.VERCEL_DEPLOY_HOOK ?? "",
     websiteBotRepo,
-    sourceBranch: process.env.SITE_SOURCE_BRANCH ?? 'main',
+    sourceBranch: process.env.SITE_SOURCE_BRANCH ?? "main",
     dryRun:
-      process.env.NODE_ENV === 'test' ||
-      process.env.SITE_DEPLOY_DRY_RUN === 'true' ||
+      process.env.NODE_ENV === "test" ||
+      process.env.SITE_DEPLOY_DRY_RUN === "true" ||
       !githubToken ||
       !websiteBotRepo,
   };
@@ -176,25 +187,23 @@ export function siteConfigFromClient(clientConfig?: Partial<ClientConfig>): Site
   // Canonical v2 path: credentials come from env:// references and the target is
   // verified. Delegate to the canonical resolver (fail-closed on any incomplete
   // provenance). Existing non-canonical clients keep the raw-token behavior below.
-  if (sd?.schemaVersion === '2.0' && sd.status === 'ready') {
+  if (sd?.schemaVersion === "2.0" && sd.status === "ready") {
     return siteConfigFromStoredClient(clientConfig);
   }
 
-  const githubToken = sd?.githubToken ?? '';
-  const websiteBotRepo = sd?.websiteBotRepo ?? '';
+  const githubToken = sd?.githubToken ?? "";
+  const websiteBotRepo = sd?.websiteBotRepo ?? "";
   if (!githubToken || !websiteBotRepo) {
-    logger.warn(
-      'client site_deployment missing githubToken or websiteBotRepo — forced to dry-run',
-    );
+    logger.warn("client site_deployment missing githubToken or websiteBotRepo — forced to dry-run");
   }
   return {
     githubToken,
-    vercelDeployHook: sd?.vercelDeployHook ?? '',
+    vercelDeployHook: sd?.vercelDeployHook ?? "",
     websiteBotRepo,
-    sourceBranch: sd?.sourceBranch || 'main',
+    sourceBranch: sd?.sourceBranch || "main",
     dryRun:
-      process.env.NODE_ENV === 'test' ||
-      process.env.SITE_DEPLOY_DRY_RUN === 'true' ||
+      process.env.NODE_ENV === "test" ||
+      process.env.SITE_DEPLOY_DRY_RUN === "true" ||
       !githubToken ||
       !websiteBotRepo,
   };
@@ -256,8 +265,10 @@ export async function updateMetaDescription(
   const client = getSiteDeploymentService(config);
   const { content, sha } = await client.readFile(filePath);
 
-  const updated = content
-    .replace(/^description:.*$/m, `description: ${yamlDoubleQuoted(newDescription)}`);
+  const updated = content.replace(
+    /^description:.*$/m,
+    `description: ${yamlDoubleQuoted(newDescription)}`,
+  );
 
   return client.writeFile(
     filePath,
@@ -289,12 +300,12 @@ ${JSON.stringify(schemaJson, null, 2)}
   // short and cause a duplicate block to be injected instead of replaced.
   const existingPattern = new RegExp(
     String.raw`<script type="application/ld\+json">[\s\S]*?"@type":\s*"${schemaType}"[\s\S]*?</script>`,
-    'g',
+    "g",
   );
 
   const updated = existingPattern.test(content)
     ? content.replace(existingPattern, scriptBlock)
-    : content.replace('</head>', `${scriptBlock}\n</head>`);
+    : content.replace("</head>", `${scriptBlock}\n</head>`);
 
   return client.writeFile(
     filePath,
@@ -317,7 +328,9 @@ export async function updateHeading(
   const { content, sha } = await client.readFile(filePath);
 
   // Collapse newlines so a multi-line value can't inject extra markdown lines.
-  const safeHeading = String(newHeading ?? '').replace(/[\r\n]+/g, ' ').trim();
+  const safeHeading = String(newHeading ?? "")
+    .replace(/[\r\n]+/g, " ")
+    .trim();
   const updated = content.replace(/^# .+$/m, `# ${safeHeading}`);
 
   return client.writeFile(
@@ -342,7 +355,7 @@ export async function rewritePageContent(
 
   // Preserve frontmatter (everything between --- delimiters), replace body
   const frontmatterMatch = /^---[\s\S]*?---/.exec(content);
-  const frontmatter = frontmatterMatch ? frontmatterMatch[0] : '';
+  const frontmatter = frontmatterMatch ? frontmatterMatch[0] : "";
   const updated = frontmatter ? `${frontmatter}\n\n${newBodyMarkdown}` : newBodyMarkdown;
 
   return client.writeFile(
@@ -363,15 +376,15 @@ export async function updateFaq(
   config?: SiteDeploymentConfig,
 ): Promise<FileUpdateResult> {
   const faqSchema = {
-    '@context': 'https://schema.org',
-    '@type': 'FAQPage',
-    mainEntity: faqs.map(f => ({
-      '@type': 'Question',
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: faqs.map((f) => ({
+      "@type": "Question",
       name: f.question,
-      acceptedAnswer: { '@type': 'Answer', text: f.answer },
+      acceptedAnswer: { "@type": "Answer", text: f.answer },
     })),
   };
-  return injectSchema(filePath, 'FAQPage', faqSchema, clientDomain, config);
+  return injectSchema(filePath, "FAQPage", faqSchema, clientDomain, config);
 }
 
 /**
@@ -387,7 +400,7 @@ export async function triggerVercelDeploy(config?: SiteDeploymentConfig): Promis
 // repository_dispatch at the Website-Bot repo, whose build-site.yml workflow
 // runs the factory pipeline (build → Vercel deploy → register back here).
 
-const DEFAULT_SPEC_PATH = 'domain_spec/domain_spec.normalized.yaml';
+const DEFAULT_SPEC_PATH = "domain_spec/domain_spec.normalized.yaml";
 
 export interface SiteBuildRequest {
   /** Client to build for; becomes CLIENT_ID in the Website-Bot pipeline. */
@@ -418,19 +431,19 @@ export async function requestSiteBuild(
   const specPath = req.specPath ?? DEFAULT_SPEC_PATH;
 
   if (config.dryRun) {
-    logger.info({ clientId: req.clientId, specPath }, '[DRY-RUN] Would dispatch build-site');
+    logger.info({ clientId: req.clientId, specPath }, "[DRY-RUN] Would dispatch build-site");
     return { dispatched: false, dryRun: true, clientId: req.clientId, specPath };
   }
 
   const url = `https://api.github.com/repos/${config.websiteBotRepo}/dispatches`;
   await axios.post(
     url,
-    { event_type: 'build-site', client_payload: { client_id: req.clientId, spec_path: specPath } },
+    { event_type: "build-site", client_payload: { client_id: req.clientId, spec_path: specPath } },
     {
       headers: {
         Authorization: `Bearer ${config.githubToken}`,
-        Accept: 'application/vnd.github.v3+json',
-        'X-GitHub-Api-Version': '2022-11-28',
+        Accept: "application/vnd.github.v3+json",
+        "X-GitHub-Api-Version": "2022-11-28",
       },
       timeout: REQUEST_TIMEOUT_MS,
     },
@@ -438,7 +451,7 @@ export async function requestSiteBuild(
 
   logger.info(
     { clientId: req.clientId, specPath, repo: config.websiteBotRepo },
-    'Dispatched build-site to Website-Bot',
+    "Dispatched build-site to Website-Bot",
   );
   return { dispatched: true, dryRun: false, clientId: req.clientId, specPath };
 }

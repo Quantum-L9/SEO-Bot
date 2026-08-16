@@ -18,22 +18,27 @@
  * dropped clientConfig, wrong module, or weakened allowlist would ship green.
  */
 
-import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance } from "fastify";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Shared, per-test queue of DB results + a record of every select() column arg.
 const dbState = vi.hoisted(() => ({ queue: [] as unknown[], selectArgs: [] as unknown[] }));
 
-vi.mock('../../src/core/database/index.js', () => {
+vi.mock("../../src/core/database/index.js", () => {
+  // Real Promise with query-builder methods attached — a genuine thenable
+  // without defining a `then` property (noThenProperty).
   const makeBuilder = (result: unknown) => {
-    const p = Promise.resolve(result);
-    const builder: Record<string, unknown> = {};
-    for (const m of ['from', 'where', 'orderBy', 'limit']) builder[m] = () => builder;
-    builder.then = (res: any, rej: any) => p.then(res, rej);
-    return builder;
+    const p = Promise.resolve(result) as Promise<unknown> & Record<string, () => unknown>;
+    for (const m of ["from", "where", "orderBy", "limit"]) {
+      p[m] = () => p;
+    }
+    return p;
   };
   const db = {
-    select: (cols?: unknown) => { dbState.selectArgs.push(cols); return makeBuilder(dbState.queue.shift() ?? []); },
+    select: (cols?: unknown) => {
+      dbState.selectArgs.push(cols);
+      return makeBuilder(dbState.queue.shift() ?? []);
+    },
     execute: () => Promise.resolve([]),
   };
   return {
@@ -41,32 +46,66 @@ vi.mock('../../src/core/database/index.js', () => {
     // Distinct column handles so publicClientColumns is a real, inspectable object.
     schema: {
       clients: Object.fromEntries(
-        ['id', 'name', 'domain', 'industry', 'city', 'state', 'country', 'config', 'active', 'createdAt', 'updatedAt', 'posthogApiKey', 'posthogProjectId']
-          .map(k => [k, `clients.${k}`]),
+        [
+          "id",
+          "name",
+          "domain",
+          "industry",
+          "city",
+          "state",
+          "country",
+          "config",
+          "active",
+          "createdAt",
+          "updatedAt",
+          "posthogApiKey",
+          "posthogProjectId",
+        ].map((k) => [k, `clients.${k}`]),
       ),
-      serpRankings: {}, webVitals: {}, pageEngagement: {}, linkProspects: {}, aeoCitations: {}, actionOutcomes: {},
+      serpRankings: {},
+      webVitals: {},
+      pageEngagement: {},
+      linkProspects: {},
+      aeoCitations: {},
+      actionOutcomes: {},
     },
   };
 });
 
 const addJobMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
-vi.mock('../../src/core/scheduler.js', () => ({
+vi.mock("../../src/core/scheduler.js", () => ({
   getScheduler: () => ({ addJob: addJobMock, isRunning: () => true }),
 }));
-vi.mock('../../src/services/llm.js', () => ({
+vi.mock("../../src/services/llm.js", () => ({
   getLlmService: () => ({ getDailySpend: vi.fn().mockResolvedValue(0), initClient: vi.fn() }),
 }));
-vi.mock('../../src/core/logger.js', () => ({
+vi.mock("../../src/core/logger.js", () => ({
   createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
-vi.mock('../../src/core/config.js', () => ({
-  getConfig: () => ({ TRUST_PROXY: false, OPERATOR_API_KEY: 'op-key', DASHBOARD_ALLOWED_ORIGINS: undefined }),
+vi.mock("../../src/core/config.js", () => ({
+  getConfig: () => ({
+    TRUST_PROXY: false,
+    OPERATOR_API_KEY: "op-key",
+    DASHBOARD_ALLOWED_ORIGINS: undefined,
+  }),
 }));
 
-import { buildApiServer } from '../../src/api/index.js';
+import { buildApiServer } from "../../src/api/index.js";
 
-const AUTH = { authorization: 'Bearer op-key' };
-const PUBLIC_COLS = ['id', 'name', 'domain', 'industry', 'city', 'state', 'country', 'config', 'active', 'createdAt', 'updatedAt'];
+const AUTH = { authorization: "Bearer op-key" };
+const PUBLIC_COLS = [
+  "id",
+  "name",
+  "domain",
+  "industry",
+  "city",
+  "state",
+  "country",
+  "config",
+  "active",
+  "createdAt",
+  "updatedAt",
+];
 
 let app: FastifyInstance;
 beforeEach(async () => {
@@ -76,90 +115,103 @@ beforeEach(async () => {
   app = await buildApiServer();
   await app.ready();
 });
-afterEach(async () => { await app.close(); });
+afterEach(async () => {
+  await app.close();
+});
 
-describe('GAP-007 — client API never projects PostHog secret columns', () => {
-  it('/api/clients selects the public allowlist, excluding posthog secrets', async () => {
-    dbState.queue = [[{ id: 'c1', name: 'Acme', domain: 'acme.com', industry: 'roofing' }]];
+describe("GAP-007 — client API never projects PostHog secret columns", () => {
+  it("/api/clients selects the public allowlist, excluding posthog secrets", async () => {
+    dbState.queue = [[{ id: "c1", name: "Acme", domain: "acme.com", industry: "roofing" }]];
 
-    const res = await app.inject({ method: 'GET', url: '/api/clients', headers: AUTH });
+    const res = await app.inject({ method: "GET", url: "/api/clients", headers: AUTH });
     expect(res.statusCode).toBe(200);
 
     // The real guarantee: select() was handed the explicit column allowlist.
     const cols = dbState.selectArgs[0] as Record<string, unknown> | undefined;
-    expect(cols).toBeDefined();                       // a bare select() (leak) would be undefined
+    expect(cols).toBeDefined(); // a bare select() (leak) would be undefined
     const keys = Object.keys(cols!);
     for (const c of PUBLIC_COLS) expect(keys).toContain(c);
-    expect(keys).not.toContain('posthogApiKey');
-    expect(keys).not.toContain('posthogProjectId');
+    expect(keys).not.toContain("posthogApiKey");
+    expect(keys).not.toContain("posthogProjectId");
 
     // Serialized body carries neither secret field name.
-    expect(res.body).not.toContain('posthogApiKey');
-    expect(res.body).not.toContain('posthogProjectId');
+    expect(res.body).not.toContain("posthogApiKey");
+    expect(res.body).not.toContain("posthogProjectId");
   });
 
-  it('/api/clients/:id selects the same public allowlist for the client row', async () => {
+  it("/api/clients/:id selects the same public allowlist for the client row", async () => {
     dbState.queue = [
-      [{ id: 'c1', name: 'Acme', domain: 'acme.com', industry: 'roofing' }], // client
-      [], [], [], [], [], // rankings, vitals, engagement, prospects, citations
+      [{ id: "c1", name: "Acme", domain: "acme.com", industry: "roofing" }], // client
+      [],
+      [],
+      [],
+      [],
+      [], // rankings, vitals, engagement, prospects, citations
     ];
 
-    const res = await app.inject({ method: 'GET', url: '/api/clients/c1', headers: AUTH });
+    const res = await app.inject({ method: "GET", url: "/api/clients/c1", headers: AUTH });
     expect(res.statusCode).toBe(200);
 
     const cols = dbState.selectArgs[0] as Record<string, unknown> | undefined;
     expect(cols).toBeDefined();
     const keys = Object.keys(cols!);
-    expect(keys).not.toContain('posthogApiKey');
-    expect(keys).not.toContain('posthogProjectId');
+    expect(keys).not.toContain("posthogApiKey");
+    expect(keys).not.toContain("posthogProjectId");
     for (const c of PUBLIC_COLS) expect(keys).toContain(c);
   });
 });
 
-describe('GAP-010 — manual-trigger routing, allowlist, and tenant payload', () => {
-  const validClient = { id: 'c1', domain: 'acme.com', config: { tenant: 'A', secretish: 'x' } };
+describe("GAP-010 — manual-trigger routing, allowlist, and tenant payload", () => {
+  const validClient = { id: "c1", domain: "acme.com", config: { tenant: "A", secretish: "x" } };
 
-  it('queues the exact module with the loaded client id/domain/config', async () => {
+  it("queues the exact module with the loaded client id/domain/config", async () => {
     dbState.queue = [[validClient]];
     const res = await app.inject({
-      method: 'POST', url: '/api/clients/c1/trigger', headers: AUTH,
-      payload: { module: 'serp:check-rankings' },
+      method: "POST",
+      url: "/api/clients/c1/trigger",
+      headers: AUTH,
+      payload: { module: "serp:check-rankings" },
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ success: true });
     expect(addJobMock).toHaveBeenCalledTimes(1);
-    expect(addJobMock).toHaveBeenCalledWith('serp:check-rankings', {
-      clientId: 'c1',
-      clientDomain: 'acme.com',
-      clientConfig: { tenant: 'A', secretish: 'x' }, // from the DB row, not the request
+    expect(addJobMock).toHaveBeenCalledWith("serp:check-rankings", {
+      clientId: "c1",
+      clientDomain: "acme.com",
+      clientConfig: { tenant: "A", secretish: "x" }, // from the DB row, not the request
     });
   });
 
-  it('rejects a module outside the allowlist and queues nothing', async () => {
+  it("rejects a module outside the allowlist and queues nothing", async () => {
     dbState.queue = [[validClient]];
     const res = await app.inject({
-      method: 'POST', url: '/api/clients/c1/trigger', headers: AUTH,
-      payload: { module: 'rm:danger' },
+      method: "POST",
+      url: "/api/clients/c1/trigger",
+      headers: AUTH,
+      payload: { module: "rm:danger" },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json().error).toContain('Invalid module');
+    expect(res.json().error).toContain("Invalid module");
     expect(addJobMock).not.toHaveBeenCalled();
   });
 
-  it('does not queue when the client does not exist', async () => {
+  it("does not queue when the client does not exist", async () => {
     dbState.queue = [[]]; // no client row
     const res = await app.inject({
-      method: 'POST', url: '/api/clients/missing/trigger', headers: AUTH,
-      payload: { module: 'serp:check-rankings' },
+      method: "POST",
+      url: "/api/clients/missing/trigger",
+      headers: AUTH,
+      payload: { module: "serp:check-rankings" },
     });
-    expect(res.json()).toEqual({ error: 'Client not found' });
+    expect(res.json()).toEqual({ error: "Client not found" });
     expect(addJobMock).not.toHaveBeenCalled();
   });
 
-  it('still enforces operator auth on the trigger route (401 without a token)', async () => {
+  it("still enforces operator auth on the trigger route (401 without a token)", async () => {
     const res = await app.inject({
-      method: 'POST', url: '/api/clients/c1/trigger',
-      payload: { module: 'serp:check-rankings' },
+      method: "POST",
+      url: "/api/clients/c1/trigger",
+      payload: { module: "serp:check-rankings" },
     });
     expect(res.statusCode).toBe(401);
     expect(addJobMock).not.toHaveBeenCalled();

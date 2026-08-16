@@ -18,17 +18,17 @@
  */
 
 import {
-  sealIntelligenceArtifact,
   type CompetitiveLandscapeArtifact,
   type CompetitiveLandscapeV1,
+  sealIntelligenceArtifact,
   WEBSITE_INTELLIGENCE_SCHEMAS,
-} from '@quantum-l9/bot-interop';
-import { createModuleLogger } from '../core/logger.js';
-import { DataForSeoClient, type OrganicSerpResult } from '../services/dataforseo.js';
-import { PRODUCER } from './producer.js';
-import { canonicalizeDomain, classifyDomain } from './domain-classification.js';
+} from "@quantum-l9/bot-interop";
+import { createModuleLogger } from "../core/logger.js";
+import { DataForSeoClient, type OrganicSerpResult } from "../services/dataforseo.js";
+import { canonicalizeDomain, classifyDomain } from "./domain-classification.js";
+import { PRODUCER } from "./producer.js";
 
-const logger = createModuleLogger('build-intelligence:competitive-landscape');
+const logger = createModuleLogger("build-intelligence:competitive-landscape");
 
 /** Minimal DataForSEO surface this producer depends on (injectable for tests). */
 export interface DataForSeoOrganicPort {
@@ -36,7 +36,7 @@ export interface DataForSeoOrganicPort {
     keyword: string;
     locationName?: string;
     languageName?: string;
-    device?: 'desktop' | 'mobile';
+    device?: "desktop" | "mobile";
     depth?: number;
   }): Promise<OrganicSerpResult>;
 }
@@ -48,12 +48,12 @@ export interface CompetitiveLandscapeRequest {
     niche: string;
     country: string;
     language: string;
-    device?: 'desktop' | 'mobile';
+    device?: "desktop" | "mobile";
     location_name?: string;
   };
   seed_queries: Array<{
     query: string;
-    intent: 'informational' | 'commercial' | 'transactional' | 'local';
+    intent: "informational" | "commercial" | "transactional" | "local";
     weight?: number;
   }>;
   /** Target donor cohort size. Default 10. */
@@ -64,10 +64,10 @@ export interface CompetitiveLandscapeRequest {
 
 /** Thrown when there is not a single real SERP observation to build donors from. */
 export class CompetitiveEvidenceIncompleteError extends Error {
-  readonly code = 'COMPETITIVE_EVIDENCE_INCOMPLETE';
+  readonly code = "COMPETITIVE_EVIDENCE_INCOMPLETE";
   constructor(message: string) {
     super(message);
-    this.name = 'CompetitiveEvidenceIncompleteError';
+    this.name = "CompetitiveEvidenceIncompleteError";
   }
 }
 
@@ -103,7 +103,7 @@ export async function createCompetitiveLandscape(
 ): Promise<CompetitiveLandscapeArtifact> {
   const dataForSeo = deps.dataForSeo ?? new DataForSeoClient();
   const desiredDonorCount = request.desired_donor_count ?? DEFAULT_DONOR_COUNT;
-  const device = request.market.device ?? 'desktop';
+  const device = request.market.device ?? "desktop";
   const locationName = request.market.location_name ?? request.market.country;
 
   const state: QueryCollectionState = {
@@ -129,15 +129,17 @@ export async function createCompetitiveLandscape(
     state.aggregates,
   );
 
-  const domains: CompetitiveLandscapeV1['domains'] = orderedAggregates.map((aggregate) => ({
+  const domains: CompetitiveLandscapeV1["domains"] = orderedAggregates.map((aggregate) => ({
     domain: aggregate.domain,
     aggregate_visibility: round(aggregate.visibility),
     qualifying_query_ids: [...aggregate.queryIds].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
     observation_ids: aggregate.observationIds,
   }));
 
-  const donorCandidates = orderedAggregates.filter((aggregate) => !excludedDomains.has(aggregate.domain));
-  const selectedDonors: CompetitiveLandscapeV1['selected_donors'] = donorCandidates
+  const donorCandidates = orderedAggregates.filter(
+    (aggregate) => !excludedDomains.has(aggregate.domain),
+  );
+  const selectedDonors: CompetitiveLandscapeV1["selected_donors"] = donorCandidates
     .slice(0, desiredDonorCount)
     .map((aggregate) => ({
       domain: aggregate.domain,
@@ -175,7 +177,7 @@ export async function createCompetitiveLandscape(
   };
 
   const artifact = sealIntelligenceArtifact({
-    artifact_type: 'competitive_landscape',
+    artifact_type: "competitive_landscape",
     client_id: request.client_id,
     build_id: request.build_id,
     producer: PRODUCER,
@@ -193,7 +195,7 @@ export async function createCompetitiveLandscape(
       evidenceComplete,
       artifactId: artifact.artifact_id,
     },
-    'CompetitiveLandscape sealed',
+    "CompetitiveLandscape sealed",
   );
 
   return artifact;
@@ -201,8 +203,8 @@ export async function createCompetitiveLandscape(
 
 /** Mutable per-run collection state threaded through the query-collection helper. */
 interface QueryCollectionState {
-  queryPortfolio: CompetitiveLandscapeV1['query_portfolio'];
-  observations: CompetitiveLandscapeV1['observations'];
+  queryPortfolio: CompetitiveLandscapeV1["query_portfolio"];
+  observations: CompetitiveLandscapeV1["observations"];
   aggregates: Map<string, DomainAggregate>;
   seenOrder: number;
 }
@@ -216,13 +218,13 @@ async function collectQueryObservations(
   request: CompetitiveLandscapeRequest,
   dataForSeo: DataForSeoOrganicPort,
   locationName: string,
-  device: 'desktop' | 'mobile',
+  device: "desktop" | "mobile",
   state: QueryCollectionState,
 ): Promise<void> {
   for (let i = 0; i < request.seed_queries.length; i++) {
     const seed = request.seed_queries[i]!;
     const qid = queryId(i);
-    const weight = typeof seed.weight === 'number' && seed.weight > 0 ? seed.weight : 1;
+    const weight = typeof seed.weight === "number" && seed.weight > 0 ? seed.weight : 1;
     state.queryPortfolio.push({ query_id: qid, query: seed.query, intent: seed.intent, weight });
 
     let serp: OrganicSerpResult;
@@ -236,14 +238,14 @@ async function collectQueryObservations(
     } catch (error) {
       logger.warn(
         { query: seed.query, error: error instanceof Error ? error.message : String(error) },
-        'SERP fetch failed for seed query; query yields zero observations',
+        "SERP fetch failed for seed query; query yields zero observations",
       );
       continue;
     }
 
     for (const item of serp.items) {
       const rank = item.rankGroup; // organic position only
-      if (typeof rank !== 'number' || rank < 1) continue;
+      if (typeof rank !== "number" || rank < 1) continue;
       const canonical = canonicalizeDomain(item.domain || item.url);
       if (!canonical) continue;
       const observationId = `${qid}-r${rank}`;
@@ -254,12 +256,18 @@ async function collectQueryObservations(
         url: item.url,
         domain: canonical,
         observed_at: serp.observedAt,
-        source: 'dataforseo',
+        source: "dataforseo",
       });
 
       let aggregate = state.aggregates.get(canonical);
       if (!aggregate) {
-        aggregate = { domain: canonical, visibility: 0, queryIds: new Set(), observationIds: [], firstSeenOrder: state.seenOrder++ };
+        aggregate = {
+          domain: canonical,
+          visibility: 0,
+          queryIds: new Set(),
+          observationIds: [],
+          firstSeenOrder: state.seenOrder++,
+        };
         state.aggregates.set(canonical, aggregate);
       }
       aggregate.visibility += visibilityContribution(weight, rank);
@@ -279,13 +287,13 @@ function applyExclusions(
   orderedAggregates: DomainAggregate[],
   operatorExclusions: Set<string>,
   aggregates: Map<string, DomainAggregate>,
-): { exclusions: CompetitiveLandscapeV1['exclusions']; excludedDomains: Set<string> } {
-  const exclusions: CompetitiveLandscapeV1['exclusions'] = [];
+): { exclusions: CompetitiveLandscapeV1["exclusions"]; excludedDomains: Set<string> } {
+  const exclusions: CompetitiveLandscapeV1["exclusions"] = [];
   const excludedDomains = new Set<string>();
 
   for (const aggregate of orderedAggregates) {
     if (operatorExclusions.has(aggregate.domain)) {
-      exclusions.push({ domain: aggregate.domain, reason: 'operator_exclusion' });
+      exclusions.push({ domain: aggregate.domain, reason: "operator_exclusion" });
       excludedDomains.add(aggregate.domain);
       continue;
     }
@@ -298,7 +306,7 @@ function applyExclusions(
 
   for (const domain of operatorExclusions) {
     if (!aggregates.has(domain)) {
-      exclusions.push({ domain, reason: 'operator_exclusion' });
+      exclusions.push({ domain, reason: "operator_exclusion" });
       excludedDomains.add(domain);
     }
   }

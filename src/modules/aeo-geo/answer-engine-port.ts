@@ -20,8 +20,8 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import axios from 'axios';
-import { getConfig } from '../../core/config.js';
+import axios from "axios";
+import { getConfig } from "../../core/config.js";
 
 /** A single answer-engine response observed for a query. */
 export interface AnswerEngineObservation {
@@ -32,7 +32,7 @@ export interface AnswerEngineObservation {
 }
 
 /** Named engines this port can observe. */
-export type AnswerEngineId = 'perplexity';
+export type AnswerEngineId = "perplexity";
 
 export interface AnswerEngineObservationPort {
   readonly engine: AnswerEngineId;
@@ -45,15 +45,15 @@ export interface AnswerEngineObservationPort {
  * prior inline AEO implementation so citation-check behavior is unchanged.
  */
 export class PerplexityAnswerEnginePort implements AnswerEngineObservationPort {
-  readonly engine = 'perplexity' as const;
+  readonly engine = "perplexity" as const;
 
   async observe(query: string, signal?: AbortSignal): Promise<AnswerEngineObservation> {
     const config = getConfig();
     const response = await axios.post(
-      'https://api.perplexity.ai/chat/completions',
+      "https://api.perplexity.ai/chat/completions",
       {
-        model: 'llama-3.1-sonar-small-128k-online',
-        messages: [{ role: 'user', content: query }],
+        model: "llama-3.1-sonar-small-128k-online",
+        messages: [{ role: "user", content: query }],
         return_citations: true,
       },
       {
@@ -63,7 +63,7 @@ export class PerplexityAnswerEnginePort implements AnswerEngineObservationPort {
       },
     );
     return {
-      content: response.data.choices?.[0]?.message?.content || '',
+      content: response.data.choices?.[0]?.message?.content || "",
       citations: response.data.citations || [],
     };
   }
@@ -73,7 +73,7 @@ let _perplexityPort: AnswerEngineObservationPort | null = null;
 
 /** Resolve the observation port for a named answer engine (singleton). */
 export function getAnswerEnginePort(engine: AnswerEngineId): AnswerEngineObservationPort {
-  if (engine === 'perplexity') {
+  if (engine === "perplexity") {
     if (_perplexityPort === null) {
       _perplexityPort = new PerplexityAnswerEnginePort();
     }

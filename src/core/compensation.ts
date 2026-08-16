@@ -8,9 +8,9 @@
  * On failure, call compensate() to reverse registered actions in LIFO order.
  */
 
-import { createModuleLogger } from './logger.js';
+import { createModuleLogger } from "./logger.js";
 
-const logger = createModuleLogger('compensation');
+const logger = createModuleLogger("compensation");
 
 export interface CompensationEntry {
   stepId: string;
@@ -33,7 +33,7 @@ export class CompensationRegistry {
    */
   register(stepId: string, action: () => Promise<void>): void {
     this.entries.push({ stepId, clientId: this.clientId, action, registeredAt: new Date() });
-    logger.debug({ jobId: this.jobId, stepId, clientId: this.clientId }, 'compensation:registered');
+    logger.debug({ jobId: this.jobId, stepId, clientId: this.clientId }, "compensation:registered");
   }
 
   /**
@@ -46,11 +46,11 @@ export class CompensationRegistry {
       try {
         await entry.action();
         results.push({ stepId: entry.stepId });
-        logger.info({ jobId: this.jobId, stepId: entry.stepId }, 'compensation:ok');
+        logger.info({ jobId: this.jobId, stepId: entry.stepId }, "compensation:ok");
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         results.push({ stepId: entry.stepId, error: message });
-        logger.error({ jobId: this.jobId, stepId: entry.stepId, message }, 'compensation:failed');
+        logger.error({ jobId: this.jobId, stepId: entry.stepId, message }, "compensation:failed");
       }
     }
     return results;

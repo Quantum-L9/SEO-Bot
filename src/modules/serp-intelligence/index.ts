@@ -7,14 +7,14 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════════
  * L9 SEO Bot - Module 1: SERP Intelligence
- * 
+ *
  * Capabilities:
  * - Daily rank tracking via DataForSEO (zero tokens)
  * - Competitor position monitoring (zero tokens)
  * - Automated gap analysis across 6 dimensions (fast LLM for scoring)
  * - Surpass plan generation (strategic LLM, used weekly)
  * - Circuit breaker: alerts if position drops >3 spots
- * 
+ *
  * Token Budget:
  * - checkRankings: 0 tokens (pure API + DB)
  * - analyzeCompetitors: ~2000 fast tokens (scoring)
@@ -22,17 +22,17 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import { Job } from 'bullmq';
-import { eq, and, desc } from 'drizzle-orm';
-import { Scheduler } from '../../core/scheduler.js';
-import { createModuleLogger } from '../../core/logger.js';
-import { getDb, schema } from '../../core/database/index.js';
-import { getLlmService } from '../../services/llm.js';
-import { getNotificationService } from '../../services/notifications.js';
-import { DataForSeoClient } from '../../services/dataforseo.js';
-import type { GapDimension, SurpassAction } from '../../types/index.js';
+import type { Job } from "bullmq";
+import { and, desc, eq } from "drizzle-orm";
+import { getDb, schema } from "../../core/database/index.js";
+import { createModuleLogger } from "../../core/logger.js";
+import type { Scheduler } from "../../core/scheduler.js";
+import { DataForSeoClient } from "../../services/dataforseo.js";
+import { getLlmService } from "../../services/llm.js";
+import { getNotificationService } from "../../services/notifications.js";
+import type { GapDimension, SurpassAction } from "../../types/index.js";
 
-const logger = createModuleLogger('serp-intelligence');
+const logger = createModuleLogger("serp-intelligence");
 
 // ─── DataForSEO Client ───────────────────────────────────────────────────────
 // The single DataForSEO client now lives in src/services/dataforseo.ts (one
@@ -50,26 +50,28 @@ async function checkRankings(job: Job): Promise<void> {
   const notifications = getNotificationService();
   const keywords = clientConfig?.targetKeywords || [];
 
-  logger.info({ clientDomain, keywordCount: keywords.length }, 'Checking rankings');
+  logger.info({ clientDomain, keywordCount: keywords.length }, "Checking rankings");
 
   for (const kw of keywords) {
     try {
       const result = await client.getRankings(kw.keyword, clientDomain);
 
       // Get previous position
-      const [previous] = await db.select()
+      const [previous] = await db
+        .select()
         .from(schema.serpRankings)
-        .where(and(
-          eq(schema.serpRankings.clientId, clientId),
-          eq(schema.serpRankings.keyword, kw.keyword),
-        ))
+        .where(
+          and(
+            eq(schema.serpRankings.clientId, clientId),
+            eq(schema.serpRankings.keyword, kw.keyword),
+          ),
+        )
         .orderBy(desc(schema.serpRankings.checkedAt))
         .limit(1);
 
       const previousPosition = previous?.position || null;
-      const positionChange = (previousPosition && result.position)
-        ? previousPosition - result.position
-        : 0;
+      const positionChange =
+        previousPosition && result.position ? previousPosition - result.position : 0;
 
       // Store ranking
       await db.insert(schema.serpRankings).values({
@@ -99,22 +101,21 @@ async function checkRankings(job: Job): Promise<void> {
         await notifications.sendAlert({
           title: `Rank Drop: "${kw.keyword}"`,
           message: `Position dropped from #${previousPosition} to #${result.position} (${positionChange} spots)`,
-          severity: positionChange < -5 ? 'critical' : 'warning',
+          severity: positionChange < -5 ? "critical" : "warning",
           clientDomain,
-          module: 'serp-intelligence',
+          module: "serp-intelligence",
           data: { keyword: kw.keyword, previousPosition, currentPosition: result.position },
         });
       }
 
       // Rate limit: 1 request per 2 seconds
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     } catch (error: any) {
-      logger.error({ keyword: kw.keyword, error: error.message }, 'Failed to check ranking');
+      logger.error({ keyword: kw.keyword, error: error.message }, "Failed to check ranking");
     }
   }
 
-  logger.info({ clientDomain }, 'Rankings check complete');
+  logger.info({ clientDomain }, "Rankings check complete");
 }
 
 // ─── Handler: Analyze Competitors (FAST LLM for scoring) ─────────────────────
@@ -126,9 +127,12 @@ async function analyzeCompetitors(job: Job): Promise<void> {
   const db = getDb();
   const dataForSeo = new DataForSeoClient();
   const llm = getLlmService();
-  const keywords = clientConfig?.targetKeywords?.filter((k: any) => k.priority === 'critical' || k.priority === 'high') || [];
+  const keywords =
+    clientConfig?.targetKeywords?.filter(
+      (k: any) => k.priority === "critical" || k.priority === "high",
+    ) || [];
 
-  logger.info({ clientDomain, keywordCount: keywords.length }, 'Analyzing competitors');
+  logger.info({ clientDomain, keywordCount: keywords.length }, "Analyzing competitors");
 
   for (const kw of keywords) {
     try {
@@ -154,7 +158,12 @@ async function analyzeCompetitors(job: Job): Promise<void> {
       const gapData = {
         keyword: kw.keyword,
         client: { position: serp.position, content: clientContent, backlinks: clientBacklinks },
-        competitor: { position: topCompetitor.position, content: competitorContent, backlinks: competitorBacklinks, domain: topCompetitor.domain },
+        competitor: {
+          position: topCompetitor.position,
+          content: competitorContent,
+          backlinks: competitorBacklinks,
+          domain: topCompetitor.domain,
+        },
       };
 
       const gaps = await llm.extractJson<GapDimension[]>(
@@ -170,8 +179,8 @@ Score based on: content_depth (word count, headings, images), schema (structured
 backlinks (referring domains, DR), speed (assume equal if no data), freshness (recent update signals), 
 serp_features (featured snippets, PAA, etc.)`,
         clientId,
-        'serp-intelligence',
-        `gap-analysis:${kw.keyword}`
+        "serp-intelligence",
+        `gap-analysis:${kw.keyword}`,
       );
 
       // Store gap analysis
@@ -181,13 +190,12 @@ serp_features (featured snippets, PAA, etc.)`,
         clientUrl: serp.url,
         competitorUrl: topCompetitor.url,
         gaps,
-        status: 'pending',
+        status: "pending",
       });
 
-      await new Promise(resolve => setTimeout(resolve, 3000));
-
+      await new Promise((resolve) => setTimeout(resolve, 3000));
     } catch (error: any) {
-      logger.error({ keyword: kw.keyword, error: error.message }, 'Competitor analysis failed');
+      logger.error({ keyword: kw.keyword, error: error.message }, "Competitor analysis failed");
     }
   }
 }
@@ -202,21 +210,19 @@ async function generateSurpassPlan(job: Job): Promise<void> {
   const llm = getLlmService();
 
   // Get latest gap analyses that need plans
-  const pendingGaps = await db.select()
+  const pendingGaps = await db
+    .select()
     .from(schema.gapAnalyses)
-    .where(and(
-      eq(schema.gapAnalyses.clientId, clientId),
-      eq(schema.gapAnalyses.status, 'pending'),
-    ))
+    .where(and(eq(schema.gapAnalyses.clientId, clientId), eq(schema.gapAnalyses.status, "pending")))
     .orderBy(desc(schema.gapAnalyses.generatedAt))
     .limit(3); // Only top 3 keywords per week
 
   if (!pendingGaps.length) {
-    logger.info({ clientDomain }, 'No pending gap analyses — skipping surpass plan');
+    logger.info({ clientDomain }, "No pending gap analyses — skipping surpass plan");
     return;
   }
 
-  logger.info({ clientDomain, gapCount: pendingGaps.length }, 'Generating surpass plans');
+  logger.info({ clientDomain, gapCount: pendingGaps.length }, "Generating surpass plans");
 
   for (const gap of pendingGaps) {
     try {
@@ -234,8 +240,8 @@ ${JSON.stringify(gap.gaps, null, 2)}
 
 Generate the surpass plan:`,
         clientId,
-        'serp-intelligence',
-        `surpass-plan:${gap.keyword}`
+        "serp-intelligence",
+        `surpass-plan:${gap.keyword}`,
       );
 
       let surpassPlan: SurpassAction[];
@@ -243,18 +249,33 @@ Generate the surpass plan:`,
         surpassPlan = JSON.parse(planJson);
       } catch {
         // If LLM didn't return valid JSON, wrap it
-        surpassPlan = [{ priority: 1, action: planJson, effort: 'medium', impact: 'high', autonomous: false, status: 'pending' }];
+        surpassPlan = [
+          {
+            priority: 1,
+            action: planJson,
+            effort: "medium",
+            impact: "high",
+            autonomous: false,
+            status: "pending",
+          },
+        ];
       }
 
       // Update gap analysis with plan
-      await db.update(schema.gapAnalyses)
-        .set({ surpassPlan, status: 'planned' })
+      await db
+        .update(schema.gapAnalyses)
+        .set({ surpassPlan, status: "planned" })
         .where(eq(schema.gapAnalyses.id, gap.id));
 
-      logger.info({ keyword: gap.keyword, actionCount: surpassPlan.length }, 'Surpass plan generated');
-
+      logger.info(
+        { keyword: gap.keyword, actionCount: surpassPlan.length },
+        "Surpass plan generated",
+      );
     } catch (error: any) {
-      logger.error({ keyword: gap.keyword, error: error.message }, 'Surpass plan generation failed');
+      logger.error(
+        { keyword: gap.keyword, error: error.message },
+        "Surpass plan generation failed",
+      );
     }
   }
 }
@@ -271,15 +292,15 @@ async function generateWeeklyReport(job: Job): Promise<void> {
 
   // Gather week's data
 
-  const rankings = await db.select()
+  const rankings = await db
+    .select()
     .from(schema.serpRankings)
-    .where(and(
-      eq(schema.serpRankings.clientId, clientId),
-    ))
+    .where(and(eq(schema.serpRankings.clientId, clientId)))
     .orderBy(desc(schema.serpRankings.checkedAt))
     .limit(50);
 
-  const recentGaps = await db.select()
+  const recentGaps = await db
+    .select()
     .from(schema.gapAnalyses)
     .where(eq(schema.gapAnalyses.clientId, clientId))
     .orderBy(desc(schema.gapAnalyses.generatedAt))
@@ -287,14 +308,14 @@ async function generateWeeklyReport(job: Job): Promise<void> {
 
   // Generate summary with fast LLM (cheap)
   const summaryContent = await llm.generateContent(
-    'Generate a concise weekly SEO report summary in HTML format. Include key metrics, wins, and action items.',
+    "Generate a concise weekly SEO report summary in HTML format. Include key metrics, wins, and action items.",
     `Client: ${clientDomain}
-Rankings data (latest): ${JSON.stringify(rankings.slice(0, 10).map(r => ({ keyword: r.keyword, position: r.position, prev: r.previousPosition })))}
+Rankings data (latest): ${JSON.stringify(rankings.slice(0, 10).map((r) => ({ keyword: r.keyword, position: r.position, prev: r.previousPosition })))}
 Gap analyses: ${recentGaps.length} pending
 Generate a brief HTML report.`,
     clientId,
-    'serp-intelligence',
-    'weekly-report-generation',
+    "serp-intelligence",
+    "weekly-report-generation",
   );
   const summary = { content: summaryContent };
 
@@ -304,15 +325,15 @@ Generate a brief HTML report.`,
     htmlReport: summary.content,
   });
 
-  logger.info({ clientDomain }, 'Weekly report sent');
+  logger.info({ clientDomain }, "Weekly report sent");
 }
 
 // ─── Register Handlers ───────────────────────────────────────────────────────
 
 export function registerSerpHandlers(scheduler: Scheduler): void {
-  scheduler.registerHandler('serp:check-rankings', checkRankings);
-  scheduler.registerHandler('serp:competitor-analysis', analyzeCompetitors);
-  scheduler.registerHandler('serp:generate-surpass-plan', generateSurpassPlan);
-  scheduler.registerHandler('reports:weekly-summary', generateWeeklyReport);
-  logger.info('SERP Intelligence handlers registered');
+  scheduler.registerHandler("serp:check-rankings", checkRankings);
+  scheduler.registerHandler("serp:competitor-analysis", analyzeCompetitors);
+  scheduler.registerHandler("serp:generate-surpass-plan", generateSurpassPlan);
+  scheduler.registerHandler("reports:weekly-summary", generateWeeklyReport);
+  logger.info("SERP Intelligence handlers registered");
 }

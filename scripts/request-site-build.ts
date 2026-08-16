@@ -22,8 +22,8 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import { hydrateSecretsIfConfigured } from '../src/core/secrets.js';
-import { requestSiteBuild } from '../src/services/site-deployment.js';
+import { hydrateSecretsIfConfigured } from "../src/core/secrets.js";
+import { requestSiteBuild } from "../src/services/site-deployment.js";
 
 async function main() {
   // Validate args before any secret loading — a bad invocation should print
@@ -32,8 +32,8 @@ async function main() {
   const specPath = process.argv[3];
 
   if (!clientId) {
-    console.error('Usage: npm run request-site-build -- <clientId> [specPath]');
-    console.error('   or: tsx scripts/request-site-build.ts <clientId> [specPath]');
+    console.error("Usage: npm run request-site-build -- <clientId> [specPath]");
+    console.error("   or: tsx scripts/request-site-build.ts <clientId> [specPath]");
     process.exit(1);
   }
 
@@ -47,7 +47,9 @@ async function main() {
         `clientId=${result.clientId} specPath=${result.specPath}`,
     );
   } else {
-    console.log(`✅ Dispatched build-site (clientId=${result.clientId}, specPath=${result.specPath})`);
+    console.log(
+      `✅ Dispatched build-site (clientId=${result.clientId}, specPath=${result.specPath})`,
+    );
   }
 }
 

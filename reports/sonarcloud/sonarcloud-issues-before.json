@@ -235,10 +235,7 @@
       "message": "Refactor this function to reduce its Cognitive Complexity from 23 to the 15 allowed.",
       "effort": "13min",
       "debt": "13min",
-      "tags": [
-        "brain-overload",
-        "editable-source"
-      ],
+      "tags": ["brain-overload", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -279,9 +276,7 @@
       "message": "Unexpected `await` of a non-Promise (non-\"Thenable\") value.",
       "effort": "1min",
       "debt": "1min",
-      "tags": [
-        "es2017"
-      ],
+      "tags": ["es2017"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -322,9 +317,7 @@
       "message": "Unexpected `await` of a non-Promise (non-\"Thenable\") value.",
       "effort": "1min",
       "debt": "1min",
-      "tags": [
-        "es2017"
-      ],
+      "tags": ["es2017"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -365,14 +358,7 @@
       "message": "Prefer top-level await over using a promise chain.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "async",
-        "editable-source",
-        "es2022",
-        "esm-only",
-        "modernize",
-        "type-dependent"
-      ],
+      "tags": ["async", "editable-source", "es2022", "esm-only", "modernize", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -413,11 +399,7 @@
       "message": "`String.raw` should be used to avoid escaping `\\`.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "es2015",
-        "readability"
-      ],
+      "tags": ["editable-source", "es2015", "readability"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -458,10 +440,7 @@
       "message": "Simplify this regular expression to reduce its runtime, as it has super-linear performance due to backtracking.",
       "effort": "20min",
       "debt": "20min",
-      "tags": [
-        "performance",
-        "regex"
-      ],
+      "tags": ["performance", "regex"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -502,11 +481,7 @@
       "message": "Use the \"RegExp.exec()\" method instead.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "regex",
-        "type-dependent"
-      ],
+      "tags": ["editable-source", "regex", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -547,11 +522,7 @@
       "message": "Use 'String#startsWith' method instead.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "es2015",
-        "type-dependent"
-      ],
+      "tags": ["editable-source", "es2015", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -592,11 +563,7 @@
       "message": "Use 'String#startsWith' method instead.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "es2015",
-        "type-dependent"
-      ],
+      "tags": ["editable-source", "es2015", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -637,10 +604,7 @@
       "message": "Simplify this regular expression to reduce its runtime, as it has super-linear performance due to backtracking.",
       "effort": "20min",
       "debt": "20min",
-      "tags": [
-        "performance",
-        "regex"
-      ],
+      "tags": ["performance", "regex"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -850,10 +814,7 @@
       "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 15 allowed.",
       "effort": "10min",
       "debt": "10min",
-      "tags": [
-        "brain-overload",
-        "editable-source"
-      ],
+      "tags": ["brain-overload", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -894,11 +855,7 @@
       "message": "`String.raw` should be used to avoid escaping `\\`.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "es2015",
-        "readability"
-      ],
+      "tags": ["editable-source", "es2015", "readability"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -1080,10 +1037,7 @@
       "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 15 allowed.",
       "effort": "10min",
       "debt": "10min",
-      "tags": [
-        "brain-overload",
-        "editable-source"
-      ],
+      "tags": ["brain-overload", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -1124,11 +1078,7 @@
       "message": "Use the \"RegExp.exec()\" method instead.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "regex",
-        "type-dependent"
-      ],
+      "tags": ["editable-source", "regex", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -1380,10 +1330,7 @@
       "message": "Refactor this function to reduce its Cognitive Complexity from 16 to the 15 allowed.",
       "effort": "6min",
       "debt": "6min",
-      "tags": [
-        "brain-overload",
-        "editable-source"
-      ],
+      "tags": ["brain-overload", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -1887,10 +1834,7 @@
       "message": "Refactor this function to reduce its Cognitive Complexity from 38 to the 15 allowed.",
       "effort": "28min",
       "debt": "28min",
-      "tags": [
-        "brain-overload",
-        "editable-source"
-      ],
+      "tags": ["brain-overload", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -1931,11 +1875,7 @@
       "message": "'value' may use Object's default stringification format ('[object Object]') when stringified.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "object",
-        "string",
-        "type-dependent"
-      ],
+      "tags": ["object", "string", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -1976,12 +1916,7 @@
       "message": "`new Error()` is too unspecific for a type check. Use `new TypeError()` instead.",
       "effort": "2min",
       "debt": "2min",
-      "tags": [
-        "convention",
-        "editable-source",
-        "error-handling",
-        "type-checking"
-      ],
+      "tags": ["convention", "editable-source", "error-handling", "type-checking"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -2022,14 +1957,7 @@
       "message": "Prefer top-level await over using a promise chain.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "async",
-        "editable-source",
-        "es2022",
-        "esm-only",
-        "modernize",
-        "type-dependent"
-      ],
+      "tags": ["async", "editable-source", "es2022", "esm-only", "modernize", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -2070,14 +1998,7 @@
       "message": "Prefer top-level await over using a promise chain.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "async",
-        "editable-source",
-        "es2022",
-        "esm-only",
-        "modernize",
-        "type-dependent"
-      ],
+      "tags": ["async", "editable-source", "es2022", "esm-only", "modernize", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -2118,11 +2039,7 @@
       "message": "Prefer `String#replaceAll()` over `String#replace()`.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "es2021",
-        "readability"
-      ],
+      "tags": ["editable-source", "es2021", "readability"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -2167,11 +2084,7 @@
       "message": "`String.raw` should be used to avoid escaping `\\`.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "es2015",
-        "readability"
-      ],
+      "tags": ["editable-source", "es2015", "readability"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -2507,10 +2420,7 @@
       "message": "Refactor this function to reduce its Cognitive Complexity from 33 to the 15 allowed.",
       "effort": "23min",
       "debt": "23min",
-      "tags": [
-        "brain-overload",
-        "editable-source"
-      ],
+      "tags": ["brain-overload", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -2551,10 +2461,7 @@
       "message": "Extract this nested ternary operation into an independent statement.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "confusing",
-        "editable-source"
-      ],
+      "tags": ["confusing", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -2736,10 +2643,7 @@
       "message": "Refactor this function to reduce its Cognitive Complexity from 17 to the 15 allowed.",
       "effort": "7min",
       "debt": "7min",
-      "tags": [
-        "brain-overload",
-        "editable-source"
-      ],
+      "tags": ["brain-overload", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -2780,12 +2684,7 @@
       "message": "Use '[[' instead of '[' for conditional tests. The '[[' construct is safer and more feature-rich.",
       "effort": "2min",
       "debt": "2min",
-      "tags": [
-        "bash",
-        "best-practices",
-        "scripting",
-        "shell"
-      ],
+      "tags": ["bash", "best-practices", "scripting", "shell"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -2826,12 +2725,7 @@
       "message": "Use '[[' instead of '[' for conditional tests. The '[[' construct is safer and more feature-rich.",
       "effort": "2min",
       "debt": "2min",
-      "tags": [
-        "bash",
-        "best-practices",
-        "scripting",
-        "shell"
-      ],
+      "tags": ["bash", "best-practices", "scripting", "shell"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -2872,12 +2766,7 @@
       "message": "Use '[[' instead of '[' for conditional tests. The '[[' construct is safer and more feature-rich.",
       "effort": "2min",
       "debt": "2min",
-      "tags": [
-        "bash",
-        "best-practices",
-        "scripting",
-        "shell"
-      ],
+      "tags": ["bash", "best-practices", "scripting", "shell"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -2918,12 +2807,7 @@
       "message": "Use '[[' instead of '[' for conditional tests. The '[[' construct is safer and more feature-rich.",
       "effort": "2min",
       "debt": "2min",
-      "tags": [
-        "bash",
-        "best-practices",
-        "scripting",
-        "shell"
-      ],
+      "tags": ["bash", "best-practices", "scripting", "shell"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -2964,10 +2848,7 @@
       "message": "Omitting \"--ignore-scripts\" allows lifecycle scripts to run during package installation.",
       "effort": "30min",
       "debt": "30min",
-      "tags": [
-        "cwe",
-        "former-hotspot"
-      ],
+      "tags": ["cwe", "former-hotspot"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -3009,11 +2890,7 @@
       "message": "'value ?? ''' will use Object's default stringification format ('[object Object]') when stringified.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "object",
-        "string",
-        "type-dependent"
-      ],
+      "tags": ["object", "string", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -3054,11 +2931,7 @@
       "message": "Prefer `String#replaceAll()` over `String#replace()`.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "es2021",
-        "readability"
-      ],
+      "tags": ["editable-source", "es2021", "readability"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -3103,11 +2976,7 @@
       "message": "Prefer `String#replaceAll()` over `String#replace()`.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "es2021",
-        "readability"
-      ],
+      "tags": ["editable-source", "es2021", "readability"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -3152,11 +3021,7 @@
       "message": "Prefer `String#replaceAll()` over `String#replace()`.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "es2021",
-        "readability"
-      ],
+      "tags": ["editable-source", "es2021", "readability"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -3201,11 +3066,7 @@
       "message": "Prefer `String#replaceAll()` over `String#replace()`.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "es2021",
-        "readability"
-      ],
+      "tags": ["editable-source", "es2021", "readability"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -3250,11 +3111,7 @@
       "message": "Prefer `String#replaceAll()` over `String#replace()`.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "es2021",
-        "readability"
-      ],
+      "tags": ["editable-source", "es2021", "readability"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -3299,10 +3156,7 @@
       "message": "Extract this nested ternary operation into an independent statement.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "confusing",
-        "editable-source"
-      ],
+      "tags": ["confusing", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -3343,10 +3197,7 @@
       "message": "Extract this nested ternary operation into an independent statement.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "confusing",
-        "editable-source"
-      ],
+      "tags": ["confusing", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -3542,10 +3393,7 @@
       "message": "Refactor this function to reduce its Cognitive Complexity from 17 to the 15 allowed.",
       "effort": "7min",
       "debt": "7min",
-      "tags": [
-        "brain-overload",
-        "editable-source"
-      ],
+      "tags": ["brain-overload", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -3586,10 +3434,7 @@
       "message": "Simplify this regular expression to reduce its runtime, as it has super-linear performance due to backtracking.",
       "effort": "20min",
       "debt": "20min",
-      "tags": [
-        "performance",
-        "regex"
-      ],
+      "tags": ["performance", "regex"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -3630,12 +3475,7 @@
       "message": "`new Error()` is too unspecific for a type check. Use `new TypeError()` instead.",
       "effort": "2min",
       "debt": "2min",
-      "tags": [
-        "convention",
-        "editable-source",
-        "error-handling",
-        "type-checking"
-      ],
+      "tags": ["convention", "editable-source", "error-handling", "type-checking"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -3831,10 +3671,7 @@
       "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 15 allowed.",
       "effort": "10min",
       "debt": "10min",
-      "tags": [
-        "brain-overload",
-        "editable-source"
-      ],
+      "tags": ["brain-overload", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -3875,11 +3712,7 @@
       "message": "Prefer `String#replaceAll()` over `String#replace()`.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "es2021",
-        "readability"
-      ],
+      "tags": ["editable-source", "es2021", "readability"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -3924,11 +3757,7 @@
       "message": "Prefer `String#replaceAll()` over `String#replace()`.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "es2021",
-        "readability"
-      ],
+      "tags": ["editable-source", "es2021", "readability"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -3973,11 +3802,7 @@
       "message": "`String.raw` should be used to avoid escaping `\\`.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "es2015",
-        "readability"
-      ],
+      "tags": ["editable-source", "es2015", "readability"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -4053,14 +3878,7 @@
       "message": "Prefer top-level await over using a promise chain.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "async",
-        "editable-source",
-        "es2022",
-        "esm-only",
-        "modernize",
-        "type-dependent"
-      ],
+      "tags": ["async", "editable-source", "es2022", "esm-only", "modernize", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -4158,10 +3976,7 @@
       "message": "Mark these members as `readonly`.",
       "effort": "2min",
       "debt": "2min",
-      "tags": [
-        "confusing",
-        "type-dependent"
-      ],
+      "tags": ["confusing", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -4202,10 +4017,7 @@
       "message": "Simplify this regular expression to reduce its runtime, as it has super-linear performance due to backtracking.",
       "effort": "20min",
       "debt": "20min",
-      "tags": [
-        "performance",
-        "regex"
-      ],
+      "tags": ["performance", "regex"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -4246,11 +4058,7 @@
       "message": "Use the \"RegExp.exec()\" method instead.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "regex",
-        "type-dependent"
-      ],
+      "tags": ["editable-source", "regex", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -4291,11 +4099,7 @@
       "message": "Use the \"RegExp.exec()\" method instead.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "regex",
-        "type-dependent"
-      ],
+      "tags": ["editable-source", "regex", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -4336,10 +4140,7 @@
       "message": "Simplify this regular expression to reduce its runtime, as it has super-linear performance due to backtracking.",
       "effort": "20min",
       "debt": "20min",
-      "tags": [
-        "performance",
-        "regex"
-      ],
+      "tags": ["performance", "regex"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -4409,10 +4210,7 @@
       "message": "Mark these members as `readonly`.",
       "effort": "2min",
       "debt": "2min",
-      "tags": [
-        "confusing",
-        "type-dependent"
-      ],
+      "tags": ["confusing", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -4453,10 +4251,7 @@
       "message": "Complete the task associated to this \"TODO\" comment.",
       "effort": "0min",
       "debt": "0min",
-      "tags": [
-        "cwe",
-        "editable-source"
-      ],
+      "tags": ["cwe", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -4497,11 +4292,7 @@
       "message": "`String.raw` should be used to avoid escaping `\\`.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "es2015",
-        "readability"
-      ],
+      "tags": ["editable-source", "es2015", "readability"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -4542,11 +4333,7 @@
       "message": "Use the \"RegExp.exec()\" method instead.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "regex",
-        "type-dependent"
-      ],
+      "tags": ["editable-source", "regex", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -4587,10 +4374,7 @@
       "message": "Omitting \"--ignore-scripts\" allows lifecycle scripts to run during package installation.",
       "effort": "30min",
       "debt": "30min",
-      "tags": [
-        "cwe",
-        "former-hotspot"
-      ],
+      "tags": ["cwe", "former-hotspot"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -4674,10 +4458,7 @@
       "message": "\"npx\" can install packages on-demand and run their lifecycle scripts.",
       "effort": "30min",
       "debt": "30min",
-      "tags": [
-        "cwe",
-        "former-hotspot"
-      ],
+      "tags": ["cwe", "former-hotspot"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -4761,10 +4542,7 @@
       "message": "\"npx\" can install packages on-demand and run their lifecycle scripts.",
       "effort": "30min",
       "debt": "30min",
-      "tags": [
-        "cwe",
-        "former-hotspot"
-      ],
+      "tags": ["cwe", "former-hotspot"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -4848,9 +4626,7 @@
       "message": "Use 'Object.hasOwn()' instead of 'Object.prototype.hasOwnProperty.call()'.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "es2022"
-      ],
+      "tags": ["es2022"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -4891,11 +4667,7 @@
       "message": "Prefer using nullish coalescing operator (`??=`) instead of an assignment expression, as it is simpler to read.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "es2020",
-        "nullish-coalescing",
-        "type-dependent"
-      ],
+      "tags": ["es2020", "nullish-coalescing", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -4977,12 +4749,7 @@
       "message": "Move function 'g' to the outer scope.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "javascript",
-        "optimization",
-        "performance"
-      ],
+      "tags": ["editable-source", "javascript", "optimization", "performance"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5023,10 +4790,7 @@
       "message": "Extract the assignment of \"p\" from this expression.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "cwe",
-        "suspicious"
-      ],
+      "tags": ["cwe", "suspicious"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5108,10 +4872,7 @@
       "message": "Extract the assignment of \"r\" from this expression.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "cwe",
-        "suspicious"
-      ],
+      "tags": ["cwe", "suspicious"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5152,10 +4913,7 @@
       "message": "Extract the assignment of \"u\" from this expression.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "cwe",
-        "suspicious"
-      ],
+      "tags": ["cwe", "suspicious"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5196,10 +4954,7 @@
       "message": "Extract the assignment of \"a\" from this expression.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "cwe",
-        "suspicious"
-      ],
+      "tags": ["cwe", "suspicious"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5281,10 +5036,7 @@
       "message": "This statement will not be executed in a loop; only the first statement will be. The rest will execute only once.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "cwe",
-        "editable-source"
-      ],
+      "tags": ["cwe", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5325,10 +5077,7 @@
       "message": "Omitting \"--ignore-scripts\" allows lifecycle scripts to run during package installation.",
       "effort": "30min",
       "debt": "30min",
-      "tags": [
-        "cwe",
-        "former-hotspot"
-      ],
+      "tags": ["cwe", "former-hotspot"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5370,11 +5119,7 @@
       "message": "Copying using a glob pattern might inadvertently add sensitive data to the container. Make sure it is safe here.",
       "effort": "20min",
       "debt": "20min",
-      "tags": [
-        "cwe",
-        "dockerfile",
-        "former-hotspot"
-      ],
+      "tags": ["cwe", "dockerfile", "former-hotspot"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5471,10 +5216,7 @@
       "message": "Omitting \"--ignore-scripts\" allows lifecycle scripts to run during package installation.",
       "effort": "30min",
       "debt": "30min",
-      "tags": [
-        "cwe",
-        "former-hotspot"
-      ],
+      "tags": ["cwe", "former-hotspot"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5516,12 +5258,7 @@
       "message": "Prefer `node:readline` over `readline`.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "convention",
-        "editable-source",
-        "import",
-        "nodejs"
-      ],
+      "tags": ["convention", "editable-source", "import", "nodejs"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5562,14 +5299,7 @@
       "message": "Prefer top-level await over using a promise chain.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "async",
-        "editable-source",
-        "es2022",
-        "esm-only",
-        "modernize",
-        "type-dependent"
-      ],
+      "tags": ["async", "editable-source", "es2022", "esm-only", "modernize", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5610,10 +5340,7 @@
       "message": "Assign this positional parameter to a local variable.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "readability",
-        "shell"
-      ],
+      "tags": ["readability", "shell"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5654,10 +5381,7 @@
       "message": "Assign this positional parameter to a local variable.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "readability",
-        "shell"
-      ],
+      "tags": ["readability", "shell"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5698,11 +5422,7 @@
       "message": "Redirect this error message to stderr (>&2).",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "output",
-        "posix",
-        "shell"
-      ],
+      "tags": ["output", "posix", "shell"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5743,10 +5463,7 @@
       "message": "Assign this positional parameter to a local variable.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "readability",
-        "shell"
-      ],
+      "tags": ["readability", "shell"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5787,10 +5504,7 @@
       "message": "Not enforcing HTTPS here might allow for redirections to insecure websites. Make sure it is safe here.",
       "effort": "30min",
       "debt": "30min",
-      "tags": [
-        "cwe",
-        "former-hotspot"
-      ],
+      "tags": ["cwe", "former-hotspot"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5832,12 +5546,7 @@
       "message": "Use '[[' instead of '[' for conditional tests. The '[[' construct is safer and more feature-rich.",
       "effort": "2min",
       "debt": "2min",
-      "tags": [
-        "bash",
-        "best-practices",
-        "scripting",
-        "shell"
-      ],
+      "tags": ["bash", "best-practices", "scripting", "shell"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5878,11 +5587,7 @@
       "message": "Remove this unused import of 'count'.",
       "effort": "1min",
       "debt": "1min",
-      "tags": [
-        "es2015",
-        "type-dependent",
-        "unused"
-      ],
+      "tags": ["es2015", "type-dependent", "unused"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5924,10 +5629,7 @@
       "message": "Extract this nested ternary operation into an independent statement.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "confusing",
-        "editable-source"
-      ],
+      "tags": ["confusing", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -5969,10 +5671,7 @@
       "message": "Extract this nested ternary operation into an independent statement.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "confusing",
-        "editable-source"
-      ],
+      "tags": ["confusing", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -6014,10 +5713,7 @@
       "message": "Extract this nested ternary operation into an independent statement.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "confusing",
-        "editable-source"
-      ],
+      "tags": ["confusing", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -6058,10 +5754,7 @@
       "message": "Extract this nested ternary operation into an independent statement.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "confusing",
-        "editable-source"
-      ],
+      "tags": ["confusing", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -6102,10 +5795,7 @@
       "message": "Extract this nested ternary operation into an independent statement.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "confusing",
-        "editable-source"
-      ],
+      "tags": ["confusing", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -6146,10 +5836,7 @@
       "message": "Extract this nested ternary operation into an independent statement.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "confusing",
-        "editable-source"
-      ],
+      "tags": ["confusing", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -6190,14 +5877,7 @@
       "message": "Prefer top-level await over an async function `runMigrations` call.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "async",
-        "editable-source",
-        "es2022",
-        "esm-only",
-        "modernize",
-        "type-dependent"
-      ],
+      "tags": ["async", "editable-source", "es2022", "esm-only", "modernize", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -6238,11 +5918,7 @@
       "message": "Remove this unused import of 'uniqueIndex'.",
       "effort": "1min",
       "debt": "1min",
-      "tags": [
-        "es2015",
-        "type-dependent",
-        "unused"
-      ],
+      "tags": ["es2015", "type-dependent", "unused"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -6284,11 +5960,7 @@
       "message": "Remove this unused import of 'isNull'.",
       "effort": "1min",
       "debt": "1min",
-      "tags": [
-        "es2015",
-        "type-dependent",
-        "unused"
-      ],
+      "tags": ["es2015", "type-dependent", "unused"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -6330,11 +6002,7 @@
       "message": "Remove this unused import of 'ModuleName'.",
       "effort": "1min",
       "debt": "1min",
-      "tags": [
-        "es2015",
-        "type-dependent",
-        "unused"
-      ],
+      "tags": ["es2015", "type-dependent", "unused"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -6376,14 +6044,7 @@
       "message": "Prefer top-level await over using a promise chain.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "async",
-        "editable-source",
-        "es2022",
-        "esm-only",
-        "modernize",
-        "type-dependent"
-      ],
+      "tags": ["async", "editable-source", "es2022", "esm-only", "modernize", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -6424,11 +6085,7 @@
       "message": "Remove this unused import of 'and'.",
       "effort": "1min",
       "debt": "1min",
-      "tags": [
-        "es2015",
-        "type-dependent",
-        "unused"
-      ],
+      "tags": ["es2015", "type-dependent", "unused"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -6499,10 +6156,7 @@
       "message": "Mark these members as `readonly`.",
       "effort": "2min",
       "debt": "2min",
-      "tags": [
-        "confusing",
-        "type-dependent"
-      ],
+      "tags": ["confusing", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -6543,11 +6197,7 @@
       "message": "Remove this unused import of 'and'.",
       "effort": "1min",
       "debt": "1min",
-      "tags": [
-        "es2015",
-        "type-dependent",
-        "unused"
-      ],
+      "tags": ["es2015", "type-dependent", "unused"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -6589,11 +6239,7 @@
       "message": "Remove this unused import of 'classifyAction'.",
       "effort": "1min",
       "debt": "1min",
-      "tags": [
-        "es2015",
-        "type-dependent",
-        "unused"
-      ],
+      "tags": ["es2015", "type-dependent", "unused"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -6818,10 +6464,7 @@
       "message": "Refactor this function to reduce its Cognitive Complexity from 17 to the 15 allowed.",
       "effort": "7min",
       "debt": "7min",
-      "tags": [
-        "brain-overload",
-        "editable-source"
-      ],
+      "tags": ["brain-overload", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -6862,11 +6505,7 @@
       "message": "Remove this useless assignment to variable \"anchor\".",
       "effort": "1min",
       "debt": "1min",
-      "tags": [
-        "cwe",
-        "editable-source",
-        "unused"
-      ],
+      "tags": ["cwe", "editable-source", "unused"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -6937,10 +6576,7 @@
       "message": "Mark these members as `readonly`.",
       "effort": "2min",
       "debt": "2min",
-      "tags": [
-        "confusing",
-        "type-dependent"
-      ],
+      "tags": ["confusing", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -6981,11 +6617,7 @@
       "message": "Remove this useless assignment to variable \"clientConfig\".",
       "effort": "1min",
       "debt": "1min",
-      "tags": [
-        "cwe",
-        "editable-source",
-        "unused"
-      ],
+      "tags": ["cwe", "editable-source", "unused"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -7027,11 +6659,7 @@
       "message": "Remove this useless assignment to variable \"oneWeekAgo\".",
       "effort": "1min",
       "debt": "1min",
-      "tags": [
-        "cwe",
-        "editable-source",
-        "unused"
-      ],
+      "tags": ["cwe", "editable-source", "unused"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -7073,11 +6701,7 @@
       "message": "Remove this unused import of 'and'.",
       "effort": "1min",
       "debt": "1min",
-      "tags": [
-        "es2015",
-        "type-dependent",
-        "unused"
-      ],
+      "tags": ["es2015", "type-dependent", "unused"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -7119,11 +6743,7 @@
       "message": "Remove this unused import of 'desc'.",
       "effort": "1min",
       "debt": "1min",
-      "tags": [
-        "es2015",
-        "type-dependent",
-        "unused"
-      ],
+      "tags": ["es2015", "type-dependent", "unused"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -7165,12 +6785,7 @@
       "message": "`ratings` should be a `Set`, and use `ratings.has()` to check existence or non-existence.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "es2015",
-        "optimization",
-        "performance"
-      ],
+      "tags": ["editable-source", "es2015", "optimization", "performance"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -7211,11 +6826,7 @@
       "message": "Prefer `.flatMap(\u2026)` over `.map(\u2026).flat()`.",
       "effort": "2min",
       "debt": "2min",
-      "tags": [
-        "editable-source",
-        "es2019",
-        "performance"
-      ],
+      "tags": ["editable-source", "es2019", "performance"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -7271,10 +6882,7 @@
       "message": "Mark this member as `readonly`.",
       "effort": "2min",
       "debt": "2min",
-      "tags": [
-        "confusing",
-        "type-dependent"
-      ],
+      "tags": ["confusing", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -7315,11 +6923,7 @@
       "message": "Prefer `Number.parseFloat` over `parseFloat`.",
       "effort": "2min",
       "debt": "2min",
-      "tags": [
-        "convention",
-        "editable-source",
-        "es2015"
-      ],
+      "tags": ["convention", "editable-source", "es2015"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -7365,11 +6969,7 @@
       "message": "Use the \"RegExp.exec()\" method instead.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "editable-source",
-        "regex",
-        "type-dependent"
-      ],
+      "tags": ["editable-source", "regex", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -7410,10 +7010,7 @@
       "message": "Simplify this regular expression to reduce its runtime, as it has super-linear performance due to backtracking.",
       "effort": "20min",
       "debt": "20min",
-      "tags": [
-        "performance",
-        "regex"
-      ],
+      "tags": ["performance", "regex"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -7454,11 +7051,7 @@
       "message": "Prefer using nullish coalescing operator (`??=`) instead of an assignment expression, as it is simpler to read.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "es2020",
-        "nullish-coalescing",
-        "type-dependent"
-      ],
+      "tags": ["es2020", "nullish-coalescing", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -7514,10 +7107,7 @@
       "message": "Mark this member as `readonly`.",
       "effort": "2min",
       "debt": "2min",
-      "tags": [
-        "confusing",
-        "type-dependent"
-      ],
+      "tags": ["confusing", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -7558,11 +7148,7 @@
       "message": "Prefer using nullish coalescing operator (`??=`) instead of an assignment expression, as it is simpler to read.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "es2020",
-        "nullish-coalescing",
-        "type-dependent"
-      ],
+      "tags": ["es2020", "nullish-coalescing", "type-dependent"],
       "transitions": [],
       "actions": [],
       "comments": [],
@@ -7603,10 +7189,7 @@
       "message": "Extract this nested ternary operation into an independent statement.",
       "effort": "5min",
       "debt": "5min",
-      "tags": [
-        "confusing",
-        "editable-source"
-      ],
+      "tags": ["confusing", "editable-source"],
       "transitions": [],
       "actions": [],
       "comments": [],

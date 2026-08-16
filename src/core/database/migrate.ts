@@ -17,18 +17,18 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { readMigrationFiles } from 'drizzle-orm/migrator';
-import { sql } from 'drizzle-orm';
-import { getDb, closeDb } from './index.js';
-import { createModuleLogger } from '../logger.js';
-import { hydrateSecretsIfConfigured } from '../secrets.js';
+import { sql } from "drizzle-orm";
+import { readMigrationFiles } from "drizzle-orm/migrator";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { createModuleLogger } from "../logger.js";
+import { hydrateSecretsIfConfigured } from "../secrets.js";
+import { closeDb, getDb } from "./index.js";
 
-const logger = createModuleLogger('migrate');
+const logger = createModuleLogger("migrate");
 
-const MIGRATIONS_FOLDER = './drizzle';
-const MIGRATIONS_TABLE = '__drizzle_migrations';
-const MIGRATIONS_SCHEMA = 'drizzle';
+const MIGRATIONS_FOLDER = "./drizzle";
+const MIGRATIONS_TABLE = "__drizzle_migrations";
+const MIGRATIONS_SCHEMA = "drizzle";
 
 interface MigrationHistoryRow {
   id: number;
@@ -54,7 +54,7 @@ async function checkMigrations(): Promise<void> {
   } catch (error) {
     logger.warn(
       { error: error instanceof Error ? error.message : String(error) },
-      'Migrations history table not found — treating all migrations as pending',
+      "Migrations history table not found — treating all migrations as pending",
     );
   }
 
@@ -63,7 +63,7 @@ async function checkMigrations(): Promise<void> {
   if (pending.length > 0) {
     logger.error(
       { pendingCount: pending.length, totalCount: fileMigrations.length },
-      'Pending migrations detected — run `npm run migrate` to apply them',
+      "Pending migrations detected — run `npm run migrate` to apply them",
     );
     process.exitCode = 1;
     return;
@@ -71,22 +71,24 @@ async function checkMigrations(): Promise<void> {
 
   logger.info(
     { totalCount: fileMigrations.length },
-    'No pending migrations — database schema is current',
+    "No pending migrations — database schema is current",
   );
 }
 
 async function runMigrations(): Promise<void> {
   const db = getDb();
   await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
-  logger.info('Migrations completed successfully');
+  logger.info("Migrations completed successfully");
 }
 
 async function main(): Promise<void> {
   await hydrateSecretsIfConfigured();
 
-  const checkOnly = process.argv.includes('--check');
+  const checkOnly = process.argv.includes("--check");
 
-  logger.info(checkOnly ? 'Starting migration check (dry run)...' : 'Starting database migrations...');
+  logger.info(
+    checkOnly ? "Starting migration check (dry run)..." : "Starting database migrations...",
+  );
 
   try {
     if (checkOnly) {
@@ -95,7 +97,7 @@ async function main(): Promise<void> {
       await runMigrations();
     }
   } catch (error) {
-    logger.error({ error }, checkOnly ? 'Migration check failed' : 'Migration failed');
+    logger.error({ error }, checkOnly ? "Migration check failed" : "Migration failed");
     process.exitCode = 1;
   } finally {
     await closeDb();

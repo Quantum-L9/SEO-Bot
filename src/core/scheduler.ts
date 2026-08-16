@@ -17,15 +17,15 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import { Queue, Worker, Job, type ConnectionOptions } from 'bullmq';
-import { Redis } from 'ioredis';
-import { eq } from 'drizzle-orm';
-import { getConfig } from './config.js';
-import { createModuleLogger } from './logger.js';
-import { getDb, schema } from './database/index.js';
-import type { JobDefinition } from '../types/index.js';
+import { type ConnectionOptions, type Job, Queue, Worker } from "bullmq";
+import { eq } from "drizzle-orm";
+import { Redis } from "ioredis";
+import type { JobDefinition } from "../types/index.js";
+import { getConfig } from "./config.js";
+import { getDb, schema } from "./database/index.js";
+import { createModuleLogger } from "./logger.js";
 
-const logger = createModuleLogger('scheduler');
+const logger = createModuleLogger("scheduler");
 
 /**
  * Deterministic BullMQ job id for a per-client fan-out child.
@@ -50,30 +50,34 @@ export function fanoutChildJobId(parentJobId: string, clientId: string): string 
 
 const JOB_DEFINITIONS: JobDefinition[] = [
   {
-    name: 'serp:check-rankings',
-    module: 'serp-intelligence',
-    cron: '0 6 * * *',
-    handler: 'checkRankings',
+    name: "serp:check-rankings",
+    module: "serp-intelligence",
+    cron: "0 6 * * *",
+    handler: "checkRankings",
     clientScoped: true,
     tokenBudget: { maxFastTokensPerRun: 0, maxStrategicTokensPerRun: 0, cooldownMinutes: 0 },
     enabled: true,
   },
   {
-    name: 'serp:competitor-analysis',
-    module: 'serp-intelligence',
-    cron: '0 7 * * 1',
-    handler: 'analyzeCompetitors',
+    name: "serp:competitor-analysis",
+    module: "serp-intelligence",
+    cron: "0 7 * * 1",
+    handler: "analyzeCompetitors",
     clientScoped: true,
     tokenBudget: { maxFastTokensPerRun: 2000, maxStrategicTokensPerRun: 4000, cooldownMinutes: 60 },
     enabled: true,
   },
   {
-    name: 'serp:generate-surpass-plan',
-    module: 'serp-intelligence',
-    cron: '0 8 * * 1',
-    handler: 'generateSurpassPlan',
+    name: "serp:generate-surpass-plan",
+    module: "serp-intelligence",
+    cron: "0 8 * * 1",
+    handler: "generateSurpassPlan",
     clientScoped: true,
-    tokenBudget: { maxFastTokensPerRun: 1000, maxStrategicTokensPerRun: 8000, cooldownMinutes: 120 },
+    tokenBudget: {
+      maxFastTokensPerRun: 1000,
+      maxStrategicTokensPerRun: 8000,
+      cooldownMinutes: 120,
+    },
     enabled: true,
   },
   {
@@ -82,82 +86,90 @@ const JOB_DEFINITIONS: JobDefinition[] = [
     // configure the site-write env vars (GITHUB_TOKEN with repo:write,
     // VERCEL_DEPLOY_HOOK, WEBSITE_BOT_REPO, SITE_SOURCE_BRANCH) and then flip
     // `enabled: true`. Handler is registered via registerPlanExecutorHandlers.
-    name: 'serp:execute-surpass-plans',
-    module: 'serp-intelligence',
-    cron: '0 9 * * 1',
-    handler: 'executeSurpassPlans',
+    name: "serp:execute-surpass-plans",
+    module: "serp-intelligence",
+    cron: "0 9 * * 1",
+    handler: "executeSurpassPlans",
     clientScoped: true,
     tokenBudget: { maxFastTokensPerRun: 0, maxStrategicTokensPerRun: 0, cooldownMinutes: 60 },
     enabled: false,
   },
   {
-    name: 'vitals:check-all-sources',
-    module: 'web-vitals',
-    cron: '0 */6 * * *',
-    handler: 'checkAllSources',
+    name: "vitals:check-all-sources",
+    module: "web-vitals",
+    cron: "0 */6 * * *",
+    handler: "checkAllSources",
     clientScoped: true,
     tokenBudget: { maxFastTokensPerRun: 0, maxStrategicTokensPerRun: 0, cooldownMinutes: 0 },
     enabled: true,
   },
   {
-    name: 'aeo:check-citations',
-    module: 'aeo-geo',
-    cron: '0 9 * * 3',
-    handler: 'checkCitations',
+    name: "aeo:check-citations",
+    module: "aeo-geo",
+    cron: "0 9 * * 3",
+    handler: "checkCitations",
     clientScoped: true,
     tokenBudget: { maxFastTokensPerRun: 500, maxStrategicTokensPerRun: 0, cooldownMinutes: 30 },
     enabled: true,
   },
   {
-    name: 'aeo:optimize-faqs',
-    module: 'aeo-geo',
-    cron: '0 10 1 * *',
-    handler: 'optimizeFaqs',
+    name: "aeo:optimize-faqs",
+    module: "aeo-geo",
+    cron: "0 10 1 * *",
+    handler: "optimizeFaqs",
     clientScoped: true,
-    tokenBudget: { maxFastTokensPerRun: 2000, maxStrategicTokensPerRun: 6000, cooldownMinutes: 180 },
+    tokenBudget: {
+      maxFastTokensPerRun: 2000,
+      maxStrategicTokensPerRun: 6000,
+      cooldownMinutes: 180,
+    },
     enabled: true,
   },
   {
-    name: 'links:discover-prospects',
-    module: 'link-building',
-    cron: '0 10 * * 2',
-    handler: 'discoverProspects',
+    name: "links:discover-prospects",
+    module: "link-building",
+    cron: "0 10 * * 2",
+    handler: "discoverProspects",
     clientScoped: true,
     tokenBudget: { maxFastTokensPerRun: 1000, maxStrategicTokensPerRun: 0, cooldownMinutes: 60 },
     enabled: true,
   },
   {
-    name: 'links:process-outreach',
-    module: 'link-building',
-    cron: '0 11 * * 1-5',
-    handler: 'processOutreach',
+    name: "links:process-outreach",
+    module: "link-building",
+    cron: "0 11 * * 1-5",
+    handler: "processOutreach",
     clientScoped: true,
     tokenBudget: { maxFastTokensPerRun: 500, maxStrategicTokensPerRun: 3000, cooldownMinutes: 60 },
     enabled: true,
   },
   {
-    name: 'behavior:pull-engagement',
-    module: 'behavior-intelligence',
-    cron: '0 5 * * *',
-    handler: 'pullEngagementData',
+    name: "behavior:pull-engagement",
+    module: "behavior-intelligence",
+    cron: "0 5 * * *",
+    handler: "pullEngagementData",
     clientScoped: true,
     tokenBudget: { maxFastTokensPerRun: 0, maxStrategicTokensPerRun: 0, cooldownMinutes: 0 },
     enabled: true,
   },
   {
-    name: 'behavior:generate-insights',
-    module: 'behavior-intelligence',
-    cron: '0 12 * * 5',
-    handler: 'generateInsights',
+    name: "behavior:generate-insights",
+    module: "behavior-intelligence",
+    cron: "0 12 * * 5",
+    handler: "generateInsights",
     clientScoped: true,
-    tokenBudget: { maxFastTokensPerRun: 1000, maxStrategicTokensPerRun: 4000, cooldownMinutes: 120 },
+    tokenBudget: {
+      maxFastTokensPerRun: 1000,
+      maxStrategicTokensPerRun: 4000,
+      cooldownMinutes: 120,
+    },
     enabled: true,
   },
   {
-    name: 'reports:weekly-summary',
-    module: 'serp-intelligence',
-    cron: '0 8 * * 5',
-    handler: 'generateWeeklyReport',
+    name: "reports:weekly-summary",
+    module: "serp-intelligence",
+    cron: "0 8 * * 5",
+    handler: "generateWeeklyReport",
     clientScoped: true,
     tokenBudget: { maxFastTokensPerRun: 500, maxStrategicTokensPerRun: 2000, cooldownMinutes: 60 },
     enabled: true,
@@ -180,22 +192,23 @@ export class Scheduler {
   }
 
   registerDefinition(definition: JobDefinition): void {
-    const existing = JOB_DEFINITIONS.find(item => item.name === definition.name);
+    const existing = JOB_DEFINITIONS.find((item) => item.name === definition.name);
     if (existing) {
-      if (JSON.stringify(existing) !== JSON.stringify(definition)) throw new Error(`Conflicting job definition: ${definition.name}`);
+      if (JSON.stringify(existing) !== JSON.stringify(definition))
+        throw new Error(`Conflicting job definition: ${definition.name}`);
       return;
     }
     JOB_DEFINITIONS.push(definition);
-    logger.debug({ jobName: definition.name }, 'Job definition registered');
+    logger.debug({ jobName: definition.name }, "Job definition registered");
   }
 
   registerHandler(jobName: string, handler: (job: Job) => Promise<void>): void {
     this.handlers.set(jobName, handler);
-    logger.debug({ jobName }, 'Handler registered');
+    logger.debug({ jobName }, "Handler registered");
   }
 
   async addJob(jobName: string, data: Record<string, unknown>): Promise<void> {
-    const jobDef = JOB_DEFINITIONS.find(j => j.name === jobName);
+    const jobDef = JOB_DEFINITIONS.find((j) => j.name === jobName);
     if (!jobDef) {
       throw new Error(`Unknown job: ${jobName}`);
     }
@@ -207,16 +220,20 @@ export class Scheduler {
       queue = new Queue(queueName, { connection: this.connection as ConnectionOptions });
       this.queues.set(queueName, queue);
     }
-    await queue.add(jobName, { definition: jobDef, ...data }, {
-      removeOnComplete: { count: 100 },
-      removeOnFail: { count: 50 },
-    });
+    await queue.add(
+      jobName,
+      { definition: jobDef, ...data },
+      {
+        removeOnComplete: { count: 100 },
+        removeOnFail: { count: 50 },
+      },
+    );
     // Log only jobName — data contains clientConfig and may include secrets/PII
-    logger.info({ jobName }, 'Manual job queued');
+    logger.info({ jobName }, "Manual job queued");
   }
 
   async start(): Promise<void> {
-    logger.info('Starting scheduler...');
+    logger.info("Starting scheduler...");
 
     for (const jobDef of JOB_DEFINITIONS) {
       if (!jobDef.enabled) continue;
@@ -230,13 +247,17 @@ export class Scheduler {
 
       const queue = this.queues.get(queueName)!;
 
-      await queue.add(jobDef.name, { definition: jobDef }, {
-        repeat: { pattern: jobDef.cron },
-        removeOnComplete: { count: 100 },
-        removeOnFail: { count: 50 },
-      });
+      await queue.add(
+        jobDef.name,
+        { definition: jobDef },
+        {
+          repeat: { pattern: jobDef.cron },
+          removeOnComplete: { count: 100 },
+          removeOnFail: { count: 50 },
+        },
+      );
 
-      logger.info({ job: jobDef.name, cron: jobDef.cron }, 'Job scheduled');
+      logger.info({ job: jobDef.name, cron: jobDef.cron }, "Job scheduled");
     }
 
     for (const [queueName] of this.queues) {
@@ -249,21 +270,24 @@ export class Scheduler {
           connection: this.connection as ConnectionOptions,
           concurrency: 2,
           limiter: { max: 5, duration: 60000 },
-        }
+        },
       );
 
-      worker.on('completed', (job) => {
-        logger.info({ jobId: job.id, name: job.name }, 'Job completed');
+      worker.on("completed", (job) => {
+        logger.info({ jobId: job.id, name: job.name }, "Job completed");
       });
 
-      worker.on('failed', (job, err) => {
-        logger.error({ jobId: job?.id, name: job?.name, err: err.message }, 'Job failed');
+      worker.on("failed", (job, err) => {
+        logger.error({ jobId: job?.id, name: job?.name, err: err.message }, "Job failed");
       });
 
       this.workers.set(queueName, worker);
     }
 
-    logger.info({ queues: this.queues.size, jobs: JOB_DEFINITIONS.filter(j => j.enabled).length }, 'Scheduler started');
+    logger.info(
+      { queues: this.queues.size, jobs: JOB_DEFINITIONS.filter((j) => j.enabled).length },
+      "Scheduler started",
+    );
   }
 
   private async processJob(job: Job): Promise<void> {
@@ -271,23 +295,28 @@ export class Scheduler {
     const handler = this.handlers.get(definition.name);
 
     if (!handler) {
-      logger.warn({ jobName: definition.name }, 'No handler registered for job');
+      logger.warn({ jobName: definition.name }, "No handler registered for job");
       return;
     }
 
     const db = getDb();
     const startTime = Date.now();
 
-    const [execution] = await db.insert(schema.jobExecutions).values({
-      jobName: definition.name,
-      clientId: job.data.clientId || null,
-      status: 'running',
-      startedAt: new Date(),
-    }).returning();
+    const [execution] = await db
+      .insert(schema.jobExecutions)
+      .values({
+        jobName: definition.name,
+        clientId: job.data.clientId || null,
+        status: "running",
+        startedAt: new Date(),
+      })
+      .returning();
 
     try {
       if (definition.clientScoped && !job.data.clientId) {
-        const activeClients = await db.select().from(schema.clients)
+        const activeClients = await db
+          .select()
+          .from(schema.clients)
           .where(eq(schema.clients.active, true));
 
         // Parent job instance id — stable across retries of THIS fire, unique
@@ -297,34 +326,42 @@ export class Scheduler {
 
         for (const client of activeClients) {
           const queue = this.queues.get(`l9-${definition.module}`)!;
-          await queue.add(definition.name, {
-            definition,
-            clientId: client.id,
-            clientDomain: client.domain,
-            clientConfig: client.config,
-          }, {
-            // Deterministic id → a retried parent fan-out does not double-enqueue
-            // this client's child job (idempotency; prevents duplicate outreach).
-            jobId: fanoutChildJobId(parentJobId, client.id),
-            removeOnComplete: { count: 100 },
-            removeOnFail: { count: 50 },
-          });
+          await queue.add(
+            definition.name,
+            {
+              definition,
+              clientId: client.id,
+              clientDomain: client.domain,
+              clientConfig: client.config,
+            },
+            {
+              // Deterministic id → a retried parent fan-out does not double-enqueue
+              // this client's child job (idempotency; prevents duplicate outreach).
+              jobId: fanoutChildJobId(parentJobId, client.id),
+              removeOnComplete: { count: 100 },
+              removeOnFail: { count: 50 },
+            },
+          );
         }
 
-        logger.info({ jobName: definition.name, clientCount: activeClients.length }, 'Fan-out completed');
+        logger.info(
+          { jobName: definition.name, clientCount: activeClients.length },
+          "Fan-out completed",
+        );
       } else {
         await handler(job);
       }
 
       const durationMs = Date.now() - startTime;
-      await db.update(schema.jobExecutions)
-        .set({ status: 'completed', completedAt: new Date(), durationMs })
+      await db
+        .update(schema.jobExecutions)
+        .set({ status: "completed", completedAt: new Date(), durationMs })
         .where(eq(schema.jobExecutions.id, execution.id));
-
     } catch (error: any) {
       const durationMs = Date.now() - startTime;
-      await db.update(schema.jobExecutions)
-        .set({ status: 'failed', completedAt: new Date(), durationMs, error: error.message })
+      await db
+        .update(schema.jobExecutions)
+        .set({ status: "failed", completedAt: new Date(), durationMs, error: error.message })
         .where(eq(schema.jobExecutions.id, execution.id));
 
       throw error;
@@ -336,7 +373,7 @@ export class Scheduler {
   }
 
   async stop(): Promise<void> {
-    logger.info('Stopping scheduler...');
+    logger.info("Stopping scheduler...");
     for (const [, worker] of this.workers) {
       await worker.close();
     }
@@ -346,7 +383,7 @@ export class Scheduler {
     await this.connection.quit();
     this.workers.clear();
     this.queues.clear();
-    logger.info('Scheduler stopped');
+    logger.info("Scheduler stopped");
     // Reset singleton so next getScheduler() call creates a fresh instance
     if (_scheduler === this) {
       _scheduler = null;

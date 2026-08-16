@@ -13,22 +13,22 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import Fastify, { type FastifyInstance } from 'fastify';
-import cors from '@fastify/cors';
-import helmet from '@fastify/helmet';
-import formBody from '@fastify/formbody';
-import { eq, desc, and, gte, sql } from 'drizzle-orm';
-import { getDb, schema } from '../core/database/index.js';
-import { createModuleLogger } from '../core/logger.js';
-import { getScheduler } from '../core/scheduler.js';
-import { getLlmService } from '../services/llm.js';
-import { registerDashboard } from './dashboard.js';
-import { registerClientRoutes } from './clients/register.js';
-import { registerBuildIntelligenceRoutes } from './build-intelligence.js';
-import { registerApiSecurity } from './security.js';
-import { getConfig } from '../core/config.js';
+import cors from "@fastify/cors";
+import formBody from "@fastify/formbody";
+import helmet from "@fastify/helmet";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
+import Fastify, { type FastifyInstance } from "fastify";
+import { getConfig } from "../core/config.js";
+import { getDb, schema } from "../core/database/index.js";
+import { createModuleLogger } from "../core/logger.js";
+import { getScheduler } from "../core/scheduler.js";
+import { getLlmService } from "../services/llm.js";
+import { registerBuildIntelligenceRoutes } from "./build-intelligence.js";
+import { registerClientRoutes } from "./clients/register.js";
+import { registerDashboard } from "./dashboard.js";
+import { registerApiSecurity } from "./security.js";
 
-const logger = createModuleLogger('api');
+const logger = createModuleLogger("api");
 
 /**
  * Build the fully-configured Fastify instance WITHOUT binding a port. Extracted
@@ -47,7 +47,12 @@ export async function buildApiServer(): Promise<FastifyInstance> {
   // allow-list is configured. `origin: true` (reflect any origin) removed.
   const allowedOrigins = getConfig().DASHBOARD_ALLOWED_ORIGINS;
   await app.register(cors, {
-    origin: allowedOrigins ? allowedOrigins.split(',').map((o) => o.trim()).filter(Boolean) : false,
+    origin: allowedOrigins
+      ? allowedOrigins
+          .split(",")
+          .map((o) => o.trim())
+          .filter(Boolean)
+      : false,
     credentials: true,
   });
 
@@ -55,48 +60,54 @@ export async function buildApiServer(): Promise<FastifyInstance> {
   registerApiSecurity(app);
 
   app.setErrorHandler((error, request, reply) => {
-    logger.error({ err: error, url: request.url, method: request.method }, 'API route error');
+    logger.error({ err: error, url: request.url, method: request.method }, "API route error");
     const status = error.statusCode ?? 500;
     // Don't leak internal error detail on 5xx; 4xx messages are safe (validation, etc.).
-    reply.status(status).send({ error: status < 500 ? error.message : 'Internal Server Error' });
+    reply.status(status).send({ error: status < 500 ? error.message : "Internal Server Error" });
   });
 
   await registerDashboard(app);
   await registerClientRoutes(app);
   await registerBuildIntelligenceRoutes(app);
 
-  app.get('/health', async () => {
+  app.get("/health", async () => {
     const db = getDb();
     const scheduler = getScheduler();
     let dbOk = false;
-    try { await db.execute(sql`SELECT 1`); dbOk = true; } catch { /* noop */ }
+    try {
+      await db.execute(sql`SELECT 1`);
+      dbOk = true;
+    } catch {
+      /* noop */
+    }
     return {
-      status: dbOk ? 'healthy' : 'degraded',
+      status: dbOk ? "healthy" : "degraded",
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
       components: {
-        database: dbOk ? 'connected' : 'disconnected',
-        scheduler: scheduler.isRunning() ? 'active' : 'stopped',
+        database: dbOk ? "connected" : "disconnected",
+        scheduler: scheduler.isRunning() ? "active" : "stopped",
       },
-      version: '1.0.0',
+      version: "1.0.0",
     };
   });
 
-  app.get('/api/status', async () => {
+  app.get("/api/status", async () => {
     const db = getDb();
-    const clients = await db.select()
+    const clients = await db
+      .select()
       .from(schema.clients)
       .where(eq(schema.clients.active, true))
       .orderBy(schema.clients.name);
     return {
-      status: 'running',
+      status: "running",
       activeClients: clients.length,
-      clients: clients.map(c => ({ id: c.id, domain: c.domain, industry: c.industry })),
+      clients: clients.map((c) => ({ id: c.id, domain: c.domain, industry: c.industry })),
       uptime: process.uptime(),
     };
   });
 
-  app.get('/api/llm-spend', async () => {
+  app.get("/api/llm-spend", async () => {
     const llm = getLlmService();
     return {
       dailySpend: await llm.getDailySpend(),
@@ -119,74 +130,187 @@ export async function buildApiServer(): Promise<FastifyInstance> {
     updatedAt: schema.clients.updatedAt,
   };
 
-  app.get('/api/clients', async () => {
+  app.get("/api/clients", async () => {
     const db = getDb();
-    const clients = await db.select(publicClientColumns)
+    const clients = await db
+      .select(publicClientColumns)
       .from(schema.clients)
       .where(eq(schema.clients.active, true))
       .orderBy(schema.clients.name);
     return { clients };
   });
 
-  app.get<{ Params: { clientId: string } }>('/api/clients/:clientId', async (request) => {
+  app.get<{ Params: { clientId: string } }>("/api/clients/:clientId", async (request) => {
     const db = getDb();
     const { clientId } = request.params;
-    const [client] = await db.select(publicClientColumns).from(schema.clients).where(eq(schema.clients.id, clientId)).limit(1);
-    if (!client) return { error: 'Client not found' };
-    const rankings = await db.select().from(schema.serpRankings).where(eq(schema.serpRankings.clientId, clientId)).orderBy(desc(schema.serpRankings.checkedAt)).limit(20);
-    const vitals = await db.select().from(schema.webVitals).where(eq(schema.webVitals.clientId, clientId)).orderBy(desc(schema.webVitals.measuredAt)).limit(10);
+    const [client] = await db
+      .select(publicClientColumns)
+      .from(schema.clients)
+      .where(eq(schema.clients.id, clientId))
+      .limit(1);
+    if (!client) return { error: "Client not found" };
+    const rankings = await db
+      .select()
+      .from(schema.serpRankings)
+      .where(eq(schema.serpRankings.clientId, clientId))
+      .orderBy(desc(schema.serpRankings.checkedAt))
+      .limit(20);
+    const vitals = await db
+      .select()
+      .from(schema.webVitals)
+      .where(eq(schema.webVitals.clientId, clientId))
+      .orderBy(desc(schema.webVitals.measuredAt))
+      .limit(10);
     const oneWeekAgo = new Date(Date.now() - 7 * 86400000);
-    const engagement = await db.select().from(schema.pageEngagement).where(and(eq(schema.pageEngagement.clientId, clientId), gte(schema.pageEngagement.computedAt, oneWeekAgo))).orderBy(desc(schema.pageEngagement.totalPageviews)).limit(10);
-    const prospects = await db.select().from(schema.linkProspects).where(eq(schema.linkProspects.clientId, clientId)).orderBy(desc(schema.linkProspects.createdAt)).limit(10);
-    const citations = await db.select().from(schema.aeoCitations).where(eq(schema.aeoCitations.clientId, clientId)).orderBy(desc(schema.aeoCitations.checkedAt)).limit(10);
+    const engagement = await db
+      .select()
+      .from(schema.pageEngagement)
+      .where(
+        and(
+          eq(schema.pageEngagement.clientId, clientId),
+          gte(schema.pageEngagement.computedAt, oneWeekAgo),
+        ),
+      )
+      .orderBy(desc(schema.pageEngagement.totalPageviews))
+      .limit(10);
+    const prospects = await db
+      .select()
+      .from(schema.linkProspects)
+      .where(eq(schema.linkProspects.clientId, clientId))
+      .orderBy(desc(schema.linkProspects.createdAt))
+      .limit(10);
+    const citations = await db
+      .select()
+      .from(schema.aeoCitations)
+      .where(eq(schema.aeoCitations.clientId, clientId))
+      .orderBy(desc(schema.aeoCitations.checkedAt))
+      .limit(10);
     return { client, rankings, vitals, engagement, prospects, citations };
   });
 
-  app.get<{ Params: { clientId: string } }>('/api/clients/:clientId/report', async (request) => {
+  app.get<{ Params: { clientId: string } }>("/api/clients/:clientId/report", async (request) => {
     const db = getDb();
     const { clientId } = request.params;
     const oneWeekAgo = new Date(Date.now() - 7 * 86400000);
-    const rankings = await db.select().from(schema.serpRankings).where(and(eq(schema.serpRankings.clientId, clientId), gte(schema.serpRankings.checkedAt, oneWeekAgo))).orderBy(desc(schema.serpRankings.checkedAt));
-    const improved = rankings.filter(r => r.previousPosition && r.position && r.position < r.previousPosition);
-    const declined = rankings.filter(r => r.previousPosition && r.position && r.position > r.previousPosition);
-    const vitals = await db.select().from(schema.webVitals).where(and(eq(schema.webVitals.clientId, clientId), gte(schema.webVitals.measuredAt, oneWeekAgo))).orderBy(desc(schema.webVitals.measuredAt));
-    const newProspects = await db.select().from(schema.linkProspects).where(and(eq(schema.linkProspects.clientId, clientId), gte(schema.linkProspects.createdAt, oneWeekAgo)));
-    const citations = await db.select().from(schema.aeoCitations).where(and(eq(schema.aeoCitations.clientId, clientId), gte(schema.aeoCitations.checkedAt, oneWeekAgo)));
-    const citationRate = citations.length > 0
-      ? (citations.filter(c => c.cited).length / citations.length * 100).toFixed(1)
-      : 'N/A';
+    const rankings = await db
+      .select()
+      .from(schema.serpRankings)
+      .where(
+        and(
+          eq(schema.serpRankings.clientId, clientId),
+          gte(schema.serpRankings.checkedAt, oneWeekAgo),
+        ),
+      )
+      .orderBy(desc(schema.serpRankings.checkedAt));
+    const improved = rankings.filter(
+      (r) => r.previousPosition && r.position && r.position < r.previousPosition,
+    );
+    const declined = rankings.filter(
+      (r) => r.previousPosition && r.position && r.position > r.previousPosition,
+    );
+    const vitals = await db
+      .select()
+      .from(schema.webVitals)
+      .where(
+        and(eq(schema.webVitals.clientId, clientId), gte(schema.webVitals.measuredAt, oneWeekAgo)),
+      )
+      .orderBy(desc(schema.webVitals.measuredAt));
+    const newProspects = await db
+      .select()
+      .from(schema.linkProspects)
+      .where(
+        and(
+          eq(schema.linkProspects.clientId, clientId),
+          gte(schema.linkProspects.createdAt, oneWeekAgo),
+        ),
+      );
+    const citations = await db
+      .select()
+      .from(schema.aeoCitations)
+      .where(
+        and(
+          eq(schema.aeoCitations.clientId, clientId),
+          gte(schema.aeoCitations.checkedAt, oneWeekAgo),
+        ),
+      );
+    const citationRate =
+      citations.length > 0
+        ? ((citations.filter((c) => c.cited).length / citations.length) * 100).toFixed(1)
+        : "N/A";
     return {
       period: { from: oneWeekAgo.toISOString(), to: new Date().toISOString() },
-      rankings: { total: rankings.length, improved: improved.length, declined: declined.length, topMovers: improved.slice(0, 5).map(r => ({ keyword: r.keyword, from: r.previousPosition, to: r.position })) },
-      vitals: { latestLcp: vitals[0]?.lcp || null, latestCls: vitals[0]?.cls || null, latestInp: vitals[0]?.inp || null },
-      linkBuilding: { newProspects: newProspects.length, readyForOutreach: newProspects.filter(p => p.status === 'ready').length, outreachSent: newProspects.filter(p => p.status === 'outreach_queued').length },
+      rankings: {
+        total: rankings.length,
+        improved: improved.length,
+        declined: declined.length,
+        topMovers: improved
+          .slice(0, 5)
+          .map((r) => ({ keyword: r.keyword, from: r.previousPosition, to: r.position })),
+      },
+      vitals: {
+        latestLcp: vitals[0]?.lcp || null,
+        latestCls: vitals[0]?.cls || null,
+        latestInp: vitals[0]?.inp || null,
+      },
+      linkBuilding: {
+        newProspects: newProspects.length,
+        readyForOutreach: newProspects.filter((p) => p.status === "ready").length,
+        outreachSent: newProspects.filter((p) => p.status === "outreach_queued").length,
+      },
       aeo: { queriesChecked: citations.length, citationRate: `${citationRate}%` },
     };
   });
 
-  app.post<{ Params: { clientId: string }; Body: { module: string } }>('/api/clients/:clientId/trigger', async (request) => {
-    const { clientId } = request.params;
-    const { module } = request.body as any;
-    const scheduler = getScheduler();
-    const validModules = [
-      'serp:check-rankings', 'serp:competitor-analysis', 'serp:generate-surpass-plan',
-      'vitals:check-all-sources', 'aeo:check-citations', 'aeo:optimize-faqs',
-      'links:discover-prospects', 'links:process-outreach',
-      'behavior:pull-engagement', 'behavior:generate-insights',
-    ];
-    if (!validModules.includes(module)) return { error: `Invalid module. Valid: ${validModules.join(', ')}` };
-    const db = getDb();
-    const [client] = await db.select().from(schema.clients).where(eq(schema.clients.id, clientId)).limit(1);
-    if (!client) return { error: 'Client not found' };
-    await scheduler.addJob(module, { clientId: client.id, clientDomain: client.domain, clientConfig: client.config });
-    return { success: true, message: `Job ${module} queued for ${client.domain}` };
-  });
+  app.post<{ Params: { clientId: string }; Body: { module: string } }>(
+    "/api/clients/:clientId/trigger",
+    async (request) => {
+      const { clientId } = request.params;
+      const { module } = request.body as any;
+      const scheduler = getScheduler();
+      const validModules = [
+        "serp:check-rankings",
+        "serp:competitor-analysis",
+        "serp:generate-surpass-plan",
+        "vitals:check-all-sources",
+        "aeo:check-citations",
+        "aeo:optimize-faqs",
+        "links:discover-prospects",
+        "links:process-outreach",
+        "behavior:pull-engagement",
+        "behavior:generate-insights",
+      ];
+      if (!validModules.includes(module))
+        return { error: `Invalid module. Valid: ${validModules.join(", ")}` };
+      const db = getDb();
+      const [client] = await db
+        .select()
+        .from(schema.clients)
+        .where(eq(schema.clients.id, clientId))
+        .limit(1);
+      if (!client) return { error: "Client not found" };
+      await scheduler.addJob(module, {
+        clientId: client.id,
+        clientDomain: client.domain,
+        clientConfig: client.config,
+      });
+      return { success: true, message: `Job ${module} queued for ${client.domain}` };
+    },
+  );
 
-  app.get('/api/token-budget', async () => {
+  app.get("/api/token-budget", async () => {
     const db = getDb();
-    const today = new Date().toISOString().split('T')[0];
-    const outcomes = await db.select().from(schema.actionOutcomes).where(gte(schema.actionOutcomes.executedAt, new Date(today))).orderBy(desc(schema.actionOutcomes.executedAt));
-    return { date: today, month: today.slice(0, 7), todayActions: outcomes.length, message: 'Detailed token tracking available in logs' };
+    const today = new Date().toISOString().split("T")[0];
+    const outcomes = await db
+      .select()
+      .from(schema.actionOutcomes)
+      .where(gte(schema.actionOutcomes.executedAt, new Date(today)))
+      .orderBy(desc(schema.actionOutcomes.executedAt));
+    return {
+      date: today,
+      month: today.slice(0, 7),
+      todayActions: outcomes.length,
+      message: "Detailed token tracking available in logs",
+    };
   });
 
   return app;
@@ -195,10 +319,10 @@ export async function buildApiServer(): Promise<FastifyInstance> {
 export async function startApiServer(port: number = 3100): Promise<void> {
   const app = await buildApiServer();
   try {
-    await app.listen({ port, host: '0.0.0.0' });
-    logger.info({ port }, 'API server started (Fastify — sole HTTP server)');
+    await app.listen({ port, host: "0.0.0.0" });
+    logger.info({ port }, "API server started (Fastify — sole HTTP server)");
   } catch (error: any) {
-    logger.error({ error: error.message }, 'API server failed to start');
+    logger.error({ error: error.message }, "API server failed to start");
     throw error;
   }
 }

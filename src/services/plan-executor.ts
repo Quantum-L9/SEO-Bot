@@ -18,27 +18,23 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import { Job } from 'bullmq';
-import { eq, and, desc } from 'drizzle-orm';
-import { getDb, schema } from '../core/database/index.js';
-import { createModuleLogger } from '../core/logger.js';
+import type { Job } from "bullmq";
+import { and, desc, eq } from "drizzle-orm";
+import { getDb, schema } from "../core/database/index.js";
+import { createProposal, evaluateExecution, logAction } from "../core/execution-policy.js";
+import { createModuleLogger } from "../core/logger.js";
+import type { SurpassAction } from "../types/index.js";
 import {
-  evaluateExecution,
-  createProposal,
-  logAction,
-} from '../core/execution-policy.js';
-import {
-  updateMetaTitle,
-  updateMetaDescription,
   injectSchema,
-  updateHeading,
-  triggerVercelDeploy,
-  siteConfigFromClient,
   type SiteDeploymentConfig,
-} from './site-deployment.js';
-import type { SurpassAction } from '../types/index.js';
+  siteConfigFromClient,
+  triggerVercelDeploy,
+  updateHeading,
+  updateMetaDescription,
+  updateMetaTitle,
+} from "./site-deployment.js";
 
-const logger = createModuleLogger('plan-executor');
+const logger = createModuleLogger("plan-executor");
 
 // Maps action strings from surpass plan to deployment functions.
 // Covers the most common autonomous actions from execution-policy taxonomy.
@@ -56,26 +52,27 @@ const ACTION_DISPATCH_MAP: Record<string, ActionDispatcher> = {
   meta_title_update: async (action, clientDomain, clientUrl, siteConfig) => {
     if (!clientUrl) return;
     const filePath = urlToFilePath(clientUrl);
-    const newTitle = extractValue(action.action, 'title');
+    const newTitle = extractValue(action.action, "title");
     if (filePath && newTitle) await updateMetaTitle(filePath, newTitle, clientDomain, siteConfig);
   },
   meta_description_update: async (action, clientDomain, clientUrl, siteConfig) => {
     if (!clientUrl) return;
     const filePath = urlToFilePath(clientUrl);
-    const newDesc = extractValue(action.action, 'description');
-    if (filePath && newDesc) await updateMetaDescription(filePath, newDesc, clientDomain, siteConfig);
+    const newDesc = extractValue(action.action, "description");
+    if (filePath && newDesc)
+      await updateMetaDescription(filePath, newDesc, clientDomain, siteConfig);
   },
   heading_optimization: async (action, clientDomain, clientUrl, siteConfig) => {
     if (!clientUrl) return;
     const filePath = urlToFilePath(clientUrl);
-    const newHeading = extractValue(action.action, 'heading');
+    const newHeading = extractValue(action.action, "heading");
     if (filePath && newHeading) await updateHeading(filePath, newHeading, clientDomain, siteConfig);
   },
   faq_content_update: async (_action, clientDomain, _clientUrl, _siteConfig) => {
     // SurpassAction carries no FAQ payload (no metadata field), and deploying an
     // empty FAQPage is a no-op at best / overwrites real schema at worst. Skip
     // until FAQ content is threaded in (aeo-geo owns FAQ generation).
-    logger.warn({ clientDomain }, 'faq_content_update skipped — no FAQ payload on SurpassAction');
+    logger.warn({ clientDomain }, "faq_content_update skipped — no FAQ payload on SurpassAction");
   },
   schema_markup_injection: async (_action, clientDomain, clientUrl, siteConfig) => {
     if (!clientUrl) return;
@@ -85,8 +82,13 @@ const ACTION_DISPATCH_MAP: Record<string, ActionDispatcher> = {
     // would write invalid JSON-LD (no @context/@type). aeo-geo enriches later.
     await injectSchema(
       filePath,
-      'LocalBusiness',
-      { '@context': 'https://schema.org', '@type': 'LocalBusiness', name: clientDomain, url: clientUrl },
+      "LocalBusiness",
+      {
+        "@context": "https://schema.org",
+        "@type": "LocalBusiness",
+        name: clientDomain,
+        url: clientUrl,
+      },
       clientDomain,
       siteConfig,
     );
@@ -100,8 +102,8 @@ const ACTION_DISPATCH_MAP: Record<string, ActionDispatcher> = {
 function urlToFilePath(url: string): string | null {
   try {
     const { pathname } = new URL(url);
-    const clean = pathname.replace(/\/+$/, '');
-    return clean === '' ? 'src/pages/index.astro' : `src/pages${clean}/index.astro`;
+    const clean = pathname.replace(/\/+$/, "");
+    return clean === "" ? "src/pages/index.astro" : `src/pages${clean}/index.astro`;
   } catch {
     return null;
   }
@@ -141,11 +143,11 @@ async function dispatchSurpassAction(
   clientId: string,
   clientDomain: string,
   siteConfig: ReturnType<typeof siteConfigFromClient>,
-): Promise<'success' | 'failed' | 'skipped'> {
+): Promise<"success" | "failed" | "skipped"> {
   const actionType = inferActionType(action.action);
   const proposal = createProposal({
     clientId,
-    module: 'serp-intelligence',
+    module: "serp-intelligence",
     action: actionType,
     description: action.action,
     rationale: `Surpass plan for keyword: ${gap.keyword}. Impact: ${action.impact}, Effort: ${action.effort}`,
@@ -157,23 +159,26 @@ async function dispatchSurpassAction(
   await logAction(proposal, decision);
 
   if (!decision.execute) {
-    logger.info({ action: action.action, keyword: gap.keyword }, 'Action queued for approval (CRITICAL)');
-    return 'skipped';
+    logger.info(
+      { action: action.action, keyword: gap.keyword },
+      "Action queued for approval (CRITICAL)",
+    );
+    return "skipped";
   }
 
   const dispatcher = ACTION_DISPATCH_MAP[actionType];
   if (!dispatcher) {
-    logger.warn({ actionType }, 'No dispatcher for action type — skipping');
-    return 'skipped';
+    logger.warn({ actionType }, "No dispatcher for action type — skipping");
+    return "skipped";
   }
 
   try {
     await dispatcher(action, clientDomain, gap.clientUrl, siteConfig);
-    logger.info({ actionType, keyword: gap.keyword }, 'Action dispatched to site-deployment');
-    return 'success';
+    logger.info({ actionType, keyword: gap.keyword }, "Action dispatched to site-deployment");
+    return "success";
   } catch (err: any) {
-    logger.error({ actionType, keyword: gap.keyword, error: err.message }, 'Dispatch failed');
-    return 'failed';
+    logger.error({ actionType, keyword: gap.keyword, error: err.message }, "Dispatch failed");
+    return "failed";
   }
 }
 
@@ -189,31 +194,30 @@ export async function executeSurpassPlans(job: Job): Promise<void> {
 
   const db = getDb();
 
-  const plannedGaps = await db.select()
+  const plannedGaps = await db
+    .select()
     .from(schema.gapAnalyses)
-    .where(and(
-      eq(schema.gapAnalyses.clientId, clientId),
-      eq(schema.gapAnalyses.status, 'planned'),
-    ))
+    .where(and(eq(schema.gapAnalyses.clientId, clientId), eq(schema.gapAnalyses.status, "planned")))
     .orderBy(desc(schema.gapAnalyses.generatedAt))
     .limit(5);
 
   if (!plannedGaps.length) {
-    logger.info({ clientDomain }, 'No planned gap analyses — executor idle');
+    logger.info({ clientDomain }, "No planned gap analyses — executor idle");
     return;
   }
 
-  logger.info({ clientDomain, count: plannedGaps.length }, 'Executing surpass plans');
+  logger.info({ clientDomain, count: plannedGaps.length }, "Executing surpass plans");
 
   let anyDeployed = false;
 
   for (const gap of plannedGaps) {
     const surpassPlan = (gap.surpassPlan as SurpassAction[]) ?? [];
-    const autonomousActions = surpassPlan.filter(a => a.autonomous && a.status === 'pending');
+    const autonomousActions = surpassPlan.filter((a) => a.autonomous && a.status === "pending");
 
     if (!autonomousActions.length) {
-      await db.update(schema.gapAnalyses)
-        .set({ status: 'executing' })
+      await db
+        .update(schema.gapAnalyses)
+        .set({ status: "executing" })
         .where(eq(schema.gapAnalyses.id, gap.id));
       continue;
     }
@@ -223,11 +227,11 @@ export async function executeSurpassPlans(job: Job): Promise<void> {
 
     for (const action of autonomousActions) {
       const result = await dispatchSurpassAction(action, gap, clientId, clientDomain, siteConfig);
-      if (result === 'success') {
+      if (result === "success") {
         dispatchAttempts += 1;
         dispatchSuccesses += 1;
         anyDeployed = true;
-      } else if (result === 'failed') {
+      } else if (result === "failed") {
         dispatchAttempts += 1;
       }
     }
@@ -238,19 +242,20 @@ export async function executeSurpassPlans(job: Job): Promise<void> {
     if (dispatchAttempts > 0 && dispatchSuccesses === 0) {
       logger.error(
         { gapId: gap.id, keyword: gap.keyword, attempts: dispatchAttempts },
-        'All dispatches failed for gap — leaving status=planned for retry',
+        "All dispatches failed for gap — leaving status=planned for retry",
       );
       continue;
     }
 
-    await db.update(schema.gapAnalyses)
-      .set({ status: 'executing' })
+    await db
+      .update(schema.gapAnalyses)
+      .set({ status: "executing" })
       .where(eq(schema.gapAnalyses.id, gap.id));
   }
 
   if (anyDeployed) {
     await triggerVercelDeploy(siteConfig);
-    logger.info({ clientDomain }, 'Vercel deploy triggered after surpass plan execution');
+    logger.info({ clientDomain }, "Vercel deploy triggered after surpass plan execution");
   }
 }
 
@@ -260,17 +265,19 @@ export async function executeSurpassPlans(job: Job): Promise<void> {
  */
 function inferActionType(actionText: string): string {
   const lower = actionText.toLowerCase();
-  if (lower.includes('meta title') || lower.includes('title tag')) return 'meta_title_update';
-  if (lower.includes('meta description') || lower.includes('description')) return 'meta_description_update';
-  if (lower.includes('h1') || lower.includes('heading')) return 'heading_optimization';
-  if (lower.includes('faq') || lower.includes('question')) return 'faq_content_update';
-  if (lower.includes('schema') || lower.includes('json-ld') || lower.includes('structured data')) return 'schema_markup_injection';
-  if (lower.includes('content') || lower.includes('rewrite')) return 'page_content_rewrite';
-  if (lower.includes('internal link')) return 'internal_link_add';
-  return 'competitor_surpass_execute';
+  if (lower.includes("meta title") || lower.includes("title tag")) return "meta_title_update";
+  if (lower.includes("meta description") || lower.includes("description"))
+    return "meta_description_update";
+  if (lower.includes("h1") || lower.includes("heading")) return "heading_optimization";
+  if (lower.includes("faq") || lower.includes("question")) return "faq_content_update";
+  if (lower.includes("schema") || lower.includes("json-ld") || lower.includes("structured data"))
+    return "schema_markup_injection";
+  if (lower.includes("content") || lower.includes("rewrite")) return "page_content_rewrite";
+  if (lower.includes("internal link")) return "internal_link_add";
+  return "competitor_surpass_execute";
 }
 
 export function registerPlanExecutorHandlers(scheduler: any): void {
-  scheduler.registerHandler('serp:execute-surpass-plans', executeSurpassPlans);
-  logger.info('Plan executor handler registered');
+  scheduler.registerHandler("serp:execute-surpass-plans", executeSurpassPlans);
+  logger.info("Plan executor handler registered");
 }

@@ -7,7 +7,7 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════════
  * L9 SEO Bot - Module 5: PostHog Behavior Intelligence
- * 
+ *
  * The GOLD flow:
  * [Visitor hits Astro site]
  *   → [PostHog JS captures: page view, time on page, scroll %, clicks, nav path]
@@ -15,7 +15,7 @@
  *   → [SEO Bot queries PostHog API daily]
  *   → [Bot learns engagement patterns]
  *   → [Bot acts on insights]
- * 
+ *
  * Capabilities:
  * - Daily engagement data pull from PostHog (zero tokens)
  * - Page performance scoring (time on page × scroll depth)
@@ -24,25 +24,25 @@
  * - Dead-end detection (pages with high exit rates)
  * - Cross-portfolio benchmarking (compare across all clients)
  * - Weekly insights generation (strategic LLM, Friday only)
- * 
+ *
  * Token Budget:
  * - pullEngagementData: 0 tokens (pure API + DB)
  * - generateInsights: ~4000 strategic tokens (weekly only)
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import axios from 'axios';
-import { Job } from 'bullmq';
-import { eq, and, desc, gte } from 'drizzle-orm';
-import { Scheduler } from '../../core/scheduler.js';
-import { getConfig } from '../../core/config.js';
-import { createModuleLogger } from '../../core/logger.js';
-import { getDb, schema } from '../../core/database/index.js';
-import { resolvePostHogQueryApiKey } from '../../core/posthog-auth.js';
-import { getLlmService } from '../../services/llm.js';
-import { getNotificationService } from '../../services/notifications.js';
+import axios from "axios";
+import type { Job } from "bullmq";
+import { and, desc, eq, gte } from "drizzle-orm";
+import { getConfig } from "../../core/config.js";
+import { getDb, schema } from "../../core/database/index.js";
+import { createModuleLogger } from "../../core/logger.js";
+import { resolvePostHogQueryApiKey } from "../../core/posthog-auth.js";
+import type { Scheduler } from "../../core/scheduler.js";
+import { getLlmService } from "../../services/llm.js";
+import { getNotificationService } from "../../services/notifications.js";
 
-const logger = createModuleLogger('behavior-intelligence');
+const logger = createModuleLogger("behavior-intelligence");
 
 // ─── PostHog Query Client ────────────────────────────────────────────────────
 
@@ -51,7 +51,7 @@ class PostHogClient {
   private apiKey: string;
 
   constructor(baseUrl: string, apiKey: string) {
-    this.baseUrl = baseUrl.replace(/\/$/, '');
+    this.baseUrl = baseUrl.replace(/\/$/, "");
     this.apiKey = apiKey;
   }
 
@@ -60,22 +60,26 @@ class PostHogClient {
       const response = await axios.post(
         `${this.baseUrl}/api/projects/${projectId}/query`,
         {
-          query: { kind: 'HogQLQuery', query: hogql },
+          query: { kind: "HogQLQuery", query: hogql },
         },
         {
           headers: { Authorization: `Bearer ${this.apiKey}` },
           timeout: 30000,
-        }
+        },
       );
 
       return response.data?.results || [];
     } catch (error: any) {
-      logger.error({ error: error.message }, 'PostHog query failed');
+      logger.error({ error: error.message }, "PostHog query failed");
       return [];
     }
   }
 
-  async getInsight(projectId: string, insightType: string, params: Record<string, any> = {}): Promise<any> {
+  async getInsight(
+    projectId: string,
+    insightType: string,
+    params: Record<string, any> = {},
+  ): Promise<any> {
     try {
       const response = await axios.post(
         `${this.baseUrl}/api/projects/${projectId}/insights/trend`,
@@ -86,12 +90,12 @@ class PostHogClient {
         {
           headers: { Authorization: `Bearer ${this.apiKey}` },
           timeout: 30000,
-        }
+        },
       );
 
       return response.data;
     } catch (error: any) {
-      logger.error({ insightType, error: error.message }, 'PostHog insight fetch failed');
+      logger.error({ insightType, error: error.message }, "PostHog insight fetch failed");
       return null;
     }
   }
@@ -107,31 +111,31 @@ async function pullEngagementData(job: Job): Promise<void> {
   const config = getConfig();
 
   // Get client's PostHog config
-  const [client] = await db.select()
+  const [client] = await db
+    .select()
     .from(schema.clients)
     .where(eq(schema.clients.id, clientId))
     .limit(1);
 
   if (!client?.posthogProjectId || !client?.posthogApiKey) {
-    logger.debug({ clientDomain }, 'No PostHog config — skipping behavior pull');
+    logger.debug({ clientDomain }, "No PostHog config — skipping behavior pull");
     return;
   }
 
   // Query API needs a personal key (phx_*). Project ingestion keys (phc_*) in
   // clients.posthog_api_key only gate readiness; multi-org tenants may store
   // phx_* there to override the shared POSTHOG_PERSONAL_API_KEY (SEO-Bot#18).
-  const queryKey = resolvePostHogQueryApiKey(
-    client.posthogApiKey,
-    config.POSTHOG_PERSONAL_API_KEY,
-  );
+  const queryKey = resolvePostHogQueryApiKey(client.posthogApiKey, config.POSTHOG_PERSONAL_API_KEY);
   const posthog = new PostHogClient(config.POSTHOG_API_URL, queryKey);
-  const today = new Date().toISOString().split('T')[0];
+  const today = new Date().toISOString().split("T")[0];
 
-  logger.info({ clientDomain }, 'Pulling engagement data from PostHog');
+  logger.info({ clientDomain }, "Pulling engagement data from PostHog");
 
   // ─── Query 1: Page-level engagement metrics ─────────────────────────────
 
-  const pageMetrics = await posthog.query(client.posthogProjectId, `
+  const pageMetrics = await posthog.query(
+    client.posthogProjectId,
+    `
     SELECT
       properties.$current_url as page_url,
       count() as pageviews,
@@ -144,11 +148,14 @@ async function pullEngagementData(job: Job): Promise<void> {
     GROUP BY page_url
     ORDER BY pageviews DESC
     LIMIT 50
-  `);
+  `,
+  );
 
   // ─── Query 2: Exit rates per page ──────────────────────────────────────
 
-  const exitRates = await posthog.query(client.posthogProjectId, `
+  const exitRates = await posthog.query(
+    client.posthogProjectId,
+    `
     SELECT
       properties.$current_url as page_url,
       count() as total_views,
@@ -161,11 +168,14 @@ async function pullEngagementData(job: Job): Promise<void> {
     HAVING total_views >= 5
     ORDER BY exit_rate DESC
     LIMIT 30
-  `);
+  `,
+  );
 
   // ─── Query 3: Bounce rates per page ────────────────────────────────────
 
-  const bounceRates = await posthog.query(client.posthogProjectId, `
+  const bounceRates = await posthog.query(
+    client.posthogProjectId,
+    `
     SELECT
       properties.$entry_current_url as landing_page,
       count() as sessions,
@@ -179,7 +189,8 @@ async function pullEngagementData(job: Job): Promise<void> {
     HAVING sessions >= 3
     ORDER BY bounce_rate DESC
     LIMIT 30
-  `);
+  `,
+  );
 
   // ─── Store aggregated data ─────────────────────────────────────────────
 
@@ -207,7 +218,7 @@ async function pullEngagementData(job: Job): Promise<void> {
     });
   }
 
-  logger.info({ clientDomain, pagesTracked: pageMetrics.length }, 'Engagement data stored');
+  logger.info({ clientDomain, pagesTracked: pageMetrics.length }, "Engagement data stored");
 }
 
 // ─── Handler: Generate Insights (STRATEGIC LLM - weekly) ─────────────────────
@@ -223,16 +234,19 @@ async function generateInsights(job: Job): Promise<void> {
   // Get last 7 days of engagement data
   const oneWeekAgo = new Date(Date.now() - 7 * 86400000);
 
-  const engagement = await db.select()
+  const engagement = await db
+    .select()
     .from(schema.pageEngagement)
-    .where(and(
-      eq(schema.pageEngagement.clientId, clientId),
-      gte(schema.pageEngagement.computedAt, oneWeekAgo),
-    ))
+    .where(
+      and(
+        eq(schema.pageEngagement.clientId, clientId),
+        gte(schema.pageEngagement.computedAt, oneWeekAgo),
+      ),
+    )
     .orderBy(desc(schema.pageEngagement.totalPageviews));
 
   if (engagement.length < 3) {
-    logger.info({ clientDomain }, 'Insufficient engagement data for insights');
+    logger.info({ clientDomain }, "Insufficient engagement data for insights");
     return;
   }
 
@@ -246,11 +260,11 @@ async function generateInsights(job: Job): Promise<void> {
     .slice(0, 5);
 
   const deadEnds = engagement
-    .filter(e => (e.exitRate || 0) > 0.7 && (e.totalPageviews || 0) >= 5)
+    .filter((e) => (e.exitRate || 0) > 0.7 && (e.totalPageviews || 0) >= 5)
     .slice(0, 5);
 
   const highBounce = engagement
-    .filter(e => (e.bounceRate || 0) > 0.8 && (e.totalPageviews || 0) >= 5)
+    .filter((e) => (e.bounceRate || 0) > 0.8 && (e.totalPageviews || 0) >= 5)
     .slice(0, 5);
 
   // Generate strategic insights
@@ -266,37 +280,37 @@ FORMAT: Return a structured report with:
 
 Be specific. Reference actual page paths. Give concrete recommendations.`,
     `Domain: ${clientDomain}
-Industry: ${clientConfig?.industry || 'local service'}
+Industry: ${clientConfig?.industry || "local service"}
 
 TOP ENGAGEMENT PAGES:
-${topByEngagement.map(p => `${p.pagePath}: ${(p.avgTimeOnPage || 0).toFixed(0)}s avg time, ${((p.avgScrollDepth || 0) * 100).toFixed(0)}% scroll, ${p.totalPageviews} views`).join('\n')}
+${topByEngagement.map((p) => `${p.pagePath}: ${(p.avgTimeOnPage || 0).toFixed(0)}s avg time, ${((p.avgScrollDepth || 0) * 100).toFixed(0)}% scroll, ${p.totalPageviews} views`).join("\n")}
 
 DEAD ENDS (high exit rate):
-${deadEnds.map(p => `${p.pagePath}: ${((p.exitRate || 0) * 100).toFixed(0)}% exit rate, ${p.totalPageviews} views`).join('\n')}
+${deadEnds.map((p) => `${p.pagePath}: ${((p.exitRate || 0) * 100).toFixed(0)}% exit rate, ${p.totalPageviews} views`).join("\n")}
 
 HIGH BOUNCE PAGES:
-${highBounce.map(p => `${p.pagePath}: ${((p.bounceRate || 0) * 100).toFixed(0)}% bounce rate, ${p.totalPageviews} views`).join('\n')}
+${highBounce.map((p) => `${p.pagePath}: ${((p.bounceRate || 0) * 100).toFixed(0)}% bounce rate, ${p.totalPageviews} views`).join("\n")}
 
 TOTAL PAGES TRACKED: ${engagement.length}
 TOTAL WEEKLY PAGEVIEWS: ${engagement.reduce((sum, e) => sum + (e.totalPageviews || 0), 0)}
 
 Generate the behavior intelligence report:`,
     clientId,
-    'behavior-intelligence',
-    'weekly-insights'
+    "behavior-intelligence",
+    "weekly-insights",
   );
 
   // Send to operator
   await notifications.sendAlert({
     title: `Behavior Intelligence Report: ${clientDomain}`,
     message: insights,
-    severity: 'info',
+    severity: "info",
     clientDomain,
-    module: 'behavior-intelligence',
+    module: "behavior-intelligence",
     data: {
-      topPages: topByEngagement.map(p => p.pagePath),
-      deadEnds: deadEnds.map(p => p.pagePath),
-      highBounce: highBounce.map(p => p.pagePath),
+      topPages: topByEngagement.map((p) => p.pagePath),
+      deadEnds: deadEnds.map((p) => p.pagePath),
+      highBounce: highBounce.map((p) => p.pagePath),
       totalPageviews: engagement.reduce((sum, e) => sum + (e.totalPageviews || 0), 0),
     },
   });
@@ -304,13 +318,13 @@ Generate the behavior intelligence report:`,
   // Store outcome for feedback loop
   await db.insert(schema.actionOutcomes).values({
     clientId,
-    module: 'behavior-intelligence',
-    action: 'weekly_insights_generated',
+    module: "behavior-intelligence",
+    action: "weekly_insights_generated",
     executedAt: new Date(),
-    learnings: `Top: ${topByEngagement[0]?.pagePath || 'N/A'}, Dead-end: ${deadEnds[0]?.pagePath || 'none'}, Bounce: ${highBounce[0]?.pagePath || 'none'}`,
+    learnings: `Top: ${topByEngagement[0]?.pagePath || "N/A"}, Dead-end: ${deadEnds[0]?.pagePath || "none"}, Bounce: ${highBounce[0]?.pagePath || "none"}`,
   });
 
-  logger.info({ clientDomain }, 'Behavior insights generated and sent');
+  logger.info({ clientDomain }, "Behavior insights generated and sent");
 }
 
 // ─── Utility ─────────────────────────────────────────────────────────────────
@@ -319,14 +333,14 @@ function extractPath(url: string): string {
   try {
     return new URL(url).pathname;
   } catch {
-    return url || '/';
+    return url || "/";
   }
 }
 
 // ─── Register Handlers ───────────────────────────────────────────────────────
 
 export function registerBehaviorHandlers(scheduler: Scheduler): void {
-  scheduler.registerHandler('behavior:pull-engagement', pullEngagementData);
-  scheduler.registerHandler('behavior:generate-insights', generateInsights);
-  logger.info('Behavior Intelligence handlers registered');
+  scheduler.registerHandler("behavior:pull-engagement", pullEngagementData);
+  scheduler.registerHandler("behavior:generate-insights", generateInsights);
+  logger.info("Behavior Intelligence handlers registered");
 }

@@ -5,9 +5,18 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schema_version", "repository", "image", "validation_run_id", "profile",
-    "overall_status", "required_gates", "blocking_findings", "unknowns",
-    "generated_at", "validation_digest", "receipt_digest"
+    "schema_version",
+    "repository",
+    "image",
+    "validation_run_id",
+    "profile",
+    "overall_status",
+    "required_gates",
+    "blocking_findings",
+    "unknowns",
+    "generated_at",
+    "validation_digest",
+    "receipt_digest"
   ],
   "properties": {
     "schema_version": { "const": "1.0.0" },

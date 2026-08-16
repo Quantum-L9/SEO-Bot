@@ -12,7 +12,11 @@
  * under maxLinksPerWeek even though the job runs every weekday — the daily cap
  * alone (e.g. 10/day) would otherwise permit ~70/week.
  */
-export function velocityRunLimit(sentThisWeek: number, maxPerWeek: number, maxPerDay: number): number {
+export function velocityRunLimit(
+  sentThisWeek: number,
+  maxPerWeek: number,
+  maxPerDay: number,
+): number {
   const weeklyRemaining = Math.max(0, maxPerWeek - Math.max(0, sentThisWeek));
   return Math.min(maxPerDay, weeklyRemaining);
 }

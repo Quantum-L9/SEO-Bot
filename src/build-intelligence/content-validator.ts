@@ -25,9 +25,9 @@ import type {
   PageContentContractRoute,
   SEOContentBlueprintRoute,
   StructuredContentRoute,
-} from '@quantum-l9/bot-interop';
-import { getLlmService, type LlmService } from '../services/llm.js';
-import { contentValidationVerdictSchema } from './schema-guards.js';
+} from "@quantum-l9/bot-interop";
+import { getLlmService, type LlmService } from "../services/llm.js";
+import { contentValidationVerdictSchema } from "./schema-guards.js";
 
 export interface RouteValidationVerdict {
   route_id: string;
@@ -50,7 +50,9 @@ export function validateRouteDeterministic(
   const failures: string[] = [];
 
   if (route.route_id !== contractRoute.route_id) {
-    failures.push(`${route.route_id}: route_id does not match contract (${contractRoute.route_id})`);
+    failures.push(
+      `${route.route_id}: route_id does not match contract (${contractRoute.route_id})`,
+    );
   }
 
   const contractSectionIds = contractRoute.sections.map((section) => section.section_id).sort();
@@ -58,19 +60,23 @@ export function validateRouteDeterministic(
   const contractSet = new Set(contractSectionIds);
   const routeSet = new Set(routeSectionIds);
   for (const id of routeSectionIds) {
-    if (!contractSet.has(id)) failures.push(`${route.route_id}: unexpected section_id "${id}" not in contract`);
+    if (!contractSet.has(id))
+      failures.push(`${route.route_id}: unexpected section_id "${id}" not in contract`);
   }
   for (const id of contractSectionIds) {
     if (!routeSet.has(id)) failures.push(`${route.route_id}: missing required section_id "${id}"`);
   }
 
   if (!route.metadata.title.trim()) failures.push(`${route.route_id}: missing metadata.title`);
-  if (!route.metadata.description.trim()) failures.push(`${route.route_id}: missing metadata.description`);
+  if (!route.metadata.description.trim())
+    failures.push(`${route.route_id}: missing metadata.description`);
 
   const linkedTargets = new Set(route.internal_links.map((link) => link.target_route_id));
   for (const requirement of contractRoute.internal_link_requirements) {
     if (!linkedTargets.has(requirement.target_route_id)) {
-      failures.push(`${route.route_id}: missing required internal link to "${requirement.target_route_id}"`);
+      failures.push(
+        `${route.route_id}: missing required internal link to "${requirement.target_route_id}"`,
+      );
     }
   }
 
@@ -92,39 +98,43 @@ export async function validateRouteSemantics(
     blueprintRoute?: SEOContentBlueprintRoute;
     llm?: LlmService;
   },
-): Promise<import('./schema-guards.js').ContentValidationVerdict> {
+): Promise<import("./schema-guards.js").ContentValidationVerdict> {
   const llm = args.llm ?? getLlmService();
   const systemPrompt =
-    'You are a strict SEO content QA validator. Judge ONLY whether the generated ' +
-    'content satisfies the contract: required topics covered, entities handled, ' +
-    'questions answered, proof requirements respected, search intent aligned, and ' +
-    'no unsupported or forbidden claims. A claim is unsupported if it is not backed ' +
-    'by an allowed fact. Do not rewrite content. Respond with ONLY a JSON object: ' +
+    "You are a strict SEO content QA validator. Judge ONLY whether the generated " +
+    "content satisfies the contract: required topics covered, entities handled, " +
+    "questions answered, proof requirements respected, search intent aligned, and " +
+    "no unsupported or forbidden claims. A claim is unsupported if it is not backed " +
+    "by an allowed fact. Do not rewrite content. Respond with ONLY a JSON object: " +
     '{"seo_blueprint_passed":bool,"contract_passed":bool,"unsupported_claims":[...],' +
     '"failed_requirements":[...]} — no prose, no markdown fences.';
 
-  const userPrompt = JSON.stringify({
-    generated_route: route,
-    contract_route: {
-      route_id: contractRoute.route_id,
-      search_context: contractRoute.search_context,
-      forbidden_claims: contractRoute.forbidden_claims,
-      acceptance_tests: contractRoute.acceptance_tests,
-      allowed_facts: contractRoute.business_facts,
-      sections: contractRoute.sections.map((section) => ({
-        section_id: section.section_id,
-        objective: section.objective,
-        content_requirements: section.content_requirements,
-        allowed_fact_ids: section.allowed_fact_ids,
-        proof_requirements: section.proof_requirements,
-      })),
+  const userPrompt = JSON.stringify(
+    {
+      generated_route: route,
+      contract_route: {
+        route_id: contractRoute.route_id,
+        search_context: contractRoute.search_context,
+        forbidden_claims: contractRoute.forbidden_claims,
+        acceptance_tests: contractRoute.acceptance_tests,
+        allowed_facts: contractRoute.business_facts,
+        sections: contractRoute.sections.map((section) => ({
+          section_id: section.section_id,
+          objective: section.objective,
+          content_requirements: section.content_requirements,
+          allowed_fact_ids: section.allowed_fact_ids,
+          proof_requirements: section.proof_requirements,
+        })),
+      },
+      blueprint_route: args.blueprintRoute ?? null,
     },
-    blueprint_route: args.blueprintRoute ?? null,
-  }, null, 2);
+    null,
+    2,
+  );
 
-  return llm.executePolicyJson('CONTENT_VALIDATION', {
+  return llm.executePolicyJson("CONTENT_VALIDATION", {
     clientId: args.clientId,
-    module: 'build-intelligence',
+    module: "build-intelligence",
     purpose: `content-validation:${contractRoute.route_id}`,
     systemPrompt,
     userPrompt,

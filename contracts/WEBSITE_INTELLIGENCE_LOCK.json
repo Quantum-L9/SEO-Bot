@@ -4,9 +4,7 @@
   "locked_at": "2026-08-14",
   "protocol": "l9.website-intelligence",
   "protocol_version": "1.0",
-  "mode_scope": [
-    "REDESIGN_IMPROVE"
-  ],
+  "mode_scope": ["REDESIGN_IMPROVE"],
   "copy_mode": {
     "behavior_change_allowed": false,
     "existing_content_generation_preserved": true,
@@ -32,41 +30,28 @@
     "competitive_landscape": {
       "version": 1,
       "producer": "SEO-Bot",
-      "consumers": [
-        "Website-Bot",
-        "SEO-Bot"
-      ]
+      "consumers": ["Website-Bot", "SEO-Bot"]
     },
     "website_build_blueprint": {
       "version": 1,
       "producer": "Website-Bot",
-      "consumers": [
-        "Website-Bot"
-      ]
+      "consumers": ["Website-Bot"]
     },
     "seo_content_blueprint": {
       "version": 1,
       "producer": "SEO-Bot",
-      "consumers": [
-        "Website-Bot",
-        "SEO-Bot"
-      ]
+      "consumers": ["Website-Bot", "SEO-Bot"]
     },
     "page_content_contract": {
       "version": 1,
       "producer": "Website-Bot",
       "producer_kind": "DETERMINISTIC_COMPILER",
-      "consumers": [
-        "Website-Bot",
-        "SEO-Bot"
-      ]
+      "consumers": ["Website-Bot", "SEO-Bot"]
     },
     "structured_content_package": {
       "version": 1,
       "producer": "SEO-Bot",
-      "consumers": [
-        "Website-Bot"
-      ]
+      "consumers": ["Website-Bot"]
     }
   },
   "authority": {

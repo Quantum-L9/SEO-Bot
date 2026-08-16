@@ -33,21 +33,12 @@
       "minLength": 1
     },
     "profile": {
-      "enum": [
-        "ci",
-        "release",
-        "production"
-      ]
+      "enum": ["ci", "release", "production"]
     },
     "repository": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "name",
-        "commit_sha",
-        "branch",
-        "dirty"
-      ],
+      "required": ["name", "commit_sha", "branch", "dirty"],
       "properties": {
         "name": {
           "const": "Quantum-L9/SEO-Bot"
@@ -57,10 +48,7 @@
           "pattern": "^[a-f0-9]{40}$"
         },
         "branch": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "dirty": {
           "type": "boolean"
@@ -80,13 +68,7 @@
       "minimum": 0
     },
     "overall_status": {
-      "enum": [
-        "PASS",
-        "PASS_WITH_FINDINGS",
-        "BLOCKED",
-        "FAIL",
-        "UNKNOWN"
-      ]
+      "enum": ["PASS", "PASS_WITH_FINDINGS", "BLOCKED", "FAIL", "UNKNOWN"]
     },
     "gate_order": {
       "type": "array",
@@ -99,13 +81,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "gate_id",
-          "required",
-          "status",
-          "evidence_path",
-          "evidence_digest"
-        ],
+        "required": ["gate_id", "required", "status", "evidence_path", "evidence_digest"],
         "properties": {
           "gate_id": {
             "type": "string"
@@ -114,13 +90,7 @@
             "type": "boolean"
           },
           "status": {
-            "enum": [
-              "PASS",
-              "PASS_WITH_FINDINGS",
-              "BLOCKED",
-              "FAIL",
-              "UNKNOWN"
-            ]
+            "enum": ["PASS", "PASS_WITH_FINDINGS", "BLOCKED", "FAIL", "UNKNOWN"]
           },
           "evidence_path": {
             "type": "string"
@@ -153,26 +123,14 @@
     "finding": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "id",
-        "severity",
-        "message",
-        "owner",
-        "blocking",
-        "evidence_refs"
-      ],
+      "required": ["id", "severity", "message", "owner", "blocking", "evidence_refs"],
       "properties": {
         "id": {
           "type": "string",
           "minLength": 1
         },
         "severity": {
-          "enum": [
-            "critical",
-            "major",
-            "minor",
-            "info"
-          ]
+          "enum": ["critical", "major", "minor", "info"]
         },
         "message": {
           "type": "string",
@@ -196,11 +154,7 @@
     "unknown": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "id",
-        "description",
-        "required_resolution"
-      ],
+      "required": ["id", "description", "required_resolution"],
       "properties": {
         "id": {
           "type": "string",

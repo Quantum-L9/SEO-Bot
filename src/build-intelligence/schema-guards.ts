@@ -19,125 +19,173 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import { z } from 'zod';
 import type {
   ContentSlot,
   SEOContentBlueprintRoute,
   StructuredContentRoute,
-} from '@quantum-l9/bot-interop';
+} from "@quantum-l9/bot-interop";
+import { z } from "zod";
 
 const CONTENT_SLOTS: readonly [ContentSlot, ...ContentSlot[]] = [
-  'primary_offer', 'service_overview', 'differentiation', 'trust', 'process',
-  'project_proof', 'local_relevance', 'objection_handling', 'faq', 'conversion',
-  'metadata',
+  "primary_offer",
+  "service_overview",
+  "differentiation",
+  "trust",
+  "process",
+  "project_proof",
+  "local_relevance",
+  "objection_handling",
+  "faq",
+  "conversion",
+  "metadata",
 ];
 const contentSlot = z.enum(CONTENT_SLOTS);
 const strArray = z.array(z.string());
 
 /* ── SEOContentBlueprint (model-produced routes) ────────────────────────────── */
 
-const seoContentRequirement = z.object({
-  requirement_id: z.string().min(1),
-  target_slots: z.array(contentSlot),
-  placement: z.enum(['FIRST_MATCH', 'ALL_MATCHES']),
-  required_topics: strArray,
-  required_entities: strArray,
-  questions: strArray,
-  proof_needed: strArray,
-  required: z.boolean(),
-}).strict();
+const seoContentRequirement = z
+  .object({
+    requirement_id: z.string().min(1),
+    target_slots: z.array(contentSlot),
+    placement: z.enum(["FIRST_MATCH", "ALL_MATCHES"]),
+    required_topics: strArray,
+    required_entities: strArray,
+    questions: strArray,
+    proof_needed: strArray,
+    required: z.boolean(),
+  })
+  .strict();
 
-export const seoContentBlueprintRouteSchema = z.object({
-  route_id: z.string().min(1),
-  path: z.string().min(1),
-  search_intent: z.object({
-    primary: z.string().min(1),
-    secondary: strArray,
-    journey_stage: z.enum(['informational', 'commercial', 'transactional']),
-  }).strict(),
-  targets: z.object({
-    primary_query: z.string().min(1),
-    supporting_queries: strArray,
-    topics: strArray,
-    entities: strArray,
-  }).strict(),
-  requirements: z.array(seoContentRequirement),
-  competitive_gaps: z.array(z.object({
-    gap_id: z.string().min(1),
-    description: z.string(),
-    donor_domains: strArray,
-    opportunity: z.string(),
-  }).strict()),
-  internal_links: z.array(z.object({
-    target_route_id: z.string().min(1),
-    purpose: z.string(),
-  }).strict()),
-  aeo_geo: z.object({
-    answer_targets: strArray,
-    schema_requirements: strArray,
-  }).strict(),
-  metadata: z.object({
-    title_requirements: strArray,
-    description_requirements: strArray,
-  }).strict(),
-  forbidden_claims: strArray,
-  acceptance_tests: strArray,
-}).strict();
+export const seoContentBlueprintRouteSchema = z
+  .object({
+    route_id: z.string().min(1),
+    path: z.string().min(1),
+    search_intent: z
+      .object({
+        primary: z.string().min(1),
+        secondary: strArray,
+        journey_stage: z.enum(["informational", "commercial", "transactional"]),
+      })
+      .strict(),
+    targets: z
+      .object({
+        primary_query: z.string().min(1),
+        supporting_queries: strArray,
+        topics: strArray,
+        entities: strArray,
+      })
+      .strict(),
+    requirements: z.array(seoContentRequirement),
+    competitive_gaps: z.array(
+      z
+        .object({
+          gap_id: z.string().min(1),
+          description: z.string(),
+          donor_domains: strArray,
+          opportunity: z.string(),
+        })
+        .strict(),
+    ),
+    internal_links: z.array(
+      z
+        .object({
+          target_route_id: z.string().min(1),
+          purpose: z.string(),
+        })
+        .strict(),
+    ),
+    aeo_geo: z
+      .object({
+        answer_targets: strArray,
+        schema_requirements: strArray,
+      })
+      .strict(),
+    metadata: z
+      .object({
+        title_requirements: strArray,
+        description_requirements: strArray,
+      })
+      .strict(),
+    forbidden_claims: strArray,
+    acceptance_tests: strArray,
+  })
+  .strict();
 
-export const seoContentBlueprintRoutesSchema = z.object({
-  routes: z.array(seoContentBlueprintRouteSchema),
-}).strict();
+export const seoContentBlueprintRoutesSchema = z
+  .object({
+    routes: z.array(seoContentBlueprintRouteSchema),
+  })
+  .strict();
 
 // Compile-time guarantee that the zod route matches the bot-interop interface.
-export type _SeoRouteParity = z.infer<typeof seoContentBlueprintRouteSchema> extends SEOContentBlueprintRoute
-  ? true : never;
+export type _SeoRouteParity =
+  z.infer<typeof seoContentBlueprintRouteSchema> extends SEOContentBlueprintRoute ? true : never;
 
 /* ── StructuredContentPackage (model-produced routes) ───────────────────────── */
 
-const contentBlock = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('paragraph'), text: z.string() }).strict(),
-  z.object({ kind: z.literal('bullets'), items: strArray }).strict(),
-  z.object({ kind: z.literal('steps'), items: strArray }).strict(),
-  z.object({ kind: z.literal('quote'), text: z.string(), attribution: z.string().optional() }).strict(),
+const contentBlock = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("paragraph"), text: z.string() }).strict(),
+  z.object({ kind: z.literal("bullets"), items: strArray }).strict(),
+  z.object({ kind: z.literal("steps"), items: strArray }).strict(),
+  z
+    .object({ kind: z.literal("quote"), text: z.string(), attribution: z.string().optional() })
+    .strict(),
 ]);
 
-export const structuredContentRouteSchema = z.object({
-  route_id: z.string().min(1),
-  path: z.string().min(1),
-  metadata: z.object({
-    title: z.string().min(1),
-    description: z.string().min(1),
-  }).strict(),
-  sections: z.array(z.object({
-    section_id: z.string().min(1),
-    eyebrow: z.string().optional(),
-    heading: z.string().optional(),
-    subheading: z.string().optional(),
-    blocks: z.array(contentBlock),
-    cta: z.object({ label: z.string(), action: z.string() }).strict().optional(),
-  }).strict()),
-  faqs: z.array(z.object({ question: z.string(), answer: z.string() }).strict()),
-  internal_links: z.array(z.object({
-    target_route_id: z.string().min(1),
-    anchor_text: z.string(),
-  }).strict()),
-  schema_content_inputs: z.object({
-    faq: z.boolean().optional(),
-    service: z.boolean().optional(),
-    local_business: z.boolean().optional(),
-  }).strict(),
-}).strict();
+export const structuredContentRouteSchema = z
+  .object({
+    route_id: z.string().min(1),
+    path: z.string().min(1),
+    metadata: z
+      .object({
+        title: z.string().min(1),
+        description: z.string().min(1),
+      })
+      .strict(),
+    sections: z.array(
+      z
+        .object({
+          section_id: z.string().min(1),
+          eyebrow: z.string().optional(),
+          heading: z.string().optional(),
+          subheading: z.string().optional(),
+          blocks: z.array(contentBlock),
+          cta: z.object({ label: z.string(), action: z.string() }).strict().optional(),
+        })
+        .strict(),
+    ),
+    faqs: z.array(z.object({ question: z.string(), answer: z.string() }).strict()),
+    internal_links: z.array(
+      z
+        .object({
+          target_route_id: z.string().min(1),
+          anchor_text: z.string(),
+        })
+        .strict(),
+    ),
+    schema_content_inputs: z
+      .object({
+        faq: z.boolean().optional(),
+        service: z.boolean().optional(),
+        local_business: z.boolean().optional(),
+      })
+      .strict(),
+  })
+  .strict();
 
-export type _StructuredRouteParity = z.infer<typeof structuredContentRouteSchema> extends StructuredContentRoute
-  ? true : never;
+export type _StructuredRouteParity =
+  z.infer<typeof structuredContentRouteSchema> extends StructuredContentRoute ? true : never;
 
 /* ── Semantic content-validation verdict (model-produced) ───────────────────── */
 
-export const contentValidationVerdictSchema = z.object({
-  seo_blueprint_passed: z.boolean(),
-  contract_passed: z.boolean(),
-  unsupported_claims: strArray,
-  failed_requirements: strArray,
-}).strict();
+export const contentValidationVerdictSchema = z
+  .object({
+    seo_blueprint_passed: z.boolean(),
+    contract_passed: z.boolean(),
+    unsupported_claims: strArray,
+    failed_requirements: strArray,
+  })
+  .strict();
 
 export type ContentValidationVerdict = z.infer<typeof contentValidationVerdictSchema>;

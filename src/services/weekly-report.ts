@@ -7,7 +7,7 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════════
  * L9 SEO Bot - Weekly Report Generator
- * 
+ *
  * Generates and delivers comprehensive weekly SEO reports:
  * - TO: Domain owner (per-client config)
  * - CC: Agency operator (OPERATOR_CC_EMAIL from env)
@@ -15,13 +15,13 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import nodemailer from 'nodemailer';
-import { eq, and, gte, desc, sql } from 'drizzle-orm';
-import { getDb, schema } from '../core/database/index.js';
-import { getConfig } from '../core/config.js';
-import { createModuleLogger } from '../core/logger.js';
+import { and, desc, eq, gte, sql } from "drizzle-orm";
+import nodemailer from "nodemailer";
+import { getConfig } from "../core/config.js";
+import { getDb, schema } from "../core/database/index.js";
+import { createModuleLogger } from "../core/logger.js";
 
-const logger = createModuleLogger('weekly-report');
+const logger = createModuleLogger("weekly-report");
 
 // ─── Report Data Structures ───────────────────────────────────────────────────
 
@@ -98,7 +98,8 @@ export async function collectWeeklyData(clientId: string): Promise<WeeklyReportD
   const now = new Date();
 
   // Get client
-  const [client] = await db.select()
+  const [client] = await db
+    .select()
     .from(schema.clients)
     .where(eq(schema.clients.id, clientId))
     .limit(1);
@@ -108,92 +109,102 @@ export async function collectWeeklyData(clientId: string): Promise<WeeklyReportD
   const clientConfig = (client.config as any) || {};
 
   // Rankings
-  const rankings = await db.select()
+  const rankings = await db
+    .select()
     .from(schema.serpRankings)
-    .where(and(
-      eq(schema.serpRankings.clientId, clientId),
-      gte(schema.serpRankings.checkedAt, oneWeekAgo),
-    ))
+    .where(
+      and(
+        eq(schema.serpRankings.clientId, clientId),
+        gte(schema.serpRankings.checkedAt, oneWeekAgo),
+      ),
+    )
     .orderBy(desc(schema.serpRankings.checkedAt));
 
   const improved = rankings
-    .filter(r => r.previousPosition && r.position && r.position < r.previousPosition)
-    .map(r => ({ keyword: r.keyword, from: r.previousPosition!, to: r.position! }));
+    .filter((r) => r.previousPosition && r.position && r.position < r.previousPosition)
+    .map((r) => ({ keyword: r.keyword, from: r.previousPosition!, to: r.position! }));
 
   const declined = rankings
-    .filter(r => r.previousPosition && r.position && r.position > r.previousPosition)
-    .map(r => ({ keyword: r.keyword, from: r.previousPosition!, to: r.position! }));
+    .filter((r) => r.previousPosition && r.position && r.position > r.previousPosition)
+    .map((r) => ({ keyword: r.keyword, from: r.previousPosition!, to: r.position! }));
 
-  const positions = rankings.filter(r => r.position).map(r => r.position!);
-  const avgPosition = positions.length > 0 ? positions.reduce((a, b) => a + b, 0) / positions.length : 0;
+  const positions = rankings.filter((r) => r.position).map((r) => r.position!);
+  const avgPosition =
+    positions.length > 0 ? positions.reduce((a, b) => a + b, 0) / positions.length : 0;
 
   // Vitals
-  const vitals = await db.select()
+  const vitals = await db
+    .select()
     .from(schema.webVitals)
-    .where(and(
-      eq(schema.webVitals.clientId, clientId),
-      gte(schema.webVitals.measuredAt, oneWeekAgo),
-    ))
+    .where(
+      and(eq(schema.webVitals.clientId, clientId), gte(schema.webVitals.measuredAt, oneWeekAgo)),
+    )
     .orderBy(desc(schema.webVitals.measuredAt))
     .limit(5);
 
   const latestVital = vitals[0];
 
   // Actions executed this week
-  const actions = await db.select()
+  const actions = await db
+    .select()
     .from(schema.actionLog)
-    .where(and(
-      eq(schema.actionLog.clientId, clientId),
-      eq(schema.actionLog.status, 'auto_executed'),
-      gte(schema.actionLog.createdAt, oneWeekAgo),
-    ))
+    .where(
+      and(
+        eq(schema.actionLog.clientId, clientId),
+        eq(schema.actionLog.status, "auto_executed"),
+        gte(schema.actionLog.createdAt, oneWeekAgo),
+      ),
+    )
     .orderBy(desc(schema.actionLog.createdAt));
 
   // Pending approvals
-  const pending = await db.select()
+  const pending = await db
+    .select()
     .from(schema.actionLog)
-    .where(and(
-      eq(schema.actionLog.clientId, clientId),
-      eq(schema.actionLog.status, 'pending_approval'),
-    ))
+    .where(
+      and(eq(schema.actionLog.clientId, clientId), eq(schema.actionLog.status, "pending_approval")),
+    )
     .orderBy(desc(schema.actionLog.createdAt));
 
   // Link building
-  const prospects = await db.select()
+  const prospects = await db
+    .select()
     .from(schema.linkProspects)
-    .where(and(
-      eq(schema.linkProspects.clientId, clientId),
-      gte(schema.linkProspects.createdAt, oneWeekAgo),
-    ));
+    .where(
+      and(
+        eq(schema.linkProspects.clientId, clientId),
+        gte(schema.linkProspects.createdAt, oneWeekAgo),
+      ),
+    );
 
   // AEO citations
-  const citations = await db.select()
+  const citations = await db
+    .select()
     .from(schema.aeoCitations)
-    .where(and(
-      eq(schema.aeoCitations.clientId, clientId),
-      gte(schema.aeoCitations.checkedAt, oneWeekAgo),
-    ));
+    .where(
+      and(
+        eq(schema.aeoCitations.clientId, clientId),
+        gte(schema.aeoCitations.checkedAt, oneWeekAgo),
+      ),
+    );
 
-  const citationRate = citations.length > 0
-    ? (citations.filter(c => c.cited).length / citations.length) * 100
-    : 0;
+  const citationRate =
+    citations.length > 0 ? (citations.filter((c) => c.cited).length / citations.length) * 100 : 0;
 
   // Token usage
-  const tokenResult = await db.select({
-    total: sql<number>`COALESCE(SUM(cost), 0)`,
-    calls: sql<number>`COUNT(*)`,
-  })
+  const tokenResult = await db
+    .select({
+      total: sql<number>`COALESCE(SUM(cost), 0)`,
+      calls: sql<number>`COUNT(*)`,
+    })
     .from(schema.llmUsage)
-    .where(and(
-      eq(schema.llmUsage.clientId, clientId),
-      gte(schema.llmUsage.timestamp, oneWeekAgo),
-    ));
+    .where(and(eq(schema.llmUsage.clientId, clientId), gte(schema.llmUsage.timestamp, oneWeekAgo)));
 
   return {
     client: {
       name: client.name,
       domain: client.domain,
-      ownerEmail: clientConfig.ownerEmail || '',
+      ownerEmail: clientConfig.ownerEmail || "",
     },
     period: { from: oneWeekAgo, to: now },
     rankings: {
@@ -203,44 +214,44 @@ export async function collectWeeklyData(clientId: string): Promise<WeeklyReportD
       avgPosition: Math.round(avgPosition * 10) / 10,
     },
     vitals: {
-      lcp: { value: latestVital?.lcp || 0, rating: latestVital?.rating || 'unknown', trend: '→' },
-      cls: { value: latestVital?.cls || 0, rating: latestVital?.rating || 'unknown', trend: '→' },
-      inp: { value: latestVital?.inp || 0, rating: latestVital?.rating || 'unknown', trend: '→' },
+      lcp: { value: latestVital?.lcp || 0, rating: latestVital?.rating || "unknown", trend: "→" },
+      cls: { value: latestVital?.cls || 0, rating: latestVital?.rating || "unknown", trend: "→" },
+      inp: { value: latestVital?.inp || 0, rating: latestVital?.rating || "unknown", trend: "→" },
     },
-    actionsExecuted: actions.map(a => ({
+    actionsExecuted: actions.map((a) => ({
       action: a.action,
       description: a.description,
       rationale: a.rationale,
       triggeredBy: a.triggeredBy,
       riskLevel: a.riskLevel,
-      result: 'completed',
+      result: "completed",
     })),
-    pendingApprovals: pending.map(p => ({
+    pendingApprovals: pending.map((p) => ({
       id: p.id,
       action: p.action,
       description: p.description,
       options: p.options ? JSON.parse(p.options as string) : [],
-      aiRecommendation: p.aiRecommendation || '',
+      aiRecommendation: p.aiRecommendation || "",
     })),
     competitorIntel: {
-      topCompetitor: 'See gap analyses',
+      topCompetitor: "See gap analyses",
       theirActions: [],
-      ourResponse: '',
+      ourResponse: "",
     },
     linkBuilding: {
       prospectsDiscovered: prospects.length,
-      outreachSent: prospects.filter(p => p.status === 'outreach_queued').length,
-      linksAcquired: prospects.filter(p => p.status === 'link_acquired').length,
-      pendingResponses: prospects.filter(p => p.status === 'awaiting_response').length,
+      outreachSent: prospects.filter((p) => p.status === "outreach_queued").length,
+      linksAcquired: prospects.filter((p) => p.status === "link_acquired").length,
+      pendingResponses: prospects.filter((p) => p.status === "awaiting_response").length,
     },
     aeo: {
       queriesChecked: citations.length,
       citationRate,
-      newCitations: citations.filter(c => c.cited).length,
+      newCitations: citations.filter((c) => c.cited).length,
     },
     tokenUsage: {
       totalSpent: tokenResult[0]?.total || 0,
-      budgetRemaining: (clientConfig.dailyTokenBudget || 2.00) * 7 - (tokenResult[0]?.total || 0),
+      budgetRemaining: (clientConfig.dailyTokenBudget || 2.0) * 7 - (tokenResult[0]?.total || 0),
       callsMade: tokenResult[0]?.calls || 0,
     },
     behaviorInsights: [],
@@ -252,18 +263,33 @@ export async function collectWeeklyData(clientId: string): Promise<WeeklyReportD
 // Extracted from an inline nested ternary so the risk→color mapping is a single
 // statement (keeps the report template literal flat).
 function riskColor(level: unknown): string {
-  if (level === 'low') return '#d4edda';
-  if (level === 'medium') return '#fff3cd';
-  return '#f8d7da';
+  if (level === "low") return "#d4edda";
+  if (level === "medium") return "#fff3cd";
+  return "#f8d7da";
 }
 
 function generateHtmlReport(data: WeeklyReportData): string {
-  const { client, period, rankings, vitals, actionsExecuted, pendingApprovals, linkBuilding, aeo, tokenUsage, behaviorInsights } = data;
+  const {
+    client,
+    period,
+    rankings,
+    vitals,
+    actionsExecuted,
+    pendingApprovals,
+    linkBuilding,
+    aeo,
+    tokenUsage,
+    behaviorInsights,
+  } = data;
 
-  const formatDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const formatDate = (d: Date) =>
+    d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
-  const actionsHtml = actionsExecuted.length > 0
-    ? actionsExecuted.map(a => `
+  const actionsHtml =
+    actionsExecuted.length > 0
+      ? actionsExecuted
+          .map(
+            (a) => `
       <tr>
         <td style="padding: 8px; border-bottom: 1px solid #eee;">${a.action}</td>
         <td style="padding: 8px; border-bottom: 1px solid #eee;">${a.description}</td>
@@ -271,25 +297,36 @@ function generateHtmlReport(data: WeeklyReportData): string {
         <td style="padding: 8px; border-bottom: 1px solid #eee; font-style: italic; color: #666;">${a.triggeredBy}</td>
         <td style="padding: 8px; border-bottom: 1px solid #eee;"><span style="background: ${riskColor(a.riskLevel)}; padding: 2px 8px; border-radius: 4px;">${a.riskLevel}</span></td>
       </tr>
-    `).join('')
-    : '<tr><td colspan="5" style="padding: 8px; text-align: center; color: #999;">No actions executed this week</td></tr>';
+    `,
+          )
+          .join("")
+      : '<tr><td colspan="5" style="padding: 8px; text-align: center; color: #999;">No actions executed this week</td></tr>';
 
-  const pendingHtml = pendingApprovals.length > 0
-    ? pendingApprovals.map(p => `
+  const pendingHtml =
+    pendingApprovals.length > 0
+      ? pendingApprovals
+          .map(
+            (p) => `
       <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
         <h4 style="margin: 0 0 8px 0;">${p.action}</h4>
         <p style="margin: 0 0 8px 0;">${p.description}</p>
-        ${p.options.length > 0 ? `
+        ${
+          p.options.length > 0
+            ? `
           <p style="font-weight: bold; margin: 8px 0 4px 0;">Options:</p>
           <ul style="margin: 0; padding-left: 20px;">
-            ${p.options.map(o => `<li>${o.recommended ? '<strong>' : ''}${o.label} (confidence: ${(o.confidence * 100).toFixed(0)}%)${o.recommended ? ' ← AI Recommended</strong>' : ''}</li>`).join('')}
+            ${p.options.map((o) => `<li>${o.recommended ? "<strong>" : ""}${o.label} (confidence: ${(o.confidence * 100).toFixed(0)}%)${o.recommended ? " ← AI Recommended</strong>" : ""}</li>`).join("")}
           </ul>
-        ` : ''}
-        ${p.aiRecommendation ? `<p style="margin: 8px 0 0 0; color: #856404;"><strong>AI Recommendation:</strong> ${p.aiRecommendation}</p>` : ''}
+        `
+            : ""
+        }
+        ${p.aiRecommendation ? `<p style="margin: 8px 0 0 0; color: #856404;"><strong>AI Recommendation:</strong> ${p.aiRecommendation}</p>` : ""}
         <p style="margin: 8px 0 0 0; font-size: 12px; color: #666;">Reply to this email with the option letter to approve, or "reject" to decline.</p>
       </div>
-    `).join('')
-    : '<p style="color: #28a745;">No pending approvals — all clear.</p>';
+    `,
+          )
+          .join("")
+      : '<p style="color: #28a745;">No pending approvals — all clear.</p>';
 
   return `
 <!DOCTYPE html>
@@ -324,12 +361,19 @@ function generateHtmlReport(data: WeeklyReportData): string {
         <div style="font-size: 12px; color: #666;">Avg Position</div>
       </div>
     </div>
-    ${rankings.improved.length > 0 ? `
+    ${
+      rankings.improved.length > 0
+        ? `
       <p style="margin: 12px 0 4px 0; font-weight: bold; color: #28a745;">Top Movers:</p>
       <ul style="margin: 0; padding-left: 20px;">
-        ${rankings.improved.slice(0, 5).map(r => `<li>"${r.keyword}" — moved from #${r.from} to #${r.to}</li>`).join('')}
+        ${rankings.improved
+          .slice(0, 5)
+          .map((r) => `<li>"${r.keyword}" — moved from #${r.from} to #${r.to}</li>`)
+          .join("")}
       </ul>
-    ` : ''}
+    `
+        : ""
+    }
   </div>
 
   <!-- Web Vitals -->
@@ -338,17 +382,17 @@ function generateHtmlReport(data: WeeklyReportData): string {
     <table style="width: 100%; border-collapse: collapse;">
       <tr>
         <td style="padding: 8px;"><strong>LCP</strong></td>
-        <td style="padding: 8px;">${vitals.lcp.value ? vitals.lcp.value.toFixed(1) + 's' : 'N/A'}</td>
+        <td style="padding: 8px;">${vitals.lcp.value ? vitals.lcp.value.toFixed(1) + "s" : "N/A"}</td>
         <td style="padding: 8px;">${vitals.lcp.rating}</td>
       </tr>
       <tr>
         <td style="padding: 8px;"><strong>CLS</strong></td>
-        <td style="padding: 8px;">${vitals.cls.value ? vitals.cls.value.toFixed(3) : 'N/A'}</td>
+        <td style="padding: 8px;">${vitals.cls.value ? vitals.cls.value.toFixed(3) : "N/A"}</td>
         <td style="padding: 8px;">${vitals.cls.rating}</td>
       </tr>
       <tr>
         <td style="padding: 8px;"><strong>INP</strong></td>
-        <td style="padding: 8px;">${vitals.inp.value ? vitals.inp.value.toFixed(0) + 'ms' : 'N/A'}</td>
+        <td style="padding: 8px;">${vitals.inp.value ? vitals.inp.value.toFixed(0) + "ms" : "N/A"}</td>
         <td style="padding: 8px;">${vitals.inp.rating}</td>
       </tr>
     </table>
@@ -398,12 +442,16 @@ function generateHtmlReport(data: WeeklyReportData): string {
   </div>
 
   <!-- Behavior Insights -->
-  ${behaviorInsights.length > 0 ? `
+  ${
+    behaviorInsights.length > 0
+      ? `
   <div style="margin-bottom: 20px;">
     <h2 style="font-size: 18px;">Behavior Insights</h2>
-    ${behaviorInsights.map(i => `<p><strong>${i.severity}:</strong> ${i.insight} — <em>${i.recommendation}</em></p>`).join('')}
+    ${behaviorInsights.map((i) => `<p><strong>${i.severity}:</strong> ${i.insight} — <em>${i.recommendation}</em></p>`).join("")}
   </div>
-  ` : ''}
+  `
+      : ""
+  }
 
   <!-- Footer -->
   <div style="border-top: 1px solid #dee2e6; padding-top: 16px; margin-top: 24px; font-size: 12px; color: #6c757d;">
@@ -422,7 +470,7 @@ export async function generateAndDeliverWeeklyReport(clientId: string): Promise<
   const data = await collectWeeklyData(clientId);
 
   if (!data) {
-    logger.warn({ clientId }, 'No client found for weekly report');
+    logger.warn({ clientId }, "No client found for weekly report");
     return;
   }
 
@@ -433,13 +481,16 @@ export async function generateAndDeliverWeeklyReport(clientId: string): Promise<
   const ccEmail = config.OPERATOR_CC_EMAIL;
 
   if (!toEmail && !ccEmail) {
-    logger.warn({ clientId, domain: data.client.domain }, 'No recipient configured for weekly report');
+    logger.warn(
+      { clientId, domain: data.client.domain },
+      "No recipient configured for weekly report",
+    );
     return;
   }
 
   // Send email
   if (!config.SMTP_PASSWORD) {
-    logger.warn('SMTP not configured — weekly report not sent');
+    logger.warn("SMTP not configured — weekly report not sent");
     return;
   }
 
@@ -458,21 +509,27 @@ export async function generateAndDeliverWeeklyReport(clientId: string): Promise<
 
   try {
     await transporter.sendMail({
-      from: `"L9 SEO Bot" <${config.OUTREACH_FROM_EMAIL || 'bot@l9.dev'}>`,
+      from: `"L9 SEO Bot" <${config.OUTREACH_FROM_EMAIL || "bot@l9.dev"}>`,
       to: recipients,
       cc,
-      subject: `Weekly SEO Report — ${data.client.domain} (${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`,
+      subject: `Weekly SEO Report — ${data.client.domain} (${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })})`,
       html: htmlReport,
     });
 
-    logger.info({
-      client: data.client.domain,
-      to: recipients,
-      cc,
-      actionsReported: data.actionsExecuted.length,
-      pendingApprovals: data.pendingApprovals.length,
-    }, 'Weekly report delivered');
+    logger.info(
+      {
+        client: data.client.domain,
+        to: recipients,
+        cc,
+        actionsReported: data.actionsExecuted.length,
+        pendingApprovals: data.pendingApprovals.length,
+      },
+      "Weekly report delivered",
+    );
   } catch (error: any) {
-    logger.error({ error: error.message, client: data.client.domain }, 'Failed to deliver weekly report');
+    logger.error(
+      { error: error.message, client: data.client.domain },
+      "Failed to deliver weekly report",
+    );
   }
 }

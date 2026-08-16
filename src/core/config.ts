@@ -12,8 +12,8 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import { z } from 'zod';
-import * as dotenv from 'dotenv';
+import * as dotenv from "dotenv";
+import { z } from "zod";
 
 dotenv.config();
 
@@ -40,7 +40,7 @@ const envSchema = z.object({
   PERPLEXITY_API_KEY: z.string().min(1),
 
   // Governed cross-agent memory (l9-graphiti-memory HTTP MCP)
-  L9_MEMORY_MODE: z.enum(['disabled', 'optional', 'required']).default('optional'),
+  L9_MEMORY_MODE: z.enum(["disabled", "optional", "required"]).default("optional"),
   L9_MEMORY_URL: z.string().url().optional(),
   L9_MEMORY_TOKEN: z.string().min(1).optional(),
   L9_MEMORY_TOKEN_BUDGET: z.coerce.number().int().min(128).max(64000).default(1200),
@@ -63,9 +63,9 @@ const envSchema = z.object({
   DASHBOARD_ALLOWED_ORIGINS: z.string().optional(),
 
   // Email Outreach
-  SMTP_HOST: z.string().default('smtp.sendgrid.net'),
+  SMTP_HOST: z.string().default("smtp.sendgrid.net"),
   SMTP_PORT: z.coerce.number().default(587),
-  SMTP_USER: z.string().default('apikey'),
+  SMTP_USER: z.string().default("apikey"),
   SMTP_PASSWORD: z.string().optional(),
   OUTREACH_FROM_EMAIL: z.string().email().optional(),
   OUTREACH_FROM_NAME: z.string().optional(),
@@ -78,13 +78,16 @@ const envSchema = z.object({
 
   // Bot Config
   BOT_PORT: z.coerce.number().default(3100),
-  BOT_LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
-  BOT_TIMEZONE: z.string().default('America/New_York'),
+  BOT_LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
+  BOT_TIMEZONE: z.string().default("America/New_York"),
   // Trust X-Forwarded-For. Set true when the API runs behind a reverse proxy /
   // tunnel (Caddy/nginx/Cloudflare) so request.ip — and the per-IP rate limiter
   // — reflect the real client IP rather than the proxy's. Default false (do not
   // trust XFF) to avoid IP spoofing when not behind a trusted proxy.
-  TRUST_PROXY: z.string().optional().transform((v) => v === 'true' || v === '1'),
+  TRUST_PROXY: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
 
   // Notifications
   OPERATOR_EMAIL: z.string().email().optional(),
@@ -93,10 +96,10 @@ const envSchema = z.object({
   TELEGRAM_CHAT_ID: z.string().optional(),
 
   // Budget — @quantum-l9/llm-router surge-aware model
-  DEFAULT_CLIENT_MONTHLY_BUDGET: z.coerce.number().default(200.00),
-  DEFAULT_CLIENT_WEEKLY_TARGET: z.coerce.number().default(50.00),
-  DEFAULT_CLIENT_WEEKLY_CEILING: z.coerce.number().default(100.00),
-  GLOBAL_MONTHLY_HARD_CEILING: z.coerce.number().default(2000.00),
+  DEFAULT_CLIENT_MONTHLY_BUDGET: z.coerce.number().default(200.0),
+  DEFAULT_CLIENT_WEEKLY_TARGET: z.coerce.number().default(50.0),
+  DEFAULT_CLIENT_WEEKLY_CEILING: z.coerce.number().default(100.0),
+  GLOBAL_MONTHLY_HARD_CEILING: z.coerce.number().default(2000.0),
   SURGE_THRESHOLD: z.coerce.number().default(0.6),
   // Optional hard daily LLM spend cap (USD). When set, execute() defers tasks
   // once the day's recorded spend reaches this value. Unset = no daily cap
@@ -104,8 +107,8 @@ const envSchema = z.object({
   DAILY_SPEND_CAP: z.coerce.number().optional(),
 
   // Execution Policy
-  AUTO_EXECUTE_THRESHOLD: z.enum(['low', 'medium', 'high']).default('high'),
-  REQUIRE_APPROVAL_ONLY_FOR: z.string().default('critical'),
+  AUTO_EXECUTE_THRESHOLD: z.enum(["low", "medium", "high"]).default("high"),
+  REQUIRE_APPROVAL_ONLY_FOR: z.string().default("critical"),
 
   // Site Deployment Transport (C-01 / GAP-08) — only used when the
   // serp:execute-surpass-plans job is enabled. All optional so startup never
@@ -113,7 +116,7 @@ const envSchema = z.object({
   GITHUB_TOKEN: z.string().optional(),
   VERCEL_DEPLOY_HOOK: z.string().optional(),
   WEBSITE_BOT_REPO: z.string().optional(),
-  SITE_SOURCE_BRANCH: z.string().default('main'),
+  SITE_SOURCE_BRANCH: z.string().default("main"),
   SITE_DEPLOY_DRY_RUN: z.string().optional(),
 });
 
@@ -128,12 +131,12 @@ export function loadConfig(): EnvConfig {
 
   if (!result.success) {
     const errors = result.error.issues.map(
-      (issue) => `  ${issue.path.join('.')}: ${issue.message}`
+      (issue) => `  ${issue.path.join(".")}: ${issue.message}`,
     );
-    console.error('═══ L9 SEO Bot - Configuration Error ═══');
-    console.error('The following environment variables are missing or invalid:');
-    console.error(errors.join('\n'));
-    console.error('═══════════════════════════════════════════');
+    console.error("═══ L9 SEO Bot - Configuration Error ═══");
+    console.error("The following environment variables are missing or invalid:");
+    console.error(errors.join("\n"));
+    console.error("═══════════════════════════════════════════");
     process.exit(1);
   }
 
