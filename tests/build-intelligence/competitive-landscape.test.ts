@@ -14,7 +14,10 @@ import {
   REQUIRED_DONOR_COUNT,
   visibilityContribution,
 } from "../../src/build-intelligence/competitive-landscape.js";
-import { HARD_EXPANSION_CEILING, planExpansionRound } from "../../src/build-intelligence/query-expansion.js";
+import {
+  HARD_EXPANSION_CEILING,
+  planExpansionRound,
+} from "../../src/build-intelligence/query-expansion.js";
 import type { OrganicSerpResult } from "../../src/services/dataforseo.js";
 import { DataForSeoTaskError, DataForSeoUnavailableError } from "../../src/services/dataforseo.js";
 
@@ -113,10 +116,10 @@ function visibilityFixture(): Record<string, OrganicSerpResult> {
   };
 }
 
-function nCompanyMap(n: number, extras: Array<{ rank: number; url: string }> = []): Record<
-  string,
-  OrganicSerpResult
-> {
+function nCompanyMap(
+  n: number,
+  extras: Array<{ rank: number; url: string }> = [],
+): Record<string, OrganicSerpResult> {
   return {
     "metal roofing": serp("metal roofing", [...rankedCompanies(n), ...extras]),
     "roof repair": serp("roof repair", []),
@@ -137,7 +140,9 @@ describe("CompetitiveLandscape — deterministic ranking truth", () => {
   });
 
   it("invokes ZERO LLM operations", async () => {
-    await createCompetitiveLandscape(baseRequest, { dataForSeo: new FakePort(visibilityFixture()) });
+    await createCompetitiveLandscape(baseRequest, {
+      dataForSeo: new FakePort(visibilityFixture()),
+    });
     expect(executeSpy).not.toHaveBeenCalled();
   });
 
@@ -173,9 +178,7 @@ describe("CompetitiveLandscape — deterministic ranking truth", () => {
     });
     const alpha = artifact.payload.domains.find((d) => d.domain === "alpha-roofing.com")!;
     const expected =
-      Math.round(
-        (visibilityContribution(2, 1) + visibilityContribution(1, 1)) * 1e6,
-      ) / 1e6;
+      Math.round((visibilityContribution(2, 1) + visibilityContribution(1, 1)) * 1e6) / 1e6;
     expect(alpha.aggregate_visibility).toBe(expected);
   });
 
@@ -361,24 +364,29 @@ describe("CompetitiveLandscape — query expansion", () => {
       addedSoFar: HARD_EXPANSION_CEILING,
     });
     expect(overflow).toEqual([]);
-    expect(planExpansionRound({
-      round: 99,
-      niche: "roofing",
-      market: { country: "United States" },
-      existingQueries: [],
-      originalQueries: ["roofing"],
-      addedSoFar: 0,
-    })).toEqual([]);
+    expect(
+      planExpansionRound({
+        round: 99,
+        niche: "roofing",
+        market: { country: "United States" },
+        existingQueries: [],
+        originalQueries: ["roofing"],
+        addedSoFar: 0,
+      }),
+    ).toEqual([]);
   });
 
   it("expands the portfolio when the initial queries cannot yield 10 donors", async () => {
     const port = new FakePort({
       "metal roofing": serp("metal roofing", rankedCompanies(4)),
       "roof repair": serp("roof repair", []),
-      roofing: serp("roofing", rankedCompanies(8, 1).map((item, i) => ({
-        rank: item.rank,
-        url: companyUrl(20 + i),
-      }))),
+      roofing: serp(
+        "roofing",
+        rankedCompanies(8, 1).map((item, i) => ({
+          rank: item.rank,
+          url: companyUrl(20 + i),
+        })),
+      ),
     });
     const artifact = await createCompetitiveLandscape(baseRequest, { dataForSeo: port });
     expect(artifact.payload.selected_donors).toHaveLength(10);

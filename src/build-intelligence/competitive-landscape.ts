@@ -23,15 +23,15 @@ import {
 } from "@quantum-l9/bot-interop";
 import { createModuleLogger } from "../core/logger.js";
 import { DataForSeoClient, type OrganicSerpResult } from "../services/dataforseo.js";
-import { CompetitiveEvidenceIncompleteError } from "./errors.js";
 import { canonicalizeDomain, qualifyDomain } from "./domain-classification.js";
+import { CompetitiveEvidenceIncompleteError } from "./errors.js";
 import { PRODUCER } from "./producer.js";
 import {
   HARD_EXPANSION_CEILING,
   initialPortfolio,
   MAX_EXPANSION_ROUNDS,
-  planExpansionRound,
   type PortfolioQuery,
+  planExpansionRound,
 } from "./query-expansion.js";
 
 export { CompetitiveEvidenceIncompleteError } from "./errors.js";

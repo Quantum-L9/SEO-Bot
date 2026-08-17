@@ -57,7 +57,12 @@ function artifact(digestSalt = "a") {
     producer: { repo: "SEO-Bot", version: "2.1.0" },
     payload: {
       schema: WEBSITE_INTELLIGENCE_SCHEMAS.competitiveLandscape,
-      market: { niche: digestSalt, country: "United States", language: "English", device: "desktop" },
+      market: {
+        niche: digestSalt,
+        country: "United States",
+        language: "English",
+        device: "desktop",
+      },
       query_portfolio: [],
       observations: [],
       domains: [],

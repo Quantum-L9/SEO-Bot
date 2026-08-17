@@ -140,7 +140,13 @@ describe("DataForSeoClient.getOrganicSerp", () => {
         tasks: [
           {
             status_code: 20000,
-            result: [{ datetime: "2024-01-02 12:00:00 +00:00", item_types: ["people_also_ask"], items: [] }],
+            result: [
+              {
+                datetime: "2024-01-02 12:00:00 +00:00",
+                item_types: ["people_also_ask"],
+                items: [],
+              },
+            ],
           },
         ],
       },

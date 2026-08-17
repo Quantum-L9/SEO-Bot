@@ -61,13 +61,10 @@ export function initialPortfolio(seeds: SeedQuery[]): PortfolioQuery[] {
   }));
 }
 
-function locationPhrase(market: {
-  country: string;
-  location_name?: string;
-}): string | undefined {
+function locationPhrase(market: { country: string; location_name?: string }): string | undefined {
   const raw = (market.location_name ?? market.country ?? "").trim();
   if (!raw) return undefined;
-  const first = raw.split(",")[0]!.trim();
+  const first = (raw.split(",")[0] ?? "").trim();
   if (!first || first.toLowerCase() === "us" || first.toLowerCase() === "united states") {
     return undefined;
   }
@@ -94,7 +91,11 @@ function templatesForRound(
     const core: ExpansionTemplate[] = [
       { query: niche, intent: "commercial", reason: "core_service_variant" },
       { query: `${niche} company`, intent: "commercial", reason: "core_service_variant" },
-      { query: `${niche} contractor`, intent: "transactional", reason: "transaction_commercial_variant" },
+      {
+        query: `${niche} contractor`,
+        intent: "transactional",
+        reason: "transaction_commercial_variant",
+      },
       { query: `${niche} near me`, intent: "local", reason: "transaction_commercial_variant" },
       { query: `hire ${niche}`, intent: "transactional", reason: "transaction_commercial_variant" },
     ];
@@ -116,7 +117,11 @@ function templatesForRound(
     highValue.push(
       { query: `${seed} company`, intent: "commercial", reason: "adjacent_search_intent_variant" },
       { query: `${seed} near me`, intent: "local", reason: "adjacent_search_intent_variant" },
-      { query: `${seed} contractor`, intent: "transactional", reason: "adjacent_search_intent_variant" },
+      {
+        query: `${seed} contractor`,
+        intent: "transactional",
+        reason: "adjacent_search_intent_variant",
+      },
     );
   }
   return highValue;

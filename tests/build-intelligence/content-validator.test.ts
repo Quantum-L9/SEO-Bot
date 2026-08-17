@@ -118,9 +118,9 @@ describe("deterministic content validation", () => {
 
   it("detects placeholder and empty content", () => {
     const placeholder = route("TODO: write durable metal roof copy");
-    expect(validateRouteDeterministic(placeholder, contract()).some((f) => /placeholder/.test(f))).toBe(
-      true,
-    );
+    expect(
+      validateRouteDeterministic(placeholder, contract()).some((f) => /placeholder/.test(f)),
+    ).toBe(true);
   });
 
   it("requires exact route identity and section set", () => {

@@ -47,8 +47,10 @@ import { PRODUCER } from "./producer.js";
 import { structuredContentRouteSchema } from "./schema-guards.js";
 
 /** @deprecated Use ContentRepairExhaustedError */
-export { ContentRepairExhaustedError as ContentRequirementUnsatisfiedError } from "./errors.js";
-export { ContentRepairExhaustedError } from "./errors.js";
+export {
+  ContentRepairExhaustedError as ContentRequirementUnsatisfiedError,
+  ContentRepairExhaustedError,
+} from "./errors.js";
 
 const logger = createModuleLogger("build-intelligence:structured-content");
 

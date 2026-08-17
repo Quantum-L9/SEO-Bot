@@ -25,7 +25,12 @@ describe("bot-interop artifact parity", () => {
       producer: PRODUCER,
       payload: {
         schema: WEBSITE_INTELLIGENCE_SCHEMAS.competitiveLandscape,
-        market: { niche: "roofing", country: "United States", language: "English", device: "desktop" },
+        market: {
+          niche: "roofing",
+          country: "United States",
+          language: "English",
+          device: "desktop",
+        },
         query_portfolio: [],
         observations: [],
         domains: [],

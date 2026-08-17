@@ -26,7 +26,9 @@ const logger = createModuleLogger("build-intelligence:store");
 export class ArtifactDigestConflictError extends Error {
   readonly code = "ARTIFACT_DIGEST_CONFLICT";
   constructor(artifactId: string) {
-    super(`ARTIFACT_DIGEST_CONFLICT: refusing to overwrite artifact ${artifactId} with a different payload digest`);
+    super(
+      `ARTIFACT_DIGEST_CONFLICT: refusing to overwrite artifact ${artifactId} with a different payload digest`,
+    );
     this.name = "ArtifactDigestConflictError";
   }
 }

@@ -242,7 +242,9 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
   it("rejects a stale/incomplete CompetitiveLandscape", async () => {
     const { llm } = fakeLlm([blueprintRoute("home", "/")]);
     const incomplete = makeLandscape({
-      selected_donors: [{ domain: "alpha-roofing.com", aggregate_visibility: 1, observation_ids: ["q1-r1"] }],
+      selected_donors: [
+        { domain: "alpha-roofing.com", aggregate_visibility: 1, observation_ids: ["q1-r1"] },
+      ],
       evidence_complete: false,
     });
     await expect(
