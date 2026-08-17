@@ -10,8 +10,8 @@
  */
 
 import { execSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { type CompetitiveLandscapeArtifact, refForArtifact } from "@quantum-l9/bot-interop";
 import { buildApiServer } from "../src/api/index.js";
 import { createCompetitiveLandscape } from "../src/build-intelligence/competitive-landscape.js";
@@ -23,7 +23,9 @@ import { createSEOContentBlueprint } from "../src/build-intelligence/seo-content
 import { getConfig } from "../src/core/config.js";
 import { hydrateSecretsIfConfigured } from "../src/core/secrets.js";
 
-const require = createRequire(import.meta.url);
+function readJson(path: string): { version: string } {
+  return JSON.parse(readFileSync(path, "utf8")) as { version: string };
+}
 
 const SAFE_HAVEN_ROUTES = [
   { route_id: "home", path: "/", purpose: "primary landing" },
@@ -51,7 +53,7 @@ function sha(): string {
 }
 
 function pkgVersion(name: string): string {
-  return require(`${name}/package.json`).version as string;
+  return readJson(join(process.cwd(), "node_modules", name, "package.json")).version;
 }
 
 async function main(): Promise<void> {
@@ -109,6 +111,10 @@ async function main(): Promise<void> {
     landscape = await createCompetitiveLandscape(landscapeBody);
   }
 
+  writeFileSync(
+    "reports/seam-competitive-landscape.json",
+    `${JSON.stringify(landscape, null, 2)}\n`,
+  );
   if (landscape.payload.selected_donors.length !== 10 || !landscape.payload.evidence_complete) {
     throw new Error(
       `Landscape invariant failed: donors=${landscape.payload.selected_donors.length} complete=${landscape.payload.evidence_complete}`,
@@ -155,6 +161,10 @@ async function main(): Promise<void> {
     seo_config: { forbidden_claims: ["decades of experience"] },
   });
 
+  writeFileSync(
+    "reports/seam-seo-content-blueprint.json",
+    `${JSON.stringify(blueprint, null, 2)}\n`,
+  );
   const invalidSlots = blueprint.payload.routes.flatMap((route) =>
     route.requirements.flatMap((req) =>
       req.target_slots.filter((slot) => !CONTENT_SLOTS.has(slot)),
@@ -165,7 +175,7 @@ async function main(): Promise<void> {
   const receipt: SeoBuildIntelligenceIntegrityReceipt = {
     identity: {
       seo_bot_sha: sha(),
-      seo_bot_version: require("../package.json").version,
+      seo_bot_version: readJson(join(process.cwd(), "package.json")).version,
       bot_interop_version: pkgVersion("@quantum-l9/bot-interop"),
       llm_router_version: pkgVersion("@quantum-l9/llm-router"),
     },

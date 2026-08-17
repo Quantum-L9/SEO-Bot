@@ -1,0 +1,533 @@
+{
+  "protocol": "l9.website-intelligence",
+  "protocol_version": "1.0",
+  "artifact_type": "seo_content_blueprint",
+  "artifact_id": "seo_content_blueprint:8fa3acc2dfdbaa3cb365076d1adf4cd5f46b2f29d366ed412845c533e78297c1",
+  "client_id": "safehavenrr",
+  "build_id": "campaign-7-seo-seam-2026-08-17T12-47-33-369Z",
+  "producer": {
+    "repo": "SEO-Bot",
+    "version": "2.1.0"
+  },
+  "produced_at": "2026-08-17T12:49:42.738Z",
+  "input_refs": [
+    {
+      "artifact_type": "competitive_landscape",
+      "artifact_id": "competitive_landscape:57d0f3d541afd258bffa4926e8c9353356230cae904d4b9388d2b2ee6bb6b43e",
+      "payload_digest": "57d0f3d541afd258bffa4926e8c9353356230cae904d4b9388d2b2ee6bb6b43e"
+    }
+  ],
+  "payload": {
+    "schema": "l9://website-intelligence/seo-content-blueprint/v1",
+    "competitive_landscape_ref": {
+      "artifact_type": "competitive_landscape",
+      "artifact_id": "competitive_landscape:57d0f3d541afd258bffa4926e8c9353356230cae904d4b9388d2b2ee6bb6b43e",
+      "payload_digest": "57d0f3d541afd258bffa4926e8c9353356230cae904d4b9388d2b2ee6bb6b43e"
+    },
+    "routes": [
+      {
+        "route_id": "home",
+        "path": "/",
+        "search_intent": {
+          "primary": "commercial",
+          "secondary": [
+            "transactional"
+          ],
+          "journey_stage": "commercial"
+        },
+        "targets": {
+          "primary_query": "roofing contractor Charlotte NC",
+          "supporting_queries": [
+            "roof replacement Charlotte NC",
+            "roof repair Charlotte",
+            "Charlotte roofing companies",
+            "roofing services Charlotte"
+          ],
+          "topics": [
+            "roof replacement",
+            "roof repair",
+            "storm damage",
+            "metal roofing",
+            "residential roofing",
+            "commercial roofing"
+          ],
+          "entities": [
+            "Safe Haven Roofing & Renovations",
+            "Charlotte",
+            "North Carolina",
+            "roofing contractor",
+            "roof replacement",
+            "roof repair"
+          ]
+        },
+        "requirements": [
+          {
+            "requirement_id": "primary_service_showcase",
+            "target_slots": [
+              "primary_offer",
+              "service_overview"
+            ],
+            "placement": "FIRST_MATCH",
+            "required_topics": [
+              "roof replacement",
+              "roof repair",
+              "storm damage"
+            ],
+            "required_entities": [
+              "Safe Haven Roofing & Renovations",
+              "Charlotte",
+              "NC"
+            ],
+            "questions": [
+              "What roofing services do you offer?",
+              "Do you serve Charlotte NC?"
+            ],
+            "proof_needed": [
+              "service area coverage",
+              "phone number"
+            ],
+            "required": true
+          }
+        ],
+        "competitive_gaps": [
+          {
+            "gap_id": "local_expertise",
+            "description": "Competitors lack emphasis on local Charlotte market knowledge and NC/SC service area",
+            "donor_domains": [
+              "metalroofingcharlotte.net",
+              "hsroofing.com"
+            ],
+            "opportunity": "Highlight specific Charlotte area expertise and dual-state coverage"
+          }
+        ],
+        "internal_links": [
+          {
+            "target_route_id": "services",
+            "purpose": "service discovery"
+          },
+          {
+            "target_route_id": "roof-replacement",
+            "purpose": "primary service conversion"
+          },
+          {
+            "target_route_id": "contact",
+            "purpose": "lead generation"
+          }
+        ],
+        "aeo_geo": {
+          "answer_targets": [
+            "Who are the best roofing contractors in Charlotte NC?",
+            "What roofing services are available in Charlotte?"
+          ],
+          "schema_requirements": [
+            "LocalBusiness",
+            "RoofingContractor",
+            "Service"
+          ]
+        },
+        "metadata": {
+          "title_requirements": [
+            "Safe Haven Roofing & Renovations",
+            "Charlotte NC",
+            "primary service"
+          ],
+          "description_requirements": [
+            "service area",
+            "phone number",
+            "key services",
+            "call to action"
+          ]
+        },
+        "forbidden_claims": [
+          "decades of experience"
+        ],
+        "acceptance_tests": [
+          "Business name appears prominently",
+          "Phone number (704) 648-7252 is visible",
+          "Service area NC/SC mentioned",
+          "Primary services clearly listed"
+        ]
+      },
+      {
+        "route_id": "services",
+        "path": "/services",
+        "search_intent": {
+          "primary": "commercial",
+          "secondary": [
+            "informational"
+          ],
+          "journey_stage": "commercial"
+        },
+        "targets": {
+          "primary_query": "roofing services Charlotte NC",
+          "supporting_queries": [
+            "roof replacement Charlotte",
+            "roof repair Charlotte",
+            "storm damage roof inspection",
+            "metal roofing Charlotte"
+          ],
+          "topics": [
+            "roof replacement",
+            "roof repair",
+            "storm damage inspection",
+            "metal roofing",
+            "residential roofing",
+            "commercial roofing",
+            "emergency repairs"
+          ],
+          "entities": [
+            "Charlotte",
+            "North Carolina",
+            "roof replacement",
+            "roof repair",
+            "storm damage",
+            "metal roofing"
+          ]
+        },
+        "requirements": [
+          {
+            "requirement_id": "comprehensive_service_list",
+            "target_slots": [
+              "service_overview",
+              "process"
+            ],
+            "placement": "ALL_MATCHES",
+            "required_topics": [
+              "roof replacement",
+              "roof repair",
+              "storm damage inspection",
+              "metal roofing"
+            ],
+            "required_entities": [
+              "Charlotte",
+              "NC"
+            ],
+            "questions": [
+              "What types of roofing services do you offer?",
+              "Do you handle storm damage?",
+              "Do you install metal roofs?"
+            ],
+            "proof_needed": [
+              "service descriptions",
+              "process explanations"
+            ],
+            "required": true
+          }
+        ],
+        "competitive_gaps": [
+          {
+            "gap_id": "service_depth",
+            "description": "Competitors provide shallow service descriptions without detailed processes",
+            "donor_domains": [
+              "evergreenroofingcharlotte.com",
+              "charlotteaceroofing.com"
+            ],
+            "opportunity": "Provide detailed service explanations and clear processes for each service type"
+          }
+        ],
+        "internal_links": [
+          {
+            "target_route_id": "roof-replacement",
+            "purpose": "service detail navigation"
+          },
+          {
+            "target_route_id": "contact",
+            "purpose": "service inquiry conversion"
+          },
+          {
+            "target_route_id": "home",
+            "purpose": "site navigation"
+          }
+        ],
+        "aeo_geo": {
+          "answer_targets": [
+            "What roofing services are available in Charlotte?",
+            "Who offers storm damage inspections in Charlotte NC?"
+          ],
+          "schema_requirements": [
+            "Service",
+            "LocalBusiness"
+          ]
+        },
+        "metadata": {
+          "title_requirements": [
+            "roofing services",
+            "Charlotte NC",
+            "Safe Haven Roofing"
+          ],
+          "description_requirements": [
+            "comprehensive service list",
+            "Charlotte area",
+            "contact information"
+          ]
+        },
+        "forbidden_claims": [
+          "decades of experience"
+        ],
+        "acceptance_tests": [
+          "All major services listed",
+          "Charlotte NC mentioned",
+          "Service processes explained",
+          "Clear navigation to detailed pages"
+        ]
+      },
+      {
+        "route_id": "roof-replacement",
+        "path": "/services/roof-replacement",
+        "search_intent": {
+          "primary": "commercial",
+          "secondary": [
+            "transactional"
+          ],
+          "journey_stage": "commercial"
+        },
+        "targets": {
+          "primary_query": "roof replacement Charlotte NC",
+          "supporting_queries": [
+            "roof replacement cost Charlotte",
+            "residential roof replacement",
+            "commercial roof replacement",
+            "roof replacement contractors Charlotte"
+          ],
+          "topics": [
+            "roof replacement",
+            "roofing materials",
+            "installation process",
+            "warranties",
+            "permits",
+            "timeline",
+            "cost factors"
+          ],
+          "entities": [
+            "Charlotte",
+            "North Carolina",
+            "roof replacement",
+            "asphalt shingles",
+            "metal roofing",
+            "residential",
+            "commercial"
+          ]
+        },
+        "requirements": [
+          {
+            "requirement_id": "detailed_replacement_info",
+            "target_slots": [
+              "service_overview",
+              "process",
+              "differentiation"
+            ],
+            "placement": "ALL_MATCHES",
+            "required_topics": [
+              "roof replacement",
+              "installation process",
+              "materials",
+              "timeline"
+            ],
+            "required_entities": [
+              "Charlotte",
+              "roof replacement"
+            ],
+            "questions": [
+              "How long does roof replacement take?",
+              "What materials do you use?",
+              "Do you handle permits?"
+            ],
+            "proof_needed": [
+              "process timeline",
+              "material options",
+              "permit handling"
+            ],
+            "required": true
+          }
+        ],
+        "competitive_gaps": [
+          {
+            "gap_id": "process_transparency",
+            "description": "Competitors lack detailed replacement process and timeline information",
+            "donor_domains": [
+              "southernstarroofing.com",
+              "metalroofingcharlotte.net"
+            ],
+            "opportunity": "Provide step-by-step replacement process with clear timelines and expectations"
+          }
+        ],
+        "internal_links": [
+          {
+            "target_route_id": "services",
+            "purpose": "service category navigation"
+          },
+          {
+            "target_route_id": "contact",
+            "purpose": "replacement quote request"
+          },
+          {
+            "target_route_id": "home",
+            "purpose": "site navigation"
+          }
+        ],
+        "aeo_geo": {
+          "answer_targets": [
+            "How much does roof replacement cost in Charlotte NC?",
+            "Who does roof replacement in Charlotte?",
+            "How long does roof replacement take?"
+          ],
+          "schema_requirements": [
+            "Service",
+            "LocalBusiness",
+            "FAQPage"
+          ]
+        },
+        "metadata": {
+          "title_requirements": [
+            "roof replacement",
+            "Charlotte NC",
+            "Safe Haven Roofing"
+          ],
+          "description_requirements": [
+            "roof replacement service",
+            "Charlotte area",
+            "process details",
+            "contact info"
+          ]
+        },
+        "forbidden_claims": [
+          "decades of experience"
+        ],
+        "acceptance_tests": [
+          "Replacement process clearly explained",
+          "Material options detailed",
+          "Timeline provided",
+          "Charlotte NC focus maintained"
+        ]
+      },
+      {
+        "route_id": "contact",
+        "path": "/contact",
+        "search_intent": {
+          "primary": "transactional",
+          "secondary": [
+            "commercial"
+          ],
+          "journey_stage": "transactional"
+        },
+        "targets": {
+          "primary_query": "roofing contractor Charlotte NC phone number",
+          "supporting_queries": [
+            "Charlotte roofing company contact",
+            "roof repair Charlotte contact",
+            "roofing estimate Charlotte"
+          ],
+          "topics": [
+            "contact information",
+            "service area",
+            "estimates",
+            "emergency services",
+            "consultation"
+          ],
+          "entities": [
+            "Safe Haven Roofing & Renovations",
+            "Charlotte",
+            "North Carolina",
+            "(704) 648-7252",
+            "NC",
+            "SC"
+          ]
+        },
+        "requirements": [
+          {
+            "requirement_id": "complete_contact_info",
+            "target_slots": [
+              "conversion",
+              "local_relevance"
+            ],
+            "placement": "FIRST_MATCH",
+            "required_topics": [
+              "contact information",
+              "service area",
+              "estimates"
+            ],
+            "required_entities": [
+              "Safe Haven Roofing & Renovations",
+              "(704) 648-7252",
+              "NC",
+              "SC"
+            ],
+            "questions": [
+              "How do I contact Safe Haven Roofing?",
+              "What areas do you serve?",
+              "Do you provide free estimates?"
+            ],
+            "proof_needed": [
+              "phone number",
+              "service area",
+              "business name"
+            ],
+            "required": true
+          }
+        ],
+        "competitive_gaps": [
+          {
+            "gap_id": "contact_accessibility",
+            "description": "Competitors don't emphasize multi-state service area or provide clear contact hierarchy",
+            "donor_domains": [
+              "catheyroofing.com",
+              "rrischarlotte.com"
+            ],
+            "opportunity": "Highlight NC/SC coverage and provide multiple contact methods with clear response expectations"
+          }
+        ],
+        "internal_links": [
+          {
+            "target_route_id": "home",
+            "purpose": "site navigation"
+          },
+          {
+            "target_route_id": "services",
+            "purpose": "service information"
+          },
+          {
+            "target_route_id": "roof-replacement",
+            "purpose": "service details"
+          }
+        ],
+        "aeo_geo": {
+          "answer_targets": [
+            "How do I contact a roofing contractor in Charlotte NC?",
+            "What is Safe Haven Roofing's phone number?"
+          ],
+          "schema_requirements": [
+            "LocalBusiness",
+            "ContactPage"
+          ]
+        },
+        "metadata": {
+          "title_requirements": [
+            "contact",
+            "Safe Haven Roofing",
+            "Charlotte NC",
+            "phone number"
+          ],
+          "description_requirements": [
+            "contact information",
+            "service area",
+            "phone number",
+            "estimate request"
+          ]
+        },
+        "forbidden_claims": [
+          "decades of experience"
+        ],
+        "acceptance_tests": [
+          "Phone number (704) 648-7252 prominently displayed",
+          "Service area NC/SC clearly stated",
+          "Business name Safe Haven Roofing & Renovations visible",
+          "Multiple contact methods available"
+        ]
+      }
+    ]
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "payload_digest": "8fa3acc2dfdbaa3cb365076d1adf4cd5f46b2f29d366ed412845c533e78297c1"
+  }
+}

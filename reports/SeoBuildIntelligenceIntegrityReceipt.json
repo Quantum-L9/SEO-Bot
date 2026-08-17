@@ -1,0 +1,68 @@
+{
+  "receipt": {
+    "identity": {
+      "seo_bot_sha": "a251adc32ec7e50dfcac5231edf7a2111fd602c8",
+      "seo_bot_version": "2.1.0",
+      "bot_interop_version": "1.1.0",
+      "llm_router_version": "1.1.2"
+    },
+    "competitive": {
+      "request_identity": {
+        "client_id": "safehavenrr",
+        "build_id": "campaign-7-seo-seam-2026-08-17T12-47-33-369Z"
+      },
+      "query_count_original": 5,
+      "query_count_expanded": 0,
+      "real_dataforseo_evidence_count": 92,
+      "qualified_candidate_count": 56,
+      "excluded_candidate_count": 8,
+      "selected_donor_count": 10,
+      "selected_donor_refs": [
+        "metalroofingcharlotte.net",
+        "gaf.com",
+        "hsroofing.com",
+        "evergreenroofingcharlotte.com",
+        "charlotteaceroofing.com",
+        "southernstarroofing.com",
+        "rrischarlotte.com",
+        "charlotteroofing.com",
+        "bestbuymetalroofing.com",
+        "catheyroofing.com"
+      ],
+      "evidence_complete": true,
+      "competitive_artifact_ref": {
+        "artifact_id": "competitive_landscape:57d0f3d541afd258bffa4926e8c9353356230cae904d4b9388d2b2ee6bb6b43e",
+        "payload_digest": "57d0f3d541afd258bffa4926e8c9353356230cae904d4b9388d2b2ee6bb6b43e"
+      },
+      "competitive_ranking_llm_calls": 0
+    },
+    "seo_blueprint": {
+      "artifact_ref": {
+        "artifact_id": "seo_content_blueprint:8fa3acc2dfdbaa3cb365076d1adf4cd5f46b2f29d366ed412845c533e78297c1",
+        "payload_digest": "8fa3acc2dfdbaa3cb365076d1adf4cd5f46b2f29d366ed412845c533e78297c1"
+      },
+      "exact_competitive_landscape_ref": {
+        "artifact_id": "competitive_landscape:57d0f3d541afd258bffa4926e8c9353356230cae904d4b9388d2b2ee6bb6b43e",
+        "payload_digest": "57d0f3d541afd258bffa4926e8c9353356230cae904d4b9388d2b2ee6bb6b43e"
+      },
+      "route_count": 4,
+      "invalid_slot_count": 0,
+      "router_only_llm": true
+    },
+    "structured_content": {
+      "executed": false,
+      "reason": "CONSUMER_PCC_REQUIRED_FOR_FINAL_SEAM"
+    },
+    "interop": {
+      "artifact_schema_parity": "PASS"
+    },
+    "final": {
+      "SEO_BUILD_INTELLIGENCE_INTEGRITY": "BLOCKED_ON_CONSUMER_PCC"
+    }
+  },
+  "validation": {
+    "ok": true,
+    "failures": []
+  },
+  "landscape_http_status": 201
+}
