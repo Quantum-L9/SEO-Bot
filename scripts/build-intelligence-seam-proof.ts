@@ -9,7 +9,6 @@
  * Writes reports/SeoBuildIntelligenceIntegrityReceipt.json
  */
 
-import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type CompetitiveLandscapeArtifact, refForArtifact } from "@quantum-l9/bot-interop";
@@ -49,7 +48,17 @@ const CONTENT_SLOTS = new Set([
 ]);
 
 function sha(): string {
-  return execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
+  const fromEnv = process.env.GITHUB_SHA?.trim();
+  if (fromEnv) return fromEnv;
+  try {
+    const head = readFileSync(join(process.cwd(), ".git", "HEAD"), "utf8").trim();
+    if (head.startsWith("ref: ")) {
+      return readFileSync(join(process.cwd(), ".git", head.slice(5).trim()), "utf8").trim();
+    }
+    return head;
+  } catch {
+    return "unresolved";
+  }
 }
 
 function pkgVersion(name: string): string {
@@ -233,7 +242,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
+try {
+  await main();
+} catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
-});
+}
