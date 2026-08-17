@@ -27,30 +27,6 @@
 import axios from "axios";
 import { getConfig } from "../core/config.js";
 
-export class DataForSeoUnavailableError extends Error {
-  readonly code = "DATAFORSEO_UNAVAILABLE";
-  constructor(message: string) {
-    super(message);
-    this.name = "DataForSeoUnavailableError";
-  }
-}
-
-export class DataForSeoTaskError extends Error {
-  readonly code = "DATAFORSEO_TASK_ERROR";
-  constructor(message: string) {
-    super(message);
-    this.name = "DataForSeoTaskError";
-  }
-}
-
-export class SerpEvidenceInvalidError extends Error {
-  readonly code = "SERP_EVIDENCE_INVALID";
-  constructor(message: string) {
-    super(message);
-    this.name = "SerpEvidenceInvalidError";
-  }
-}
-
 /** A single organic SERP result, normalized for ranking-truth consumers. */
 export interface OrganicSerpItem {
   /** Absolute position across all SERP item types (matches scheduled tracking). */
@@ -79,11 +55,40 @@ export interface OrganicSerpResult {
   observedAt: string;
   serpFeatures: string[];
   items: OrganicSerpItem[];
-  /**
-   * Distinguishes a successful capture with zero organic rows (VALID_EMPTY)
-   * from a thrown provider/task/malformed failure. Never invented.
-   */
-  outcome?: "ok" | "valid_empty";
+}
+
+/**
+ * Transport / account / top-level API failure. The provider could not be reached
+ * or refused the request — there is no SERP evidence, and none may be inferred.
+ */
+export class DataForSeoUnavailableError extends Error {
+  readonly code = "DATAFORSEO_UNAVAILABLE";
+  constructor(message: string) {
+    super(message);
+    this.name = "DataForSeoUnavailableError";
+  }
+}
+
+/**
+ * The request reached DataForSEO but the individual task failed (bad location,
+ * quota, provider-side error). Distinct from a task that legitimately returned
+ * zero organic results — that is a VALID EMPTY RESULT and returns normally.
+ */
+export class DataForSeoTaskError extends Error {
+  readonly code = "DATAFORSEO_TASK_ERROR";
+  constructor(message: string) {
+    super(message);
+    this.name = "DataForSeoTaskError";
+  }
+}
+
+/** The task succeeded but its payload is not usable ranking evidence. */
+export class SerpEvidenceInvalidError extends Error {
+  readonly code = "SERP_EVIDENCE_INVALID";
+  constructor(message: string) {
+    super(message);
+    this.name = "SerpEvidenceInvalidError";
+  }
 }
 
 export class DataForSeoClient {
@@ -108,12 +113,15 @@ export class DataForSeoClient {
         timeout: 30000,
       });
     } catch (error) {
-      throw wrapDataForSeoTransportError(error);
+      // Transport, timeout, auth, and non-2xx responses are all "no evidence".
+      throw new DataForSeoUnavailableError(
+        `DataForSEO request to ${endpoint} failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
     if (response.data?.status_code !== 20000) {
       throw new DataForSeoUnavailableError(
-        `DataForSEO error: ${response.data?.status_message ?? "unknown provider status"}`,
+        `DataForSEO error: ${response.data?.status_message ?? "unknown"} (status ${response.data?.status_code ?? "unknown"})`,
       );
     }
 
@@ -149,58 +157,64 @@ export class DataForSeoClient {
     // top-level 20000. Treat them as failures instead of silently producing zero
     // organic items — a real provider error must not masquerade as "no results".
     const taskContainer = result.tasks?.[0];
-    if (!taskContainer || typeof taskContainer !== "object") {
-      throw new SerpEvidenceInvalidError("DataForSEO task result is missing or malformed");
-    }
-    if (taskContainer.status_code !== undefined && taskContainer.status_code !== 20000) {
+    if (taskContainer?.status_code !== undefined && taskContainer.status_code !== 20000) {
       throw new DataForSeoTaskError(
         `DataForSEO task error: ${taskContainer.status_message ?? "unknown"} (status ${taskContainer.status_code})`,
       );
     }
-    if (!Array.isArray(taskContainer.result)) {
-      throw new SerpEvidenceInvalidError(
-        `DataForSEO task result is malformed: ${taskContainer.status_message ?? "result is not an array"}`,
-      );
-    }
-    if (taskContainer.result.length === 0) {
-      throw new SerpEvidenceInvalidError(
-        `DataForSEO task result is malformed: ${taskContainer.status_message ?? "no result returned"} (status ${taskContainer.status_code ?? "unknown"})`,
+    if (!Array.isArray(taskContainer?.result) || taskContainer.result.length === 0) {
+      throw new DataForSeoTaskError(
+        `DataForSEO task error: ${taskContainer?.status_message ?? "no result returned"} (status ${taskContainer?.status_code ?? "unknown"})`,
       );
     }
     const task = taskContainer.result[0];
-    if (!task || typeof task !== "object") {
-      throw new SerpEvidenceInvalidError("DataForSEO task result[0] is missing or malformed");
+    // A task that ran and found nothing returns `items: []` (or a null items
+    // field) — that is a VALID EMPTY RESULT, not a provider failure. Anything
+    // else in the items position is a malformed payload and fails closed.
+    const rawItems = task?.items ?? [];
+    if (!Array.isArray(rawItems)) {
+      throw new SerpEvidenceInvalidError(
+        `DataForSEO returned a malformed items payload for "${params.keyword}" (${typeof task?.items})`,
+      );
     }
-    const rawItems = Array.isArray(task.items) ? task.items : [];
-    const serpFeatures: string[] = Array.isArray(task.item_types) ? task.item_types : [];
-    const observedAt = normalizeSerpDatetime(task.datetime) ?? "";
+    const serpFeatures: string[] = Array.isArray(task?.item_types) ? task.item_types : [];
+    const observedAt = normalizeSerpDatetime(task?.datetime) ?? taskContainer.time ?? "";
 
     const items: OrganicSerpItem[] = [];
     for (const item of rawItems) {
-      if (!item || item.type !== "organic") continue;
-      if (typeof item.url !== "string") continue;
+      if (!item || typeof item !== "object") {
+        throw new SerpEvidenceInvalidError(
+          `DataForSEO returned a malformed SERP item for "${params.keyword}"`,
+        );
+      }
+      if (item.type !== "organic") continue;
+      if (typeof item.url !== "string") {
+        throw new SerpEvidenceInvalidError(
+          `DataForSEO organic item for "${params.keyword}" is missing a URL`,
+        );
+      }
+      const rank = item.rank_group ?? item.rank_absolute;
+      if (typeof rank !== "number" || !Number.isFinite(rank) || rank < 1) {
+        throw new SerpEvidenceInvalidError(
+          `DataForSEO organic item for "${params.keyword}" has no usable rank (${String(rank)})`,
+        );
+      }
       let domain: string;
       try {
         domain = new URL(item.url).hostname.replace("www.", "");
       } catch {
-        continue; // unparseable URL cannot be ranking truth
+        throw new SerpEvidenceInvalidError(
+          `DataForSEO organic item for "${params.keyword}" has an unparseable URL: ${item.url}`,
+        );
       }
-      const rankGroup = item.rank_group ?? item.rank_absolute;
-      if (typeof rankGroup !== "number" || rankGroup < 1) continue;
       items.push({
-        rankAbsolute: typeof item.rank_absolute === "number" ? item.rank_absolute : rankGroup,
-        rankGroup,
+        rankAbsolute: item.rank_absolute,
+        rankGroup: rank,
         url: item.url,
         domain,
         title: item.title || "",
         snippet: item.description || "",
       });
-    }
-
-    if (items.length > 0 && !observedAt) {
-      throw new SerpEvidenceInvalidError(
-        "DataForSEO organic observations are missing a provider datetime",
-      );
     }
 
     return {
@@ -211,7 +225,6 @@ export class DataForSeoClient {
       observedAt,
       serpFeatures,
       items,
-      outcome: items.length === 0 ? "valid_empty" : "ok",
     };
   }
 
@@ -322,12 +335,6 @@ export class DataForSeoClient {
       externalLinks: page.meta?.external_links_count || 0,
     };
   }
-}
-
-/** Map a transport/HTTP failure to DATAFORSEO_UNAVAILABLE. Never returns. */
-export function wrapDataForSeoTransportError(error: unknown): never {
-  const message = error instanceof Error ? error.message : String(error);
-  throw new DataForSeoUnavailableError(`DataForSEO unavailable: ${message}`);
 }
 
 /**

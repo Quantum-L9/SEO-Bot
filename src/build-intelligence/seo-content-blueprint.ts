@@ -23,11 +23,13 @@
  */
 
 import {
+  assertIntelligenceArtifactIntegrity,
   type CompetitiveLandscapeArtifact,
   refForArtifact,
   type SEOContentBlueprintArtifact,
   type SEOContentBlueprintRoute,
   type SEOContentBlueprintV1,
+  sameArtifactRef,
   sealIntelligenceArtifact,
   type VerifiedBusinessFact,
   WEBSITE_INTELLIGENCE_SCHEMAS,
@@ -35,15 +37,6 @@ import {
 import { createModuleLogger } from "../core/logger.js";
 import { DataForSeoClient } from "../services/dataforseo.js";
 import { getLlmService, type LlmService } from "../services/llm.js";
-import { REQUIRED_DONOR_COUNT } from "./competitive-landscape.js";
-import {
-  ArtifactLineageMismatchError,
-  CompetitiveLandscapeInvalidError,
-  CompetitiveLandscapeRefMismatchError,
-  ContentSlotInvalidError,
-  RouteSetMismatchError,
-  SeoContentBlueprintInvalidError,
-} from "./errors.js";
 import { PRODUCER } from "./producer.js";
 import { seoContentBlueprintRoutesSchema } from "./schema-guards.js";
 
@@ -74,6 +67,42 @@ export interface SEOContentBlueprintRequest {
   };
 }
 
+/** The supplied CompetitiveLandscape is not usable as blueprint input. */
+export class CompetitiveLandscapeInputInvalidError extends Error {
+  readonly code = "COMPETITIVE_LANDSCAPE_INVALID";
+  constructor(message: string) {
+    super(message);
+    this.name = "CompetitiveLandscapeInputInvalidError";
+  }
+}
+
+/** The requested route set is itself malformed (empty, duplicated, unusable). */
+export class RouteSetMismatchError extends Error {
+  readonly code = "ROUTE_SET_MISMATCH";
+  constructor(message: string) {
+    super(message);
+    this.name = "RouteSetMismatchError";
+  }
+}
+
+/** Model output does not satisfy the deterministic blueprint contract. */
+export class SeoContentBlueprintInvalidError extends Error {
+  readonly code = "SEO_CONTENT_BLUEPRINT_INVALID";
+  constructor(message: string) {
+    super(message);
+    this.name = "SeoContentBlueprintInvalidError";
+  }
+}
+
+/** The sealed blueprint does not reference the exact landscape it consumed. */
+export class CompetitiveLandscapeRefMismatchError extends Error {
+  readonly code = "COMPETITIVE_LANDSCAPE_REF_MISMATCH";
+  constructor(message: string) {
+    super(message);
+    this.name = "CompetitiveLandscapeRefMismatchError";
+  }
+}
+
 // Evidence bounds — capped so the model never receives an unbounded payload and
 // no full-site crawl is ever performed.
 const MAX_DONORS_FOR_EVIDENCE = 6;
@@ -96,12 +125,9 @@ export async function createSEOContentBlueprint(
   request: SEOContentBlueprintRequest,
   deps: { llm?: LlmService; dataForSeo?: PageContentPort } = {},
 ): Promise<SEOContentBlueprintArtifact> {
-  if (request.routes.length === 0) {
-    throw new SeoContentBlueprintInvalidError(
-      "SEO_CONTENT_BLUEPRINT_INVALID: at least one route identity is required",
-    );
-  }
-  assertLandscapeLineage(request);
+  assertRouteSet(request.routes);
+  assertLandscapeUsable(request.competitive_landscape);
+
   const llm = deps.llm ?? getLlmService();
   const dataForSeo = deps.dataForSeo ?? new DataForSeoClient();
   const landscape = request.competitive_landscape.payload;
@@ -193,8 +219,7 @@ export async function createSEOContentBlueprint(
     purpose: `seo-content-blueprint:${request.build_id}`,
     systemPrompt,
     userPrompt,
-    validate: (value) =>
-      reconcileRoutes(value, request.routes, request.seo_config?.forbidden_claims ?? []),
+    validate: (value) => reconcileRoutes(value, request.routes),
   });
 
   const landscapeRef = refForArtifact(request.competitive_landscape);
@@ -203,9 +228,12 @@ export async function createSEOContentBlueprint(
     competitive_landscape_ref: landscapeRef,
     routes,
   };
-  if (payload.competitive_landscape_ref.artifact_id !== landscapeRef.artifact_id) {
+
+  // Exact lineage, proven rather than assumed: the sealed blueprint must point
+  // at precisely the landscape artifact this call consumed.
+  if (!sameArtifactRef(payload.competitive_landscape_ref, landscapeRef)) {
     throw new CompetitiveLandscapeRefMismatchError(
-      "SEOContentBlueprint competitive_landscape_ref does not match the request artifact",
+      "Sealed blueprint does not reference the exact CompetitiveLandscape supplied in the request",
     );
   }
 
@@ -214,7 +242,7 @@ export async function createSEOContentBlueprint(
     client_id: request.client_id,
     build_id: request.build_id,
     producer: PRODUCER,
-    input_refs: [refForArtifact(request.competitive_landscape)],
+    input_refs: [landscapeRef],
     payload,
   });
 
@@ -230,6 +258,59 @@ export async function createSEOContentBlueprint(
   );
 
   return artifact;
+}
+
+/** The requested route set is the identity authority — it must be well formed. */
+function assertRouteSet(routes: SEOContentBlueprintRequest["routes"]): void {
+  if (routes.length === 0) {
+    throw new RouteSetMismatchError("at least one route identity is required");
+  }
+  const seenIds = new Set<string>();
+  const seenPaths = new Set<string>();
+  for (const route of routes) {
+    if (seenIds.has(route.route_id)) {
+      throw new RouteSetMismatchError(
+        `duplicate route_id in requested route set: ${route.route_id}`,
+      );
+    }
+    if (seenPaths.has(route.path)) {
+      throw new RouteSetMismatchError(`duplicate path in requested route set: ${route.path}`);
+    }
+    seenIds.add(route.route_id);
+    seenPaths.add(route.path);
+  }
+}
+
+/**
+ * A blueprint may only be built on a landscape that is intact AND complete.
+ * Building strategy on an incomplete donor cohort is exactly the failure mode
+ * this producer exists to prevent.
+ */
+function assertLandscapeUsable(landscape: CompetitiveLandscapeArtifact): void {
+  assertIntelligenceArtifactIntegrity(landscape);
+  if (landscape.artifact_type !== "competitive_landscape") {
+    throw new CompetitiveLandscapeInputInvalidError(
+      `expected a competitive_landscape artifact, received ${landscape.artifact_type}`,
+    );
+  }
+  if (landscape.payload.schema !== WEBSITE_INTELLIGENCE_SCHEMAS.competitiveLandscape) {
+    throw new CompetitiveLandscapeInputInvalidError(
+      `unexpected CompetitiveLandscape payload schema: ${landscape.payload.schema}`,
+    );
+  }
+  if (!landscape.payload.evidence_complete) {
+    throw new CompetitiveLandscapeInputInvalidError(
+      "CompetitiveLandscape is not evidence_complete; refusing to build a blueprint on partial competitive intelligence",
+    );
+  }
+  if (landscape.payload.selected_donors.length === 0) {
+    throw new CompetitiveLandscapeInputInvalidError("CompetitiveLandscape has no selected donors");
+  }
+  if (landscape.payload.observations.length === 0) {
+    throw new CompetitiveLandscapeInputInvalidError(
+      "CompetitiveLandscape has no SERP observations",
+    );
+  }
 }
 
 /**
@@ -305,82 +386,73 @@ async function collectDonorMetrics(
  * request and routes are returned in the requested order (deterministic).
  * Missing or unexpected routes throw, triggering the single bounded repair.
  */
-function assertLandscapeLineage(request: SEOContentBlueprintRequest): void {
-  const landscape = request.competitive_landscape;
-  if (landscape.artifact_type !== "competitive_landscape") {
-    throw new CompetitiveLandscapeInvalidError(
-      "COMPETITIVE_LANDSCAPE_INVALID: expected a competitive_landscape artifact",
-    );
-  }
-  if (landscape.client_id !== request.client_id || landscape.build_id !== request.build_id) {
-    throw new ArtifactLineageMismatchError(
-      `ARTIFACT_LINEAGE_MISMATCH: landscape client/build ` +
-        `(${landscape.client_id}/${landscape.build_id}) does not match request ` +
-        `(${request.client_id}/${request.build_id})`,
-    );
-  }
-  if (
-    !landscape.payload.evidence_complete ||
-    landscape.payload.selected_donors.length !== REQUIRED_DONOR_COUNT
-  ) {
-    throw new CompetitiveLandscapeInvalidError(
-      `COMPETITIVE_LANDSCAPE_INVALID: landscape is not a complete ${REQUIRED_DONOR_COUNT}-donor artifact`,
-    );
-  }
-}
-
 function reconcileRoutes(
   value: unknown,
   requested: Array<{ route_id: string; path: string; purpose: string }>,
-  requestForbiddenClaims: string[],
 ): SEOContentBlueprintRoute[] {
-  let parsed: { routes: SEOContentBlueprintRoute[] };
-  try {
-    parsed = seoContentBlueprintRoutesSchema.parse(value);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (/target_slots|Invalid enum value/.test(message)) {
-      throw new ContentSlotInvalidError(`CONTENT_SLOT_INVALID: ${message}`);
-    }
-    throw new SeoContentBlueprintInvalidError(`SEO_CONTENT_BLUEPRINT_INVALID: ${message}`);
-  }
+  // Slot vocabulary is enforced here: `target_slots` is a zod enum over the
+  // shared ContentSlot union, so an invented slot name fails the parse.
+  const parsed = seoContentBlueprintRoutesSchema.parse(value);
   const byId = new Map(parsed.routes.map((route) => [route.route_id, route]));
+
+  if (byId.size !== parsed.routes.length) {
+    throw new Error("Duplicate route_id in model output");
+  }
 
   const requestedIds = new Set(requested.map((route) => route.route_id));
   const unexpected = parsed.routes
     .map((route) => route.route_id)
     .filter((id) => !requestedIds.has(id));
   if (unexpected.length > 0) {
-    throw new RouteSetMismatchError(
-      `ROUTE_SET_MISMATCH: unexpected route_id(s) not in the requested set: ${unexpected.join(", ")}`,
-    );
+    throw new Error(`Unexpected route_id(s) not in the requested set: ${unexpected.join(", ")}`);
   }
 
-  const reconciled = requested.map((route) => {
+  const routes = requested.map((route) => {
     const produced = byId.get(route.route_id);
     if (!produced) {
-      throw new RouteSetMismatchError(
-        `ROUTE_SET_MISMATCH: missing blueprint for required route_id: ${route.route_id}`,
-      );
+      throw new Error(`Missing blueprint for required route_id: ${route.route_id}`);
     }
-    const forbidden = uniqueSorted([...produced.forbidden_claims, ...requestForbiddenClaims]);
-    return { ...produced, route_id: route.route_id, path: route.path, forbidden_claims: forbidden };
+    // Re-assert identity from the request (authority), keep strategic fields.
+    return { ...produced, route_id: route.route_id, path: route.path };
   });
 
-  for (const route of reconciled) {
+  assertBlueprintSemantics(routes, requestedIds);
+  return routes;
+}
+
+/**
+ * Deterministic semantic checks the zod shape cannot express: internal links
+ * must target routes that exist, and requirement ids must be unique per route.
+ * A violation throws, which triggers the single bounded repair before sealing.
+ */
+function assertBlueprintSemantics(
+  routes: SEOContentBlueprintRoute[],
+  requestedIds: Set<string>,
+): void {
+  for (const route of routes) {
     for (const link of route.internal_links) {
       if (!requestedIds.has(link.target_route_id)) {
-        throw new RouteSetMismatchError(
-          `ROUTE_SET_MISMATCH: internal link target "${link.target_route_id}" is not in the route set`,
+        throw new Error(
+          `Route "${route.route_id}" links to unknown target_route_id "${link.target_route_id}"`,
+        );
+      }
+      if (link.target_route_id === route.route_id) {
+        throw new Error(`Route "${route.route_id}" links to itself`);
+      }
+    }
+    const requirementIds = new Set<string>();
+    for (const requirement of route.requirements) {
+      if (requirementIds.has(requirement.requirement_id)) {
+        throw new Error(
+          `Route "${route.route_id}" has duplicate requirement_id "${requirement.requirement_id}"`,
+        );
+      }
+      requirementIds.add(requirement.requirement_id);
+      if (requirement.target_slots.length === 0) {
+        throw new Error(
+          `Route "${route.route_id}" requirement "${requirement.requirement_id}" targets no content slot`,
         );
       }
     }
   }
-  return reconciled;
-}
-
-function uniqueSorted(values: string[]): string[] {
-  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort((a, b) =>
-    a < b ? -1 : a > b ? 1 : 0,
-  );
 }

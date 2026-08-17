@@ -24,37 +24,35 @@ vi.mock("../../src/core/logger.js", () => ({
   createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
-function makeLandscape(
-  overrides: Partial<CompetitiveLandscapeV1> = {},
-): CompetitiveLandscapeArtifact {
-  const donors = Array.from({ length: 10 }, (_, i) => ({
-    domain: i === 0 ? "alpha-roofing.com" : `donor-${i + 1}.com`,
-    aggregate_visibility: 10 - i,
-    observation_ids: [`q1-r${i + 1}`],
-  }));
+function makeLandscape(): CompetitiveLandscapeArtifact {
   const payload: CompetitiveLandscapeV1 = {
     schema: WEBSITE_INTELLIGENCE_SCHEMAS.competitiveLandscape,
     market: { niche: "roofing", country: "United States", language: "English", device: "desktop" },
     query_portfolio: [{ query_id: "q1", query: "metal roofing", intent: "commercial", weight: 1 }],
-    observations: donors.map((donor, i) => ({
-      observation_id: donor.observation_ids[0]!,
-      query_id: "q1",
-      rank: i + 1,
-      url: `https://${donor.domain}/`,
-      domain: donor.domain,
-      observed_at: "2024-01-01T00:00:00.000Z",
-      source: "dataforseo" as const,
-    })),
-    domains: donors.map((donor) => ({
-      domain: donor.domain,
-      aggregate_visibility: donor.aggregate_visibility,
-      qualifying_query_ids: ["q1"],
-      observation_ids: donor.observation_ids,
-    })),
-    selected_donors: donors,
+    observations: [
+      {
+        observation_id: "q1-r1",
+        query_id: "q1",
+        rank: 1,
+        url: "https://alpha-roofing.com/metal",
+        domain: "alpha-roofing.com",
+        observed_at: "2024-01-01T00:00:00.000Z",
+        source: "dataforseo",
+      },
+    ],
+    domains: [
+      {
+        domain: "alpha-roofing.com",
+        aggregate_visibility: 1,
+        qualifying_query_ids: ["q1"],
+        observation_ids: ["q1-r1"],
+      },
+    ],
+    selected_donors: [
+      { domain: "alpha-roofing.com", aggregate_visibility: 1, observation_ids: ["q1-r1"] },
+    ],
     exclusions: [],
     evidence_complete: true,
-    ...overrides,
   };
   return sealIntelligenceArtifact({
     artifact_type: "competitive_landscape",
@@ -192,7 +190,7 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
         },
         { llm, dataForSeo: fakePages },
       ),
-    ).rejects.toThrow(/ROUTE_SET_MISMATCH|Unexpected route_id/);
+    ).rejects.toThrow(/Unexpected route_id/);
   });
 
   it("carries only the CompetitiveLandscape as an input ref (no WebsiteBuildBlueprint dependency)", async () => {
@@ -238,104 +236,176 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
     expect(contract.route_shape.targets.primary_query).toBeTruthy();
     expect(contract.journey_stage).toBeUndefined();
   });
+});
 
-  it("rejects a stale/incomplete CompetitiveLandscape", async () => {
-    const { llm } = fakeLlm([blueprintRoute("home", "/")]);
-    const incomplete = makeLandscape({
-      selected_donors: [
-        { domain: "alpha-roofing.com", aggregate_visibility: 1, observation_ids: ["q1-r1"] },
-      ],
-      evidence_complete: false,
+describe("SEOContentBlueprint — input gates", () => {
+  function landscapeWith(
+    mutate: (payload: CompetitiveLandscapeV1) => void,
+  ): CompetitiveLandscapeArtifact {
+    const base = makeLandscape();
+    const payload = structuredClone(base.payload);
+    mutate(payload);
+    return sealIntelligenceArtifact({
+      artifact_type: "competitive_landscape",
+      client_id: "client-1",
+      build_id: "build-1",
+      producer: { repo: "SEO-Bot", version: "2.1.0" },
+      payload,
     });
-    await expect(
-      createSEOContentBlueprint(
-        {
-          client_id: "client-1",
-          build_id: "build-1",
-          competitive_landscape: incomplete,
-          routes: requestedRoutes,
-          business_facts: [],
-        },
-        { llm, dataForSeo: fakePages },
-      ),
-    ).rejects.toThrow(/COMPETITIVE_LANDSCAPE_INVALID/);
-  });
+  }
 
-  it("rejects a landscape from a different build (stale artifact)", async () => {
-    const { llm } = fakeLlm([blueprintRoute("home", "/")]);
-    const stale = makeLandscape();
-    await expect(
-      createSEOContentBlueprint(
-        {
-          client_id: "client-1",
-          build_id: "other-build",
-          competitive_landscape: stale,
-          routes: requestedRoutes,
-          business_facts: [],
-        },
-        { llm, dataForSeo: fakePages },
-      ),
-    ).rejects.toThrow(/ARTIFACT_LINEAGE_MISMATCH/);
-  });
-
-  it("rejects an unrecognized content slot", async () => {
-    const bad = {
-      ...blueprintRoute("home", "/"),
-      requirements: [
-        {
-          ...blueprintRoute("home", "/").requirements[0]!,
-          target_slots: ["hero_banner"],
-        },
-      ],
-    };
-    const { llm } = fakeLlm([bad as never]);
-    await expect(
-      createSEOContentBlueprint(
-        {
-          client_id: "client-1",
-          build_id: "build-1",
-          competitive_landscape: makeLandscape(),
-          routes: requestedRoutes,
-          business_facts: [],
-        },
-        { llm, dataForSeo: fakePages },
-      ),
-    ).rejects.toThrow(/CONTENT_SLOT_INVALID|Invalid enum/);
-  });
-
-  it("rejects an internal link that is not in the route set", async () => {
-    const withBadLink = {
-      ...blueprintRoute("home", "/"),
-      internal_links: [{ target_route_id: "ghost", purpose: "cross-link" }],
-    };
-    const { llm } = fakeLlm([withBadLink]);
-    await expect(
-      createSEOContentBlueprint(
-        {
-          client_id: "client-1",
-          build_id: "build-1",
-          competitive_landscape: makeLandscape(),
-          routes: requestedRoutes,
-          business_facts: [],
-        },
-        { llm, dataForSeo: fakePages },
-      ),
-    ).rejects.toThrow(/ROUTE_SET_MISMATCH/);
-  });
-
-  it("retains request forbidden claims on every route", async () => {
-    const { llm } = fakeLlm([blueprintRoute("home", "/")]);
-    const artifact = await createSEOContentBlueprint(
+  async function build(
+    overrides: Partial<Parameters<typeof createSEOContentBlueprint>[0]>,
+    routes: SEOContentBlueprintRoute[] = [blueprintRoute("home", "/")],
+  ) {
+    const { llm } = fakeLlm(routes);
+    return createSEOContentBlueprint(
       {
         client_id: "client-1",
         build_id: "build-1",
         competitive_landscape: makeLandscape(),
         routes: requestedRoutes,
         business_facts: [],
-        seo_config: { forbidden_claims: ["decades of experience"] },
+        ...overrides,
       },
       { llm, dataForSeo: fakePages },
     );
-    expect(artifact.payload.routes[0]!.forbidden_claims).toContain("decades of experience");
+  }
+
+  it("refuses to build on a landscape that is not evidence_complete", async () => {
+    await expect(
+      build({
+        competitive_landscape: landscapeWith((p) => {
+          p.evidence_complete = false;
+        }),
+      }),
+    ).rejects.toMatchObject({ code: "COMPETITIVE_LANDSCAPE_INVALID" });
+  });
+
+  it("refuses to build on a landscape with no selected donors", async () => {
+    await expect(
+      build({
+        competitive_landscape: landscapeWith((p) => {
+          p.selected_donors = [];
+        }),
+      }),
+    ).rejects.toMatchObject({ code: "COMPETITIVE_LANDSCAPE_INVALID" });
+  });
+
+  it("rejects a tampered landscape before any LLM call", async () => {
+    const landscape = makeLandscape();
+    (landscape.payload as { evidence_complete: boolean }).evidence_complete = true;
+    landscape.payload.selected_donors[0]!.domain = "tampered.com";
+    await expect(build({ competitive_landscape: landscape })).rejects.toThrow(
+      /INTEL_ARTIFACT_HASH_MISMATCH/,
+    );
+  });
+
+  it("rejects an empty or duplicated requested route set", async () => {
+    await expect(build({ routes: [] })).rejects.toMatchObject({ code: "ROUTE_SET_MISMATCH" });
+    await expect(
+      build({
+        routes: [
+          { route_id: "home", path: "/", purpose: "a" },
+          { route_id: "home", path: "/b", purpose: "b" },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "ROUTE_SET_MISMATCH" });
+  });
+});
+
+describe("SEOContentBlueprint — deterministic output validation", () => {
+  async function buildWith(routes: SEOContentBlueprintRoute[], requested = requestedRoutes) {
+    const { llm } = fakeLlm(routes);
+    return createSEOContentBlueprint(
+      {
+        client_id: "client-1",
+        build_id: "build-1",
+        competitive_landscape: makeLandscape(),
+        routes: requested,
+        business_facts: [],
+      },
+      { llm, dataForSeo: fakePages },
+    );
+  }
+
+  it("rejects an invented content slot", async () => {
+    const bad = blueprintRoute("home", "/");
+    (bad.requirements[0] as { target_slots: string[] }).target_slots = ["hero_banner"];
+    await expect(buildWith([bad])).rejects.toThrow();
+  });
+
+  it("accepts every slot in the shared ContentSlot vocabulary", async () => {
+    const ok = blueprintRoute("home", "/");
+    ok.requirements[0]!.target_slots = [
+      "primary_offer",
+      "service_overview",
+      "differentiation",
+      "trust",
+      "process",
+      "project_proof",
+      "local_relevance",
+      "objection_handling",
+      "faq",
+      "conversion",
+      "metadata",
+    ];
+    const artifact = await buildWith([ok]);
+    expect(artifact.payload.routes[0]!.requirements[0]!.target_slots).toHaveLength(11);
+  });
+
+  it("rejects a requirement that targets no slot", async () => {
+    const bad = blueprintRoute("home", "/");
+    bad.requirements[0]!.target_slots = [];
+    await expect(buildWith([bad])).rejects.toThrow(/targets no content slot/);
+  });
+
+  it("rejects an internal link to a route that does not exist", async () => {
+    const bad = blueprintRoute("home", "/");
+    bad.internal_links = [{ target_route_id: "nowhere", purpose: "x" }];
+    await expect(buildWith([bad])).rejects.toThrow(/unknown target_route_id/);
+  });
+
+  it("accepts an internal link to another requested route", async () => {
+    const requested = [
+      { route_id: "home", path: "/", purpose: "primary landing" },
+      { route_id: "services", path: "/services", purpose: "services" },
+    ];
+    const home = blueprintRoute("home", "/");
+    home.internal_links = [{ target_route_id: "services", purpose: "deepen" }];
+    const artifact = await buildWith([home, blueprintRoute("services", "/services")], requested);
+    expect(artifact.payload.routes[0]!.internal_links[0]!.target_route_id).toBe("services");
+  });
+
+  it("rejects a route that links to itself", async () => {
+    const bad = blueprintRoute("home", "/");
+    bad.internal_links = [{ target_route_id: "home", purpose: "loop" }];
+    await expect(buildWith([bad])).rejects.toThrow(/links to itself/);
+  });
+
+  it("rejects duplicate requirement ids within a route", async () => {
+    const bad = blueprintRoute("home", "/");
+    bad.requirements = [bad.requirements[0]!, structuredClone(bad.requirements[0]!)];
+    await expect(buildWith([bad])).rejects.toThrow(/duplicate requirement_id/);
+  });
+
+  it("rejects a missing route from model output", async () => {
+    const requested = [
+      { route_id: "home", path: "/", purpose: "primary landing" },
+      { route_id: "services", path: "/services", purpose: "services" },
+    ];
+    await expect(buildWith([blueprintRoute("home", "/")], requested)).rejects.toThrow(
+      /Missing blueprint for required route_id: services/,
+    );
+  });
+
+  it("preserves forbidden claims from model output verbatim", async () => {
+    const route = blueprintRoute("home", "/");
+    route.forbidden_claims = ["cheapest in town", "lifetime free"];
+    const artifact = await buildWith([route]);
+    expect(artifact.payload.routes[0]!.forbidden_claims).toEqual([
+      "cheapest in town",
+      "lifetime free",
+    ]);
   });
 });

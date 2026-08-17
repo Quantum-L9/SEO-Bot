@@ -13,3 +13,9 @@ validation/runs/
 # Governed IDE profile stamps (rewritten locally; do not commit)
 .vscode/.l9-ide-desired-hash
 .vscode/.l9-agentdocs-hash
+
+# Session-local governance scratch: memory receipts, phase locks, L4 autonomy
+# phase/release state, PR handoffs. Carries session identifiers and is rewritten
+# per run, so it is never shared branch content. Matches the constellation
+# convention (Website-Bot, l9-ci-core, l9-meta-injector, Cognitive.Engine.Graphs).
+.l9/

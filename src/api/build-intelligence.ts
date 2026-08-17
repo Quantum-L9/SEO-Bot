@@ -33,14 +33,30 @@ import {
 } from "@quantum-l9/bot-interop";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
-import { createCompetitiveLandscape } from "../build-intelligence/competitive-landscape.js";
-import { BuildIntelligenceError } from "../build-intelligence/errors.js";
-import { createSEOContentBlueprint } from "../build-intelligence/seo-content-blueprint.js";
+import {
+  CompetitiveDonorQualificationError,
+  CompetitiveEvidenceIncompleteError,
+  CompetitiveLandscapeInvalidError,
+  createCompetitiveLandscape,
+} from "../build-intelligence/competitive-landscape.js";
+import {
+  CompetitiveLandscapeInputInvalidError,
+  CompetitiveLandscapeRefMismatchError,
+  createSEOContentBlueprint,
+  RouteSetMismatchError,
+  SeoContentBlueprintInvalidError,
+} from "../build-intelligence/seo-content-blueprint.js";
 import {
   ArtifactDigestConflictError,
   persistIntelligenceArtifact,
 } from "../build-intelligence/store.js";
-import { createStructuredContentPackage } from "../build-intelligence/structured-content.js";
+import {
+  ArtifactLineageMismatchError,
+  ContentRequirementUnsatisfiedError,
+  createStructuredContentPackage,
+  PageContentContractInvalidError,
+  StructuredContentRouteMismatchError,
+} from "../build-intelligence/structured-content.js";
 import { createModuleLogger } from "../core/logger.js";
 import {
   DataForSeoTaskError,
@@ -137,7 +153,6 @@ function requireArtifact<T extends WebsiteIntelligenceArtifact>(
   value: unknown,
   expectedType: IntelligenceArtifactType,
   clientId: string,
-  buildId: string,
 ): T {
   const artifact = value as WebsiteIntelligenceArtifact;
   if (!artifact || typeof artifact !== "object" || artifact.artifact_type !== expectedType) {
@@ -147,11 +162,6 @@ function requireArtifact<T extends WebsiteIntelligenceArtifact>(
   if (artifact.client_id !== clientId) {
     throw new Error(
       `artifact client_id "${artifact.client_id}" does not match request client_id "${clientId}"`,
-    );
-  }
-  if (artifact.build_id !== buildId) {
-    throw new Error(
-      `artifact build_id "${artifact.build_id}" does not match request build_id "${buildId}"`,
     );
   }
   return artifact as T;
@@ -181,9 +191,24 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
     const parsed = competitiveLandscapeBody.safeParse(request.body);
     if (!parsed.success) return badRequest(reply, "invalid request body", parsed.error.issues);
     try {
-      const artifact = await createCompetitiveLandscape(parsed.data);
+      const { artifact, evidence } = await createCompetitiveLandscape(parsed.data);
       assertIntelligenceArtifactIntegrity(artifact);
       await persistBestEffort(artifact);
+      logger.info(
+        {
+          artifactId: artifact.artifact_id,
+          seedQueries: evidence.seed_query_count,
+          finalQueries: evidence.final_query_count,
+          expansionRounds: evidence.expansion_rounds_used,
+          observations: evidence.serp_observation_count,
+          qualified: evidence.qualified_candidate_count,
+          unknown: evidence.unknown_candidate_count,
+          excluded: evidence.excluded_candidate_count,
+          donors: evidence.selected_donor_count,
+          rankingLlmCalls: evidence.ranking_llm_calls,
+        },
+        "CompetitiveLandscape produced",
+      );
       return reply.status(201).send(artifact);
     } catch (error) {
       return handleProducerError(reply, error);
@@ -200,7 +225,6 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
         parsed.data.competitive_landscape,
         "competitive_landscape",
         parsed.data.client_id,
-        parsed.data.build_id,
       );
     } catch (error) {
       return badRequest(
@@ -237,14 +261,12 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
         parsed.data.page_content_contract,
         "page_content_contract",
         parsed.data.client_id,
-        parsed.data.build_id,
       );
       blueprint = parsed.data.seo_content_blueprint
         ? requireArtifact<SEOContentBlueprintArtifact>(
             parsed.data.seo_content_blueprint,
             "seo_content_blueprint",
             parsed.data.client_id,
-            parsed.data.build_id,
           )
         : undefined;
     } catch (error) {
@@ -274,24 +296,55 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
   );
 }
 
-/** Map typed producer failures to stable HTTP responses. */
+/**
+ * Map typed producer failures to stable HTTP responses. A producer failure is
+ * NEVER answered with a fabricated success — every branch here is a 4xx/5xx.
+ */
 function handleProducerError(reply: FastifyReply, error: unknown): FastifyReply {
-  if (error instanceof ArtifactDigestConflictError) {
-    return reply.status(409).send({ error: error.code, message: error.message });
-  }
-  if (
-    error instanceof DataForSeoUnavailableError ||
-    error instanceof DataForSeoTaskError ||
-    error instanceof SerpEvidenceInvalidError
-  ) {
+  // Upstream evidence provider is unreachable or refused the request.
+  if (error instanceof DataForSeoUnavailableError) {
     return reply.status(502).send({ error: error.code, message: error.message });
   }
-  if (error instanceof BuildIntelligenceError) {
-    const extra =
-      "failedRequirements" in error && Array.isArray(error.failedRequirements)
-        ? { failed_requirements: error.failedRequirements }
-        : {};
-    return reply.status(422).send({ error: error.code, message: error.message, ...extra });
+  // Provider reached, individual task failed, or its payload is unusable.
+  if (error instanceof DataForSeoTaskError || error instanceof SerpEvidenceInvalidError) {
+    return reply.status(502).send({ error: error.code, message: error.message });
+  }
+  if (error instanceof CompetitiveEvidenceIncompleteError) {
+    return reply
+      .status(422)
+      .send({ error: error.code, message: error.message, detail: error.detail });
+  }
+  if (error instanceof CompetitiveDonorQualificationError) {
+    return reply
+      .status(422)
+      .send({ error: error.code, message: error.message, detail: error.detail });
+  }
+  if (
+    error instanceof CompetitiveLandscapeInvalidError ||
+    error instanceof CompetitiveLandscapeInputInvalidError
+  ) {
+    return reply.status(422).send({ error: error.code, message: error.message });
+  }
+  if (
+    error instanceof RouteSetMismatchError ||
+    error instanceof SeoContentBlueprintInvalidError ||
+    error instanceof CompetitiveLandscapeRefMismatchError ||
+    error instanceof PageContentContractInvalidError ||
+    error instanceof StructuredContentRouteMismatchError ||
+    error instanceof ArtifactLineageMismatchError
+  ) {
+    return reply.status(422).send({ error: error.code, message: error.message });
+  }
+  if (error instanceof ContentRequirementUnsatisfiedError) {
+    return reply.status(422).send({
+      error: error.code,
+      message: error.message,
+      failed_requirements: error.failedRequirements,
+      unsupported_claims: error.unsupportedClaims,
+    });
+  }
+  if (error instanceof ArtifactDigestConflictError) {
+    return reply.status(409).send({ error: error.code, message: error.message });
   }
   // Lineage assertion failures from bot-interop surface as INTEL_ARTIFACT_*.
   const message = error instanceof Error ? error.message : String(error);

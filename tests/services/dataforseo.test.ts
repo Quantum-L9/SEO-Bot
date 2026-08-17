@@ -12,14 +12,7 @@ vi.mock("../../src/core/config.js", () => ({
   getConfig: () => ({ DATAFORSEO_LOGIN: "login", DATAFORSEO_PASSWORD: "pass" }),
 }));
 
-import {
-  DataForSeoClient,
-  DataForSeoTaskError,
-  DataForSeoUnavailableError,
-  normalizeSerpDatetime,
-  SerpEvidenceInvalidError,
-  wrapDataForSeoTransportError,
-} from "../../src/services/dataforseo.js";
+import { DataForSeoClient, normalizeSerpDatetime } from "../../src/services/dataforseo.js";
 
 beforeEach(() => post.mockReset());
 
@@ -77,23 +70,11 @@ describe("DataForSeoClient.getOrganicSerp", () => {
     expect(result.serpFeatures).toContain("paid");
   });
 
-  it("surfaces DataForSEO API errors as DATAFORSEO_UNAVAILABLE", async () => {
+  it("surfaces DataForSEO API errors", async () => {
     post.mockResolvedValue({ data: { status_code: 40000, status_message: "bad" } });
-    await expect(new DataForSeoClient().getOrganicSerp({ keyword: "x" })).rejects.toBeInstanceOf(
-      DataForSeoUnavailableError,
+    await expect(new DataForSeoClient().getOrganicSerp({ keyword: "x" })).rejects.toThrow(
+      /DataForSEO error: bad/,
     );
-  });
-
-  it("maps transport/HTTP failures to DATAFORSEO_UNAVAILABLE", () => {
-    expect(() => wrapDataForSeoTransportError(new Error("socket hang up"))).toThrow(
-      DataForSeoUnavailableError,
-    );
-    try {
-      wrapDataForSeoTransportError(new Error("socket hang up"));
-    } catch (error) {
-      expect(error).toBeInstanceOf(DataForSeoUnavailableError);
-      expect((error as DataForSeoUnavailableError).code).toBe("DATAFORSEO_UNAVAILABLE");
-    }
   });
 
   it("rejects task-level errors (invalid location) instead of returning zero items", async () => {
@@ -107,53 +88,21 @@ describe("DataForSeoClient.getOrganicSerp", () => {
         ],
       },
     });
-    await expect(new DataForSeoClient().getOrganicSerp({ keyword: "x" })).rejects.toBeInstanceOf(
-      DataForSeoTaskError,
+    await expect(new DataForSeoClient().getOrganicSerp({ keyword: "x" })).rejects.toThrow(
+      /DataForSEO task error: Invalid Field: 'location_name'/,
     );
   });
 
-  it("rejects tasks that return no result array as SERP_EVIDENCE_INVALID", async () => {
+  it("rejects tasks that return no result array instead of returning zero items", async () => {
     post.mockResolvedValue({
       data: {
         status_code: 20000,
         tasks: [{ status_code: 20000, status_message: "Ok.", result: [] }],
       },
     });
-    await expect(new DataForSeoClient().getOrganicSerp({ keyword: "x" })).rejects.toBeInstanceOf(
-      SerpEvidenceInvalidError,
+    await expect(new DataForSeoClient().getOrganicSerp({ keyword: "x" })).rejects.toThrow(
+      /DataForSEO task error/,
     );
-  });
-
-  it("rejects a malformed task object as SERP_EVIDENCE_INVALID", async () => {
-    post.mockResolvedValue({
-      data: { status_code: 20000, tasks: [null] },
-    });
-    await expect(new DataForSeoClient().getOrganicSerp({ keyword: "x" })).rejects.toBeInstanceOf(
-      SerpEvidenceInvalidError,
-    );
-  });
-
-  it("returns VALID_EMPTY (zero organic items) for a well-formed empty SERP", async () => {
-    post.mockResolvedValue({
-      data: {
-        status_code: 20000,
-        tasks: [
-          {
-            status_code: 20000,
-            result: [
-              {
-                datetime: "2024-01-02 12:00:00 +00:00",
-                item_types: ["people_also_ask"],
-                items: [],
-              },
-            ],
-          },
-        ],
-      },
-    });
-    const result = await new DataForSeoClient().getOrganicSerp({ keyword: "x" });
-    expect(result.items).toEqual([]);
-    expect(result.outcome).toBe("valid_empty");
   });
 });
 

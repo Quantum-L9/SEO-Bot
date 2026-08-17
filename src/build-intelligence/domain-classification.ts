@@ -11,8 +11,17 @@
  * Ranking truth is deterministic (no LLM). Donor selection must exclude domains
  * that are structurally unsuitable as design/content donors — social networks,
  * directories, marketplaces, publishers, and review aggregators — and record
- * every exclusion WITH its reason. Ambiguous domains are RETAINED, never
- * silently discarded: certainty is not invented.
+ * every exclusion WITH its reason.
+ *
+ * Qualification is explicitly THREE-STATE. A domain that survives every
+ * structural exclusion rule is still only QUALIFIED once the SERP evidence
+ * corroborates it as an operating company in this market; otherwise it is
+ * UNKNOWN. UNKNOWN never occupies a donor position and never silently becomes
+ * QUALIFIED — certainty is not invented. Because the shared
+ * `CompetitiveLandscapeV1` exclusion vocabulary has no UNKNOWN member (and
+ * SEO-Bot must not invent protocol fields), an UNKNOWN candidate is recorded in
+ * the sealed ledger under the accepted `irrelevant` reason, while the exact
+ * deterministic rule travels in logs and the integrity receipt.
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -24,14 +33,6 @@ export type DomainExclusionReason =
   | "publisher"
   | "aggregator"
   | "irrelevant";
-
-export type DomainQualificationStatus = "qualified" | "excluded" | "unknown";
-
-export interface DomainQualification {
-  status: DomainQualificationStatus;
-  /** Present when status is excluded or unknown. `unknown` maps to schema reason `irrelevant`. */
-  reason?: DomainExclusionReason;
-}
 
 /**
  * Canonicalize a URL or hostname to a bare registrable-ish domain:
@@ -127,27 +128,66 @@ const CLASSIFICATION: Record<DomainExclusionReason, readonly string[]> = {
     "expertise.com",
     "birdeye.com",
   ],
+  // Populated by the structural rules below rather than by an exact-match list.
   irrelevant: [],
 };
 
 /**
- * Hosting/platform/shortener properties. These are not operating companies and
- * are not on the structural exclusion lists, so qualification is UNKNOWN —
- * they must not occupy a required donor slot.
+ * Suffixes that are never an operating company's commercial site. Matched on the
+ * canonical domain's tail, so `city.dallas.gov` and `dallas.gov` both match.
  */
-const UNKNOWN_PLATFORM_HOSTS: readonly string[] = [
-  "blogspot.com",
+const NON_COMMERCIAL_SUFFIXES: readonly string[] = [
+  ".gov",
+  ".mil",
+  ".edu",
+  ".gov.uk",
+  ".ac.uk",
+  ".nhs.uk",
+  ".gov.au",
+  ".edu.au",
+  ".gc.ca",
+  ".gov.ca",
+];
+
+/**
+ * Hosted site-builder / blogging platforms. A page on one of these is a tenant
+ * of the platform, not an independent operating-company domain, so it cannot be
+ * a design/content donor even when the tenant is a genuine local business.
+ */
+const HOSTED_PLATFORM_SUFFIXES: readonly string[] = [
   "wordpress.com",
+  "blogspot.com",
   "wixsite.com",
-  "wix.com",
-  "squarespace.com",
   "weebly.com",
-  "webnode.com",
+  "squarespace.com",
+  "godaddysites.com",
+  "business.site",
+  "myshopify.com",
+  "substack.com",
   "github.io",
-  "bit.ly",
-  "t.co",
-  "goo.gl",
-  "tinyurl.com",
+  "tumblr.com",
+  "webflow.io",
+  "netlify.app",
+  "vercel.app",
+  "sites.google.com",
+];
+
+/**
+ * Lexical directory/aggregator markers in the domain label itself. Intentionally
+ * narrow — a real operating company can legitimately be called "bestroofing.com",
+ * so only unambiguous listing-site tokens appear here.
+ */
+const DIRECTORY_NAME_MARKERS: readonly string[] = [
+  "directory",
+  "directories",
+  "yellowpages",
+  "whitepages",
+  "businesslistings",
+  "listingsof",
+  "top10",
+  "top-10",
+  "bestof",
+  "best-of",
 ];
 
 function matches(domain: string, entry: string): boolean {
@@ -155,44 +195,100 @@ function matches(domain: string, entry: string): boolean {
 }
 
 /**
- * Classify a domain's donor eligibility. Returns the exclusion reason when the
- * domain is a known non-donor property, or `null` to RETAIN it (including every
- * ambiguous/unknown domain — the deliberate default).
+ * Structural exclusion pass: is this domain a known or structurally-evident
+ * non-donor property? Returns the exclusion reason, or `null` when the domain
+ * survives every structural rule (which is NOT yet the same as qualified).
  */
 export function classifyDomain(domain: string): DomainExclusionReason | null {
+  return structuralExclusion(domain)?.reason ?? null;
+}
+
+/** Structural exclusion with the exact deterministic rule that fired. */
+export function structuralExclusion(
+  domain: string,
+): { reason: DomainExclusionReason; rule: string } | null {
   const canonical = canonicalizeDomain(domain);
   if (!canonical) return null;
-  // Deterministic evaluation order (object key order is stable for these keys).
+
+  // 1. Curated non-donor properties (deterministic key order).
   for (const reason of Object.keys(CLASSIFICATION) as DomainExclusionReason[]) {
     if (CLASSIFICATION[reason].some((entry) => matches(canonical, entry))) {
-      return reason;
+      return { reason, rule: `curated_list:${reason}` };
+    }
+  }
+  // 2. Non-commercial suffixes (government, military, academic, health service).
+  for (const suffix of NON_COMMERCIAL_SUFFIXES) {
+    if (canonical === suffix.slice(1) || canonical.endsWith(suffix)) {
+      return { reason: "irrelevant", rule: `non_commercial_suffix:${suffix}` };
+    }
+  }
+  // 3. Tenant of a hosted site-builder / blogging platform.
+  for (const platform of HOSTED_PLATFORM_SUFFIXES) {
+    if (matches(canonical, platform)) {
+      return { reason: "irrelevant", rule: `hosted_platform:${platform}` };
+    }
+  }
+  // 4. Unambiguous listing-site tokens in the domain label.
+  const label = canonical.split(".")[0] ?? "";
+  for (const marker of DIRECTORY_NAME_MARKERS) {
+    if (label.includes(marker)) {
+      return { reason: "directory", rule: `directory_name_marker:${marker}` };
     }
   }
   return null;
 }
 
-function isIpLiteral(domain: string): boolean {
-  return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(domain);
-}
+/* ── Three-state donor qualification ────────────────────────────────────────── */
 
 /**
- * Qualify a canonical domain for donor selection.
- *
- * - Known structural non-donors → excluded (do not occupy donor slots).
- * - Platform/hosting/shortener/IP → unknown (must not count toward the 10).
- * - Empty/unparseable → unknown.
- * - Otherwise → qualified operating-company candidate (exclude-list architecture).
- *
- * UNKNOWN never silently becomes QUALIFIED.
+ * Minimum distinct portfolio queries a domain must rank for before the SERP
+ * evidence corroborates it as an operating company in this market.
  */
-export function qualifyDomain(domain: string): DomainQualification {
-  const canonical = canonicalizeDomain(domain);
-  if (!canonical) return { status: "unknown", reason: "irrelevant" };
-  if (isIpLiteral(canonical)) return { status: "unknown", reason: "irrelevant" };
-  if (UNKNOWN_PLATFORM_HOSTS.some((entry) => matches(canonical, entry))) {
-    return { status: "unknown", reason: "irrelevant" };
+export const QUALIFICATION_MIN_DISTINCT_QUERIES = 2;
+/**
+ * A single strong placement is corroboration on its own: a domain in the top
+ * `QUALIFICATION_STRONG_RANK` organic positions for a portfolio query is an
+ * established competitor even when it appears for only that one query.
+ */
+export const QUALIFICATION_STRONG_RANK = 10;
+
+/** Deterministic evidence inputs for the corroboration rule. */
+export interface DomainMarketEvidence {
+  /** How many distinct `query_id`s this domain ranked for. */
+  distinctQueryCount: number;
+  /** Best (lowest) organic rank observed across the portfolio. */
+  bestRank: number;
+}
+
+export type DonorQualification =
+  | { status: "qualified"; rule: string }
+  | { status: "excluded"; reason: DomainExclusionReason; rule: string }
+  | { status: "unknown"; reason: "irrelevant"; rule: string };
+
+/**
+ * Qualify a domain as a donor candidate. Structural exclusions win first; a
+ * surviving domain is QUALIFIED only when the SERP evidence corroborates it,
+ * and UNKNOWN otherwise. UNKNOWN is never counted toward the donor cohort.
+ */
+export function qualifyDomain(domain: string, evidence: DomainMarketEvidence): DonorQualification {
+  const excluded = structuralExclusion(domain);
+  if (excluded) return { status: "excluded", ...excluded };
+
+  if (evidence.distinctQueryCount >= QUALIFICATION_MIN_DISTINCT_QUERIES) {
+    return {
+      status: "qualified",
+      rule: `market_corroboration:distinct_queries>=${QUALIFICATION_MIN_DISTINCT_QUERIES}`,
+    };
   }
-  const excluded = classifyDomain(canonical);
-  if (excluded) return { status: "excluded", reason: excluded };
-  return { status: "qualified" };
+  if (evidence.bestRank >= 1 && evidence.bestRank <= QUALIFICATION_STRONG_RANK) {
+    return {
+      status: "qualified",
+      rule: `market_corroboration:best_rank<=${QUALIFICATION_STRONG_RANK}`,
+    };
+  }
+  return {
+    status: "unknown",
+    reason: "irrelevant",
+    rule: "insufficient_market_corroboration",
+  };
 }

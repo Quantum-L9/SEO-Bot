@@ -7,24 +7,26 @@
 import { assertIntelligenceArtifactIntegrity } from "@quantum-l9/bot-interop";
 import { describe, expect, it, vi } from "vitest";
 import {
+  CompetitiveDonorQualificationError,
   CompetitiveEvidenceIncompleteError,
   type CompetitiveLandscapeRequest,
   createCompetitiveLandscape,
   type DataForSeoOrganicPort,
-  REQUIRED_DONOR_COUNT,
-  visibilityContribution,
 } from "../../src/build-intelligence/competitive-landscape.js";
+import { MAX_PORTFOLIO_QUERIES } from "../../src/build-intelligence/query-portfolio.js";
 import {
-  HARD_EXPANSION_CEILING,
-  planExpansionRound,
-} from "../../src/build-intelligence/query-expansion.js";
-import type { OrganicSerpResult } from "../../src/services/dataforseo.js";
-import { DataForSeoTaskError, DataForSeoUnavailableError } from "../../src/services/dataforseo.js";
+  DataForSeoTaskError,
+  DataForSeoUnavailableError,
+  type OrganicSerpResult,
+  SerpEvidenceInvalidError,
+} from "../../src/services/dataforseo.js";
 
 vi.mock("../../src/core/logger.js", () => ({
   createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
+// Zero-LLM guard: the LLM service module is mocked so any accidental use would
+// register a call. It must never be touched on the CompetitiveLandscape path.
 const executeSpy = vi.fn();
 vi.mock("../../src/services/llm.js", () => ({
   getLlmService: () => ({
@@ -54,154 +56,181 @@ function serp(
       title: "",
       snippet: "",
     })),
-    outcome: items.length === 0 ? "valid_empty" : "ok",
   };
 }
 
-function companyUrl(index: number, path = "/"): string {
-  return `https://www.operating-co-${index}.com${path}`;
-}
-
-function rankedCompanies(count: number, startRank = 1): Array<{ rank: number; url: string }> {
-  return Array.from({ length: count }, (_, i) => ({
-    rank: startRank + i,
-    url: companyUrl(i + 1),
-  }));
-}
-
 class FakePort implements DataForSeoOrganicPort {
-  public calls = 0;
-  public keywords: string[] = [];
+  public readonly keywords: string[] = [];
   constructor(
     private readonly map: Record<string, OrganicSerpResult>,
-    private readonly failures: Record<string, Error> = {},
+    private readonly fallback: (keyword: string) => OrganicSerpResult = (keyword) =>
+      serp(keyword, []),
   ) {}
   async getOrganicSerp(params: { keyword: string }): Promise<OrganicSerpResult> {
-    this.calls += 1;
     this.keywords.push(params.keyword);
-    if (this.failures[params.keyword]) throw this.failures[params.keyword];
-    return this.map[params.keyword] ?? serp(params.keyword, []);
+    return this.map[params.keyword] ?? this.fallback(params.keyword);
   }
+}
+
+/** Emits N qualifying operating-company domains for every query it is asked about. */
+function cohortPort(companyCount: number, extras: Array<{ rank: number; url: string }> = []) {
+  return new FakePort({}, (keyword) =>
+    serp(keyword, [
+      ...Array.from({ length: companyCount }, (_, i) => ({
+        rank: i + 1,
+        url: `https://co-${String(i + 1).padStart(2, "0")}.com/${encodeURIComponent(keyword)}`,
+      })),
+      ...extras,
+    ]),
+  );
 }
 
 const baseRequest: CompetitiveLandscapeRequest = {
   client_id: "client-1",
   build_id: "build-1",
-  market: {
-    niche: "roofing",
-    country: "United States",
-    language: "English",
-    device: "desktop",
-    location_name: "North Carolina,United States",
-  },
+  market: { niche: "roofing", country: "United States", language: "English", device: "desktop" },
   seed_queries: [
     { query: "metal roofing", intent: "commercial", weight: 2 },
     { query: "roof repair", intent: "transactional" },
   ],
+  desired_donor_count: 3,
 };
 
-function visibilityFixture(): Record<string, OrganicSerpResult> {
+function fixtureMap(): Record<string, OrganicSerpResult> {
   return {
     "metal roofing": serp("metal roofing", [
       { rank: 1, url: "https://www.alpha-roofing.com/metal" },
       { rank: 2, url: "https://beta-roofs.com/" },
       { rank: 3, url: "https://www.facebook.com/someroofer" },
-      ...rankedCompanies(10, 4),
     ]),
     "roof repair": serp("roof repair", [
-      { rank: 1, url: "https://alpha-roofing.com/repair" },
+      { rank: 1, url: "https://alpha-roofing.com/repair" }, // same domain as www.alpha-roofing.com
       { rank: 2, url: "https://yelp.com/biz/roofers" },
       { rank: 4, url: "https://gamma-roofing.com/repair" },
     ]),
   };
 }
 
-function nCompanyMap(
-  n: number,
-  extras: Array<{ rank: number; url: string }> = [],
-): Record<string, OrganicSerpResult> {
-  return {
-    "metal roofing": serp("metal roofing", [...rankedCompanies(n), ...extras]),
-    "roof repair": serp("roof repair", []),
-  };
-}
-
 describe("CompetitiveLandscape — deterministic ranking truth", () => {
   it("produces the same semantic digest for the same SERP fixture (determinism)", async () => {
     const a = await createCompetitiveLandscape(baseRequest, {
-      dataForSeo: new FakePort(visibilityFixture()),
+      dataForSeo: new FakePort(fixtureMap()),
     });
     const b = await createCompetitiveLandscape(baseRequest, {
-      dataForSeo: new FakePort(visibilityFixture()),
+      dataForSeo: new FakePort(fixtureMap()),
     });
-    expect(a.integrity.payload_digest).toBe(b.integrity.payload_digest);
-    expect(a.artifact_id).toBe(b.artifact_id);
-    expect(() => assertIntelligenceArtifactIntegrity(a)).not.toThrow();
+    expect(a.artifact.integrity.payload_digest).toBe(b.artifact.integrity.payload_digest);
+    expect(a.artifact.artifact_id).toBe(b.artifact.artifact_id);
+    expect(() => assertIntelligenceArtifactIntegrity(a.artifact)).not.toThrow();
   });
 
-  it("invokes ZERO LLM operations", async () => {
-    await createCompetitiveLandscape(baseRequest, {
-      dataForSeo: new FakePort(visibilityFixture()),
+  it("invokes ZERO LLM operations and reports ranking_llm_calls=0", async () => {
+    const { evidence } = await createCompetitiveLandscape(baseRequest, {
+      dataForSeo: new FakePort(fixtureMap()),
     });
     expect(executeSpy).not.toHaveBeenCalled();
+    expect(evidence.ranking_llm_calls).toBe(0);
   });
 
   it("records organic-only observations with exact ranking URL, canonical domain, and query id", async () => {
-    const artifact = await createCompetitiveLandscape(baseRequest, {
-      dataForSeo: new FakePort(visibilityFixture()),
+    const { artifact } = await createCompetitiveLandscape(baseRequest, {
+      dataForSeo: new FakePort(fixtureMap()),
     });
     for (const o of artifact.payload.observations) {
       expect(o.source).toBe("dataforseo");
       expect(o.rank).toBeGreaterThanOrEqual(1);
       expect(o.observed_at).toBe("2024-01-01T00:00:00.000Z");
+      expect(o.query_id).toMatch(/^q\d+$/);
     }
     const alpha = artifact.payload.observations.find(
       (o) => o.url === "https://www.alpha-roofing.com/metal",
     );
     expect(alpha).toBeDefined();
-    expect(alpha!.domain).toBe("alpha-roofing.com");
+    expect(alpha?.domain).toBe("alpha-roofing.com");
+  });
+
+  it("assigns collision-free observation ids even when two items share a rank", async () => {
+    const port = new FakePort({
+      "metal roofing": serp("metal roofing", [
+        { rank: 1, url: "https://one.com/a" },
+        { rank: 1, url: "https://two.com/b" }, // duplicate rank_group — must not collide
+        { rank: 2, url: "https://three.com/c" },
+      ]),
+      "roof repair": serp("roof repair", [{ rank: 1, url: "https://one.com/r" }]),
+    });
+    const { artifact } = await createCompetitiveLandscape(baseRequest, { dataForSeo: port });
+    const ids = artifact.payload.observations.map((o) => o.observation_id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("does not double-count the identical ranking URL within one query", async () => {
+    const port = new FakePort({
+      "metal roofing": serp("metal roofing", [
+        { rank: 1, url: "https://dup.com/page" },
+        { rank: 5, url: "https://dup.com/page" }, // same URL repeated
+        { rank: 2, url: "https://other.com/x" },
+      ]),
+      "roof repair": serp("roof repair", [{ rank: 1, url: "https://dup.com/r" }]),
+    });
+    const { artifact } = await createCompetitiveLandscape(
+      { ...baseRequest, desired_donor_count: 2 },
+      { dataForSeo: port },
+    );
+    const dup = artifact.payload.domains.find((d) => d.domain === "dup.com");
+    // q1 contributes exactly one observation for the repeated URL, q2 one more.
+    expect(dup?.observation_ids).toHaveLength(2);
   });
 
   it("normalizes www/protocol/path variants to one canonical domain (dedupe)", async () => {
-    const artifact = await createCompetitiveLandscape(baseRequest, {
-      dataForSeo: new FakePort(visibilityFixture()),
+    const { artifact } = await createCompetitiveLandscape(baseRequest, {
+      dataForSeo: new FakePort(fixtureMap()),
     });
     const alpha = artifact.payload.domains.find((d) => d.domain === "alpha-roofing.com");
     expect(alpha).toBeDefined();
-    expect(alpha!.observation_ids).toHaveLength(2);
-    expect(alpha!.qualifying_query_ids.sort()).toEqual(["q1", "q2"]);
+    expect(alpha?.observation_ids).toHaveLength(2);
+    expect(alpha?.qualifying_query_ids.slice().sort()).toEqual(["q1", "q2"]);
   });
 
   it("computes visibility as Σ weight × 1/log2(rank+1), deterministically", async () => {
-    const artifact = await createCompetitiveLandscape(baseRequest, {
-      dataForSeo: new FakePort(visibilityFixture()),
+    const { artifact } = await createCompetitiveLandscape(baseRequest, {
+      dataForSeo: new FakePort(fixtureMap()),
     });
-    const alpha = artifact.payload.domains.find((d) => d.domain === "alpha-roofing.com")!;
-    const expected =
-      Math.round((visibilityContribution(2, 1) + visibilityContribution(1, 1)) * 1e6) / 1e6;
-    expect(alpha.aggregate_visibility).toBe(expected);
+    const alpha = artifact.payload.domains.find((d) => d.domain === "alpha-roofing.com");
+    // q1 weight 2 @ rank1: 2 * 1/log2(2) = 2 ; q2 weight 1 @ rank1: 1 * 1/log2(2) = 1
+    const expected = Math.round((2 * (1 / Math.log2(2)) + 1 * (1 / Math.log2(2))) * 1e6) / 1e6;
+    expect(alpha?.aggregate_visibility).toBe(expected);
   });
 
-  it("does not double-count the same domain twice in one query", async () => {
-    const artifact = await createCompetitiveLandscape(baseRequest, {
+  it("breaks visibility ties deterministically and reproducibly", async () => {
+    const tied = new FakePort({
+      "metal roofing": serp("metal roofing", [
+        { rank: 1, url: "https://zeta.com/a" },
+        { rank: 1, url: "https://alpha.com/a" },
+        { rank: 1, url: "https://mid.com/a" },
+      ]),
+      "roof repair": serp("roof repair", []),
+    });
+    const first = await createCompetitiveLandscape(baseRequest, { dataForSeo: tied });
+    const second = await createCompetitiveLandscape(baseRequest, {
       dataForSeo: new FakePort({
         "metal roofing": serp("metal roofing", [
-          { rank: 1, url: "https://www.alpha-roofing.com/a" },
-          { rank: 5, url: "https://alpha-roofing.com/b" },
-          ...rankedCompanies(10, 6),
+          { rank: 1, url: "https://zeta.com/a" },
+          { rank: 1, url: "https://alpha.com/a" },
+          { rank: 1, url: "https://mid.com/a" },
         ]),
         "roof repair": serp("roof repair", []),
       }),
     });
-    const alpha = artifact.payload.domains.find((d) => d.domain === "alpha-roofing.com")!;
-    expect(alpha.observation_ids).toHaveLength(1);
-    expect(alpha.aggregate_visibility).toBe(Math.round(visibilityContribution(2, 1) * 1e6) / 1e6);
+    const order = first.artifact.payload.selected_donors.map((d) => d.domain);
+    expect(order).toEqual(second.artifact.payload.selected_donors.map((d) => d.domain));
+    // Equal visibility → first-seen order wins, so SERP order is preserved.
+    expect(order).toEqual(["zeta.com", "alpha.com", "mid.com"]);
   });
 
   it("excludes social/directory domains and operator exclusions, each WITH a reason", async () => {
-    const artifact = await createCompetitiveLandscape(
-      { ...baseRequest, operator_exclusions: ["gamma-roofing.com"] },
-      { dataForSeo: new FakePort(visibilityFixture()) },
+    const { artifact } = await createCompetitiveLandscape(
+      { ...baseRequest, desired_donor_count: 2, operator_exclusions: ["gamma-roofing.com"] },
+      { dataForSeo: new FakePort(fixtureMap()) },
     );
     const byDomain = Object.fromEntries(
       artifact.payload.exclusions.map((e) => [e.domain, e.reason]),
@@ -217,8 +246,8 @@ describe("CompetitiveLandscape — deterministic ranking truth", () => {
   });
 
   it("guarantees every selected donor resolves to at least one real observation", async () => {
-    const artifact = await createCompetitiveLandscape(baseRequest, {
-      dataForSeo: new FakePort(visibilityFixture()),
+    const { artifact } = await createCompetitiveLandscape(baseRequest, {
+      dataForSeo: new FakePort(fixtureMap()),
     });
     const observationIds = new Set(artifact.payload.observations.map((o) => o.observation_id));
     for (const donor of artifact.payload.selected_donors) {
@@ -226,199 +255,265 @@ describe("CompetitiveLandscape — deterministic ranking truth", () => {
       for (const id of donor.observation_ids) expect(observationIds.has(id)).toBe(true);
     }
   });
-
-  it("breaks visibility ties by first-seen order then domain", async () => {
-    const artifact = await createCompetitiveLandscape(
-      {
-        ...baseRequest,
-        seed_queries: [{ query: "metal roofing", intent: "commercial", weight: 1 }],
-      },
-      {
-        dataForSeo: new FakePort({
-          "metal roofing": serp("metal roofing", [
-            { rank: 1, url: "https://zeta-roof.com/" },
-            { rank: 1, url: "https://alpha-roof.com/" },
-            ...rankedCompanies(10, 3),
-          ]),
-        }),
-      },
-    );
-    const firstTwo = artifact.payload.selected_donors.slice(0, 2).map((d) => d.domain);
-    expect(firstTwo[0]).toBe("zeta-roof.com");
-    expect(firstTwo[1]).toBe("alpha-roof.com");
-  });
 });
 
-describe("CompetitiveLandscape — exact-10 donor invariant", () => {
-  it("fails closed on 3 qualified donors (never seals evidence_complete)", async () => {
-    await expect(
-      createCompetitiveLandscape(baseRequest, { dataForSeo: new FakePort(nCompanyMap(3)) }),
-    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
-  });
+describe("CompetitiveLandscape — the exactly-ten donor invariant", () => {
+  const tenRequest: CompetitiveLandscapeRequest = { ...baseRequest, desired_donor_count: 10 };
 
-  it("fails closed on 9 qualified donors", async () => {
-    await expect(
-      createCompetitiveLandscape(baseRequest, { dataForSeo: new FakePort(nCompanyMap(9)) }),
-    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
-  });
-
-  it("seals exactly 10 qualified donors with evidence_complete=true", async () => {
-    const artifact = await createCompetitiveLandscape(baseRequest, {
-      dataForSeo: new FakePort(nCompanyMap(10)),
+  it("seals with evidence_complete=true when exactly 10 qualified donors exist", async () => {
+    const { artifact, evidence } = await createCompetitiveLandscape(tenRequest, {
+      dataForSeo: cohortPort(10),
     });
-    expect(artifact.payload.selected_donors).toHaveLength(REQUIRED_DONOR_COUNT);
+    expect(artifact.payload.selected_donors).toHaveLength(10);
     expect(artifact.payload.evidence_complete).toBe(true);
-    expect(artifact.producer.repo).toBe("SEO-Bot");
+    expect(evidence.selected_donor_count).toBe(10);
   });
 
-  it("replaces a directory occupying a top slot with the next qualified candidate", async () => {
-    const artifact = await createCompetitiveLandscape(baseRequest, {
-      dataForSeo: new FakePort(
-        nCompanyMap(10, [{ rank: 1, url: "https://www.yelp.com/biz/roofers" }]),
-      ),
+  it("selects the deterministic top 10 when 12 qualify", async () => {
+    const { artifact } = await createCompetitiveLandscape(tenRequest, {
+      dataForSeo: cohortPort(12),
     });
-    const donors = artifact.payload.selected_donors.map((d) => d.domain);
-    expect(donors).toHaveLength(10);
-    expect(donors).not.toContain("yelp.com");
-    expect(artifact.payload.exclusions.some((e) => e.domain === "yelp.com")).toBe(true);
+    expect(artifact.payload.selected_donors).toHaveLength(10);
+    // Rank 1 is the strongest, rank 12 the weakest — the tail is dropped.
+    expect(artifact.payload.selected_donors.map((d) => d.domain)).toEqual(
+      Array.from({ length: 10 }, (_, i) => `co-${String(i + 1).padStart(2, "0")}.com`),
+    );
   });
 
-  it("does not count UNKNOWN platform hosts toward the required 10", async () => {
+  it("REJECTS a 3-donor cohort instead of sealing it", async () => {
     await expect(
-      createCompetitiveLandscape(baseRequest, {
-        dataForSeo: new FakePort(
-          nCompanyMap(9, [{ rank: 1, url: "https://some-roofer.blogspot.com/post" }]),
+      createCompetitiveLandscape(tenRequest, { dataForSeo: cohortPort(3) }),
+    ).rejects.toMatchObject({ code: "COMPETITIVE_EVIDENCE_INCOMPLETE" });
+  });
+
+  it("REJECTS a 9-donor cohort instead of sealing it", async () => {
+    await expect(
+      createCompetitiveLandscape(tenRequest, { dataForSeo: cohortPort(9) }),
+    ).rejects.toMatchObject({ code: "COMPETITIVE_EVIDENCE_INCOMPLETE" });
+  });
+
+  it("never emits evidence_complete=true for a short cohort (no partial seal path)", async () => {
+    for (const count of [0, 1, 3, 7, 9]) {
+      await expect(
+        createCompetitiveLandscape(tenRequest, { dataForSeo: cohortPort(count) }),
+      ).rejects.toBeInstanceOf(Error);
+    }
+  });
+
+  it("replaces an excluded directory with the next qualified candidate", async () => {
+    // 10 companies + a directory ranked 2nd: the directory must not take a slot,
+    // so the cohort falls one short and fails closed.
+    await expect(
+      createCompetitiveLandscape(tenRequest, {
+        dataForSeo: cohortPort(9, [{ rank: 2, url: "https://yelp.com/biz" }]),
+      }),
+    ).rejects.toMatchObject({ code: "COMPETITIVE_DONOR_QUALIFICATION_FAILED" });
+
+    // With an 11th real company available the directory is simply skipped over.
+    const { artifact } = await createCompetitiveLandscape(tenRequest, {
+      dataForSeo: cohortPort(11, [{ rank: 2, url: "https://yelp.com/biz" }]),
+    });
+    expect(artifact.payload.selected_donors).toHaveLength(10);
+    expect(artifact.payload.selected_donors.map((d) => d.domain)).not.toContain("yelp.com");
+    expect(artifact.payload.exclusions.map((e) => e.domain)).toContain("yelp.com");
+  });
+
+  it("never counts an UNKNOWN (uncorroborated) domain toward the cohort", async () => {
+    // 9 corroborated companies plus one domain seen once at rank 15 → UNKNOWN.
+    await expect(
+      createCompetitiveLandscape(tenRequest, {
+        dataForSeo: new FakePort({}, (keyword) =>
+          keyword === "metal roofing"
+            ? serp(keyword, [
+                ...Array.from({ length: 9 }, (_, i) => ({
+                  rank: i + 1,
+                  url: `https://co-${i}.com/x`,
+                })),
+                { rank: 15, url: "https://mystery-domain.com/deep" },
+              ])
+            : serp(keyword, []),
         ),
       }),
-    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    ).rejects.toMatchObject({ code: "COMPETITIVE_DONOR_QUALIFICATION_FAILED" });
   });
 
-  it("replaces an UNKNOWN candidate with the next qualified domain when extras exist", async () => {
-    const artifact = await createCompetitiveLandscape(baseRequest, {
-      dataForSeo: new FakePort(
-        nCompanyMap(10, [{ rank: 1, url: "https://some-roofer.blogspot.com/post" }]),
+  it("records an UNKNOWN candidate in the ledger as irrelevant, never as qualified", async () => {
+    // Seen for exactly one query, deep in the results: no corroboration.
+    const { artifact, evidence } = await createCompetitiveLandscape(tenRequest, {
+      dataForSeo: new FakePort({}, (keyword) =>
+        serp(keyword, [
+          ...Array.from({ length: 10 }, (_, i) => ({
+            rank: i + 1,
+            url: `https://co-${String(i + 1).padStart(2, "0")}.com/x`,
+          })),
+          ...(keyword === "metal roofing"
+            ? [{ rank: 18, url: "https://mystery-domain.com/deep" }]
+            : []),
+        ]),
       ),
     });
-    const donors = artifact.payload.selected_donors.map((d) => d.domain);
-    expect(donors).toHaveLength(10);
-    expect(donors).not.toContain("blogspot.com");
-    expect(donors).not.toContain("some-roofer.blogspot.com");
-    expect(
-      artifact.payload.exclusions.some(
-        (e) => e.reason === "irrelevant" && e.domain.endsWith("blogspot.com"),
-      ),
-    ).toBe(true);
+    const mystery = evidence.qualification_ledger.find(
+      (entry) => entry.domain === "mystery-domain.com",
+    );
+    expect(mystery?.status).toBe("unknown");
+    expect(mystery?.rule).toBe("insufficient_market_corroboration");
+    expect(artifact.payload.exclusions).toContainEqual({
+      domain: "mystery-domain.com",
+      reason: "irrelevant",
+    });
+    expect(artifact.payload.selected_donors.map((d) => d.domain)).not.toContain(
+      "mystery-domain.com",
+    );
+  });
+});
+
+describe("CompetitiveLandscape — bounded deterministic query expansion", () => {
+  const tenRequest: CompetitiveLandscapeRequest = { ...baseRequest, desired_donor_count: 10 };
+
+  it("does not expand when the seed portfolio already satisfies the cohort", async () => {
+    const port = cohortPort(10);
+    const { evidence } = await createCompetitiveLandscape(tenRequest, { dataForSeo: port });
+    expect(evidence.expansion_rounds_used).toBe(0);
+    expect(evidence.final_query_count).toBe(evidence.seed_query_count);
+    expect(port.keywords).toEqual(["metal roofing", "roof repair"]);
   });
 
-  it("selects the top deterministic 10 from 12 qualified candidates", async () => {
-    const artifact = await createCompetitiveLandscape(baseRequest, {
-      dataForSeo: new FakePort(nCompanyMap(12)),
+  it("expands deterministically and records provenance for every added query", async () => {
+    // Seeds yield only 5 companies; expansion queries surface the rest.
+    const port = new FakePort({}, (keyword) =>
+      ["metal roofing", "roof repair"].includes(keyword)
+        ? serp(
+            keyword,
+            Array.from({ length: 5 }, (_, i) => ({ rank: i + 1, url: `https://co-${i}.com/x` })),
+          )
+        : serp(
+            keyword,
+            Array.from({ length: 10 }, (_, i) => ({ rank: i + 1, url: `https://co-${i}.com/x` })),
+          ),
+    );
+    const { artifact, evidence } = await createCompetitiveLandscape(tenRequest, {
+      dataForSeo: port,
     });
+    expect(evidence.expansion_rounds_used).toBeGreaterThanOrEqual(1);
+    expect(evidence.final_query_count).toBeGreaterThan(evidence.seed_query_count);
     expect(artifact.payload.selected_donors).toHaveLength(10);
-    expect(artifact.payload.domains.length).toBeGreaterThanOrEqual(12);
-    expect(artifact.payload.selected_donors[0]!.domain).toBe("operating-co-1.com");
+
+    const expanded = evidence.query_provenance.filter((entry) => entry.origin === "expansion");
+    expect(expanded.length).toBeGreaterThan(0);
+    for (const entry of expanded) {
+      expect(entry.rule).toBeTruthy();
+      expect(entry.expansion_round).toBeGreaterThanOrEqual(1);
+      expect(entry.derived_from).toBeTruthy();
+    }
+    // Every portfolio query is present in the sealed artifact.
+    expect(artifact.payload.query_portfolio).toHaveLength(evidence.final_query_count);
   });
 
-  it("does not manufacture donors and ignores a requested count below 10", async () => {
+  it("honors the hard expansion ceiling and then fails closed", async () => {
+    const port = cohortPort(4);
     await expect(
-      createCompetitiveLandscape(
-        { ...baseRequest, desired_donor_count: 3 },
-        { dataForSeo: new FakePort(nCompanyMap(3)) },
-      ),
-    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+      createCompetitiveLandscape(tenRequest, { dataForSeo: port }),
+    ).rejects.toMatchObject({ code: "COMPETITIVE_EVIDENCE_INCOMPLETE" });
+    // Expansion ran, but never beyond the hard query ceiling.
+    expect(port.keywords.length).toBeGreaterThan(tenRequest.seed_queries.length);
+    expect(port.keywords.length).toBeLessThanOrEqual(MAX_PORTFOLIO_QUERIES);
+  });
+
+  it("fetches each portfolio query exactly once across expansion rounds", async () => {
+    const port = cohortPort(4);
+    await createCompetitiveLandscape(tenRequest, { dataForSeo: port }).catch(() => undefined);
+    expect(new Set(port.keywords).size).toBe(port.keywords.length);
   });
 });
 
-describe("CompetitiveLandscape — query expansion", () => {
-  it("plans a bounded deterministic expansion with provenance", () => {
-    const planned = planExpansionRound({
-      round: 1,
-      niche: "roofing",
-      market: { country: "United States", location_name: "North Carolina,United States" },
-      existingQueries: ["metal roofing"],
-      originalQueries: ["metal roofing"],
-      addedSoFar: 0,
-    });
-    expect(planned.length).toBeGreaterThan(0);
-    expect(planned.length).toBeLessThanOrEqual(HARD_EXPANSION_CEILING);
-    expect(planned.every((q) => q.round === 1 && q.reason && q.weight === 1)).toBe(true);
-    expect(new Set(planned.map((q) => q.query.toLowerCase())).size).toBe(planned.length);
-  });
+describe("CompetitiveLandscape — SERP evidence integrity", () => {
+  class ThrowingPort implements DataForSeoOrganicPort {
+    constructor(
+      private readonly error: Error,
+      private readonly failOn?: string,
+    ) {}
+    async getOrganicSerp(params: { keyword: string }): Promise<OrganicSerpResult> {
+      if (!this.failOn || params.keyword === this.failOn) throw this.error;
+      return serp(params.keyword, [{ rank: 1, url: "https://ok.com/a" }]);
+    }
+  }
 
-  it("does not emit unbounded or duplicate expansion queries", () => {
-    const first = planExpansionRound({
-      round: 1,
-      niche: "roofing",
-      market: { country: "United States" },
-      existingQueries: ["roofing", "roofing company"],
-      originalQueries: ["roofing"],
-      addedSoFar: 0,
-    });
-    expect(first.every((q) => q.query !== "roofing" && q.query !== "roofing company")).toBe(true);
-    const overflow = planExpansionRound({
-      round: 1,
-      niche: "roofing",
-      market: { country: "United States" },
-      existingQueries: [],
-      originalQueries: ["roofing"],
-      addedSoFar: HARD_EXPANSION_CEILING,
-    });
-    expect(overflow).toEqual([]);
-    expect(
-      planExpansionRound({
-        round: 99,
-        niche: "roofing",
-        market: { country: "United States" },
-        existingQueries: [],
-        originalQueries: ["roofing"],
-        addedSoFar: 0,
-      }),
-    ).toEqual([]);
-  });
-
-  it("expands the portfolio when the initial queries cannot yield 10 donors", async () => {
-    const port = new FakePort({
-      "metal roofing": serp("metal roofing", rankedCompanies(4)),
-      "roof repair": serp("roof repair", []),
-      roofing: serp(
-        "roofing",
-        rankedCompanies(8, 1).map((item, i) => ({
-          rank: item.rank,
-          url: companyUrl(20 + i),
-        })),
-      ),
-    });
-    const artifact = await createCompetitiveLandscape(baseRequest, { dataForSeo: port });
-    expect(artifact.payload.selected_donors).toHaveLength(10);
-    expect(artifact.payload.query_portfolio.length).toBeGreaterThan(2);
-    expect(port.keywords.some((k) => k !== "metal roofing" && k !== "roof repair")).toBe(true);
-  });
-});
-
-describe("CompetitiveLandscape — DataForSEO failure surfacing", () => {
-  it("does not seal when a query hits a provider failure", async () => {
+  it("surfaces a provider outage rather than degrading to zero observations", async () => {
     await expect(
       createCompetitiveLandscape(baseRequest, {
-        dataForSeo: new FakePort(nCompanyMap(10), {
-          "roof repair": new DataForSeoUnavailableError("DataForSEO unavailable: network"),
-        }),
+        dataForSeo: new ThrowingPort(new DataForSeoUnavailableError("connect ETIMEDOUT")),
       }),
     ).rejects.toBeInstanceOf(DataForSeoUnavailableError);
   });
 
-  it("does not degrade a task-level error into zero observations", async () => {
+  it("surfaces a task-level provider error rather than an empty landscape", async () => {
     await expect(
       createCompetitiveLandscape(baseRequest, {
-        dataForSeo: new FakePort(nCompanyMap(10), {
-          "metal roofing": new DataForSeoTaskError("DataForSEO task error: Invalid Field"),
-        }),
+        dataForSeo: new ThrowingPort(new DataForSeoTaskError("invalid location_name")),
       }),
     ).rejects.toBeInstanceOf(DataForSeoTaskError);
   });
 
-  it("treats a valid empty SERP as empty evidence, not a provider success-with-donors", async () => {
+  it("surfaces malformed SERP evidence rather than silently skipping it", async () => {
+    await expect(
+      createCompetitiveLandscape(baseRequest, {
+        dataForSeo: new ThrowingPort(new SerpEvidenceInvalidError("item has no usable rank")),
+      }),
+    ).rejects.toBeInstanceOf(SerpEvidenceInvalidError);
+  });
+
+  it("fails the whole artifact when only ONE query fails (no partial evidence)", async () => {
+    await expect(
+      createCompetitiveLandscape(baseRequest, {
+        dataForSeo: new ThrowingPort(new DataForSeoTaskError("quota"), "roof repair"),
+      }),
+    ).rejects.toBeInstanceOf(DataForSeoTaskError);
+  });
+
+  it("treats a genuinely empty SERP as a valid empty result, not a failure", async () => {
+    // Empty results are legal; they simply cannot form a cohort, so the donor
+    // invariant (not a provider error) is what fails.
     await expect(
       createCompetitiveLandscape(baseRequest, { dataForSeo: new FakePort({}) }),
+    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+  });
+
+  it("distinguishes thin evidence from failed qualification", async () => {
+    await expect(
+      createCompetitiveLandscape(
+        { ...baseRequest, desired_donor_count: 10 },
+        { dataForSeo: cohortPort(2) },
+      ),
+    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    await expect(
+      createCompetitiveLandscape(
+        { ...baseRequest, desired_donor_count: 10 },
+        { dataForSeo: cohortPort(11, [{ rank: 1, url: "https://yelp.com/a" }]) },
+      ),
+    ).resolves.toBeDefined();
+    await expect(
+      createCompetitiveLandscape(
+        { ...baseRequest, desired_donor_count: 10 },
+        {
+          dataForSeo: cohortPort(5, [
+            { rank: 11, url: "https://facebook.com/a" },
+            { rank: 12, url: "https://yelp.com/a" },
+            { rank: 13, url: "https://reddit.com/a" },
+            { rank: 14, url: "https://amazon.com/a" },
+            { rank: 15, url: "https://forbes.com/a" },
+            { rank: 16, url: "https://trustpilot.com/a" },
+          ]),
+        },
+      ),
+    ).rejects.toBeInstanceOf(CompetitiveDonorQualificationError);
+  });
+
+  it("rejects a request whose seed queries are all blank", async () => {
+    await expect(
+      createCompetitiveLandscape(
+        { ...baseRequest, seed_queries: [{ query: "   ", intent: "commercial" }] },
+        { dataForSeo: new FakePort({}) },
+      ),
     ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
   });
 });

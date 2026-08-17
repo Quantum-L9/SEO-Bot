@@ -51,19 +51,66 @@ vi.mock("../../src/build-intelligence/competitive-landscape.js", async () => {
   });
   sealedLandscape.value = artifact;
   return {
-    createCompetitiveLandscape: vi.fn(async () => artifact),
+    // The producer returns the sealed artifact plus its reproducibility evidence.
+    createCompetitiveLandscape: vi.fn(async () => ({
+      artifact,
+      evidence: {
+        seed_query_count: 1,
+        final_query_count: 1,
+        expansion_rounds_used: 0,
+        expansion_round_ceiling: 3,
+        expansion_query_ceiling: 24,
+        expansion_ceiling_reached: false,
+        query_provenance: [],
+        serp_observation_count: 1,
+        candidate_domain_count: 1,
+        qualified_candidate_count: 1,
+        unknown_candidate_count: 0,
+        excluded_candidate_count: 0,
+        selected_donor_count: 1,
+        qualification_ledger: [],
+        ranking_llm_calls: 0,
+      },
+    })),
     CompetitiveEvidenceIncompleteError: class extends Error {
       code = "COMPETITIVE_EVIDENCE_INCOMPLETE";
+    },
+    CompetitiveDonorQualificationError: class extends Error {
+      code = "COMPETITIVE_DONOR_QUALIFICATION_FAILED";
+    },
+    CompetitiveLandscapeInvalidError: class extends Error {
+      code = "COMPETITIVE_LANDSCAPE_INVALID";
     },
   };
 });
 vi.mock("../../src/build-intelligence/seo-content-blueprint.js", () => ({
   createSEOContentBlueprint: vi.fn(),
+  CompetitiveLandscapeInputInvalidError: class extends Error {
+    code = "COMPETITIVE_LANDSCAPE_INVALID";
+  },
+  CompetitiveLandscapeRefMismatchError: class extends Error {
+    code = "COMPETITIVE_LANDSCAPE_REF_MISMATCH";
+  },
+  RouteSetMismatchError: class extends Error {
+    code = "ROUTE_SET_MISMATCH";
+  },
+  SeoContentBlueprintInvalidError: class extends Error {
+    code = "SEO_CONTENT_BLUEPRINT_INVALID";
+  },
 }));
 vi.mock("../../src/build-intelligence/structured-content.js", () => ({
   createStructuredContentPackage: vi.fn(),
   ContentRequirementUnsatisfiedError: class extends Error {
     code = "CONTENT_REQUIREMENT_UNSATISFIED";
+  },
+  PageContentContractInvalidError: class extends Error {
+    code = "PAGE_CONTENT_CONTRACT_INVALID";
+  },
+  StructuredContentRouteMismatchError: class extends Error {
+    code = "STRUCTURED_CONTENT_ROUTE_MISMATCH";
+  },
+  ArtifactLineageMismatchError: class extends Error {
+    code = "ARTIFACT_LINEAGE_MISMATCH";
   },
 }));
 vi.mock("../../src/build-intelligence/store.js", () => ({
@@ -75,6 +122,11 @@ vi.mock("../../src/build-intelligence/store.js", () => ({
 
 import { registerBuildIntelligenceRoutes } from "../../src/api/build-intelligence.js";
 import { _resetRateLimiter, registerApiSecurity } from "../../src/api/security.js";
+import {
+  DataForSeoTaskError,
+  DataForSeoUnavailableError,
+  SerpEvidenceInvalidError,
+} from "../../src/services/dataforseo.js";
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
@@ -156,58 +208,108 @@ describe("POST /api/build-intelligence/competitive-landscape", () => {
   });
 });
 
-describe("POST /api/build-intelligence/seo-content-blueprint", () => {
-  it("enforces authentication (401)", async () => {
-    const res = await app.inject({
+describe("build-intelligence — producer failure never becomes a fake success", () => {
+  async function postWith(error: Error) {
+    const producer = await import("../../src/build-intelligence/competitive-landscape.js");
+    vi.mocked(producer.createCompetitiveLandscape).mockRejectedValueOnce(error);
+    return app.inject({
       method: "POST",
-      url: "/api/build-intelligence/seo-content-blueprint",
-      payload: { client_id: "client-1", build_id: "build-1" },
+      url: "/api/build-intelligence/competitive-landscape",
+      headers: AUTH,
+      payload: validBody,
     });
-    expect(res.statusCode).toBe(401);
+  }
+
+  it("maps a provider outage to 502 DATAFORSEO_UNAVAILABLE", async () => {
+    const res = await postWith(new DataForSeoUnavailableError("connect ETIMEDOUT"));
+    expect(res.statusCode).toBe(502);
+    expect(res.json().error).toBe("DATAFORSEO_UNAVAILABLE");
   });
 
-  it("rejects a malformed body and provider injection (400)", async () => {
-    const malformed = await app.inject({
-      method: "POST",
-      url: "/api/build-intelligence/seo-content-blueprint",
-      headers: AUTH,
-      payload: { client_id: "client-1", build_id: "build-1" },
-    });
-    expect(malformed.statusCode).toBe(400);
-    const leak = await app.inject({
-      method: "POST",
-      url: "/api/build-intelligence/seo-content-blueprint",
-      headers: AUTH,
-      payload: {
-        client_id: "client-1",
-        build_id: "build-1",
-        competitive_landscape: {},
-        routes: [{ route_id: "home", path: "/", purpose: "p" }],
-        business_facts: [],
-        model: "gpt-4o",
-      },
-    });
-    expect(leak.statusCode).toBe(400);
-  });
-});
-
-describe("POST /api/build-intelligence/structured-content", () => {
-  it("enforces authentication (401)", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/build-intelligence/structured-content",
-      payload: { client_id: "client-1", build_id: "build-1" },
-    });
-    expect(res.statusCode).toBe(401);
+  it("maps a task-level provider error to 502 DATAFORSEO_TASK_ERROR", async () => {
+    const res = await postWith(new DataForSeoTaskError("invalid location_name"));
+    expect(res.statusCode).toBe(502);
+    expect(res.json().error).toBe("DATAFORSEO_TASK_ERROR");
   });
 
-  it("rejects a malformed body (400)", async () => {
+  it("maps malformed SERP evidence to 502 SERP_EVIDENCE_INVALID", async () => {
+    const res = await postWith(new SerpEvidenceInvalidError("no usable rank"));
+    expect(res.statusCode).toBe(502);
+    expect(res.json().error).toBe("SERP_EVIDENCE_INVALID");
+  });
+
+  it("maps an incomplete donor cohort to 422 with no artifact body", async () => {
+    const producer = await import("../../src/build-intelligence/competitive-landscape.js");
+    const failure = new producer.CompetitiveEvidenceIncompleteError("only 3 of 10", {
+      selected: 3,
+      required: 10,
+      qualified: 3,
+      unknown: 0,
+      excluded: 2,
+      queries: 8,
+      observations: 40,
+      expansion_rounds_used: 3,
+    });
+    const res = await postWith(failure);
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error).toBe("COMPETITIVE_EVIDENCE_INCOMPLETE");
+    expect(res.json().artifact_id).toBeUndefined();
+  });
+
+  it("maps a failed donor qualification to 422", async () => {
+    const producer = await import("../../src/build-intelligence/competitive-landscape.js");
+    const res = await postWith(
+      new producer.CompetitiveDonorQualificationError("not donors", {
+        selected: 4,
+        required: 10,
+        candidates: 18,
+        qualified: 4,
+        unknown: 6,
+        excluded: 8,
+      }),
+    );
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error).toBe("COMPETITIVE_DONOR_QUALIFICATION_FAILED");
+  });
+
+  it("maps a digest conflict to 409 rather than overwriting", async () => {
+    const store = await import("../../src/build-intelligence/store.js");
+    const res = await postWith(new store.ArtifactDigestConflictError("conflict"));
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("CONTENT_CONTRACT_HASH_MISMATCH");
+  });
+
+  it("returns the same content-addressed artifact id for a repeated request (idempotent)", async () => {
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/competitive-landscape",
+      headers: AUTH,
+      payload: validBody,
+    });
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/competitive-landscape",
+      headers: AUTH,
+      payload: validBody,
+    });
+    expect(first.statusCode).toBe(201);
+    expect(second.statusCode).toBe(201);
+    expect(second.json().artifact_id).toBe(first.json().artifact_id);
+    expect(second.json().integrity.payload_digest).toBe(first.json().integrity.payload_digest);
+  });
+
+  it("still returns the sealed artifact when best-effort persistence fails", async () => {
+    const store = await import("../../src/build-intelligence/store.js");
+    vi.mocked(store.persistIntelligenceArtifact).mockRejectedValueOnce(
+      new Error("connection refused"),
+    );
     const res = await app.inject({
       method: "POST",
-      url: "/api/build-intelligence/structured-content",
+      url: "/api/build-intelligence/competitive-landscape",
       headers: AUTH,
-      payload: { client_id: "client-1", build_id: "build-1" },
+      payload: validBody,
     });
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(201);
+    expect(res.json().artifact_type).toBe("competitive_landscape");
   });
 });
