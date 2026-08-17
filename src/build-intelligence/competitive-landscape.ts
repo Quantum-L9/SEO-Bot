@@ -240,7 +240,7 @@ export async function createCompetitiveLandscape(
   // Observations accumulate across expansion rounds; a query is fetched once.
   const observations: Observation[] = [];
   const fetched = new Set<string>();
-  let selection = emptySelection();
+  let selection: DonorSelection | null = null;
   let expansionCeilingReached = false;
 
   for (;;) {
@@ -277,6 +277,22 @@ export async function createCompetitiveLandscape(
       "Donor cohort short of requirement; expanding query portfolio (bounded, deterministic)",
     );
     portfolio = expanded;
+  }
+
+  if (!selection) {
+    throw new CompetitiveEvidenceIncompleteError(
+      "Donor selection did not run after the query portfolio was built.",
+      {
+        selected: 0,
+        required: desiredDonorCount,
+        qualified: 0,
+        unknown: 0,
+        excluded: 0,
+        queries: portfolio.queries.length,
+        observations: observations.length,
+        expansion_rounds_used: portfolio.round,
+      },
+    );
   }
 
   const evidence: CompetitiveEvidenceSummary = {
@@ -424,18 +440,6 @@ interface DonorSelection {
   qualified: number;
   unknown: number;
   excluded: number;
-}
-
-function emptySelection(): DonorSelection {
-  return {
-    domains: [],
-    selected: [],
-    exclusions: [],
-    ledger: [],
-    qualified: 0,
-    unknown: 0,
-    excluded: 0,
-  };
 }
 
 /**

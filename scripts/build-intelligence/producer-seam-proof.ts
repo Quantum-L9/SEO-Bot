@@ -35,10 +35,9 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   type PageContentContractArtifact,
   refForArtifact,
@@ -89,8 +88,14 @@ function packageVersion(name: string): string {
 }
 
 function gitSha(): string {
+  const fromEnv = process.env.GITHUB_SHA?.trim();
+  if (fromEnv) return fromEnv;
   try {
-    return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    const head = readFileSync(join(process.cwd(), ".git", "HEAD"), "utf8").trim();
+    if (head.startsWith("ref: ")) {
+      return readFileSync(join(process.cwd(), ".git", head.slice(5).trim()), "utf8").trim();
+    }
+    return head;
   } catch {
     return "unresolved";
   }
@@ -235,10 +240,10 @@ async function main(): Promise<number> {
   return validation.verdict === "FAIL" ? 1 : 0;
 }
 
-main()
-  .then((code) => process.exit(code))
-  .catch((error: unknown) => {
-    console.error("[seam-proof] FAILED:", error instanceof Error ? error.message : String(error));
-    console.error("SEO_BUILD_INTELLIGENCE_INTEGRITY: FAIL");
-    process.exit(1);
-  });
+try {
+  process.exit(await main());
+} catch (error: unknown) {
+  console.error("[seam-proof] FAILED:", error instanceof Error ? error.message : String(error));
+  console.error("SEO_BUILD_INTELLIGENCE_INTEGRITY: FAIL");
+  process.exit(1);
+}
