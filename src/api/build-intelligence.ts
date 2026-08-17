@@ -33,20 +33,20 @@ import {
 } from "@quantum-l9/bot-interop";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
-import {
-  CompetitiveEvidenceIncompleteError,
-  createCompetitiveLandscape,
-} from "../build-intelligence/competitive-landscape.js";
+import { createCompetitiveLandscape } from "../build-intelligence/competitive-landscape.js";
+import { BuildIntelligenceError } from "../build-intelligence/errors.js";
 import { createSEOContentBlueprint } from "../build-intelligence/seo-content-blueprint.js";
 import {
   ArtifactDigestConflictError,
   persistIntelligenceArtifact,
 } from "../build-intelligence/store.js";
-import {
-  ContentRequirementUnsatisfiedError,
-  createStructuredContentPackage,
-} from "../build-intelligence/structured-content.js";
+import { createStructuredContentPackage } from "../build-intelligence/structured-content.js";
 import { createModuleLogger } from "../core/logger.js";
+import {
+  DataForSeoTaskError,
+  DataForSeoUnavailableError,
+  SerpEvidenceInvalidError,
+} from "../services/dataforseo.js";
 
 const logger = createModuleLogger("api:build-intelligence");
 
@@ -137,6 +137,7 @@ function requireArtifact<T extends WebsiteIntelligenceArtifact>(
   value: unknown,
   expectedType: IntelligenceArtifactType,
   clientId: string,
+  buildId: string,
 ): T {
   const artifact = value as WebsiteIntelligenceArtifact;
   if (!artifact || typeof artifact !== "object" || artifact.artifact_type !== expectedType) {
@@ -146,6 +147,11 @@ function requireArtifact<T extends WebsiteIntelligenceArtifact>(
   if (artifact.client_id !== clientId) {
     throw new Error(
       `artifact client_id "${artifact.client_id}" does not match request client_id "${clientId}"`,
+    );
+  }
+  if (artifact.build_id !== buildId) {
+    throw new Error(
+      `artifact build_id "${artifact.build_id}" does not match request build_id "${buildId}"`,
     );
   }
   return artifact as T;
@@ -194,6 +200,7 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
         parsed.data.competitive_landscape,
         "competitive_landscape",
         parsed.data.client_id,
+        parsed.data.build_id,
       );
     } catch (error) {
       return badRequest(
@@ -230,12 +237,14 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
         parsed.data.page_content_contract,
         "page_content_contract",
         parsed.data.client_id,
+        parsed.data.build_id,
       );
       blueprint = parsed.data.seo_content_blueprint
         ? requireArtifact<SEOContentBlueprintArtifact>(
             parsed.data.seo_content_blueprint,
             "seo_content_blueprint",
             parsed.data.client_id,
+            parsed.data.build_id,
           )
         : undefined;
     } catch (error) {
@@ -267,18 +276,22 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
 
 /** Map typed producer failures to stable HTTP responses. */
 function handleProducerError(reply: FastifyReply, error: unknown): FastifyReply {
-  if (error instanceof CompetitiveEvidenceIncompleteError) {
-    return reply.status(422).send({ error: error.code, message: error.message });
-  }
-  if (error instanceof ContentRequirementUnsatisfiedError) {
-    return reply.status(422).send({
-      error: error.code,
-      message: error.message,
-      failed_requirements: error.failedRequirements,
-    });
-  }
   if (error instanceof ArtifactDigestConflictError) {
     return reply.status(409).send({ error: error.code, message: error.message });
+  }
+  if (
+    error instanceof DataForSeoUnavailableError ||
+    error instanceof DataForSeoTaskError ||
+    error instanceof SerpEvidenceInvalidError
+  ) {
+    return reply.status(502).send({ error: error.code, message: error.message });
+  }
+  if (error instanceof BuildIntelligenceError) {
+    const extra =
+      "failedRequirements" in error && Array.isArray(error.failedRequirements)
+        ? { failed_requirements: error.failedRequirements }
+        : {};
+    return reply.status(422).send({ error: error.code, message: error.message, ...extra });
   }
   // Lineage assertion failures from bot-interop surface as INTEL_ARTIFACT_*.
   const message = error instanceof Error ? error.message : String(error);

@@ -155,3 +155,59 @@ describe("POST /api/build-intelligence/competitive-landscape", () => {
     }
   });
 });
+
+describe("POST /api/build-intelligence/seo-content-blueprint", () => {
+  it("enforces authentication (401)", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/seo-content-blueprint",
+      payload: { client_id: "client-1", build_id: "build-1" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("rejects a malformed body and provider injection (400)", async () => {
+    const malformed = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/seo-content-blueprint",
+      headers: AUTH,
+      payload: { client_id: "client-1", build_id: "build-1" },
+    });
+    expect(malformed.statusCode).toBe(400);
+    const leak = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/seo-content-blueprint",
+      headers: AUTH,
+      payload: {
+        client_id: "client-1",
+        build_id: "build-1",
+        competitive_landscape: {},
+        routes: [{ route_id: "home", path: "/", purpose: "p" }],
+        business_facts: [],
+        model: "gpt-4o",
+      },
+    });
+    expect(leak.statusCode).toBe(400);
+  });
+});
+
+describe("POST /api/build-intelligence/structured-content", () => {
+  it("enforces authentication (401)", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/structured-content",
+      payload: { client_id: "client-1", build_id: "build-1" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("rejects a malformed body (400)", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/structured-content",
+      headers: AUTH,
+      payload: { client_id: "client-1", build_id: "build-1" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});

@@ -36,8 +36,19 @@ import {
 import { createModuleLogger } from "../core/logger.js";
 import { getLlmService, type LlmService } from "../services/llm.js";
 import { type RouteValidationVerdict, validateRoute } from "./content-validator.js";
+import {
+  ArtifactLineageMismatchError,
+  ContentRepairExhaustedError,
+  PageContentContractHashMismatchError,
+  PageContentContractInvalidError,
+  StructuredContentRouteMismatchError,
+} from "./errors.js";
 import { PRODUCER } from "./producer.js";
 import { structuredContentRouteSchema } from "./schema-guards.js";
+
+/** @deprecated Use ContentRepairExhaustedError */
+export { ContentRepairExhaustedError as ContentRequirementUnsatisfiedError } from "./errors.js";
+export { ContentRepairExhaustedError } from "./errors.js";
 
 const logger = createModuleLogger("build-intelligence:structured-content");
 
@@ -49,24 +60,35 @@ export interface StructuredContentRequest {
   seo_content_blueprint?: SEOContentBlueprintArtifact;
 }
 
-/** Thrown when a route still fails its requirements after the one bounded repair. */
-export class ContentRequirementUnsatisfiedError extends Error {
-  readonly code = "CONTENT_REQUIREMENT_UNSATISFIED";
-  constructor(
-    message: string,
-    readonly failedRequirements: string[],
-  ) {
-    super(message);
-    this.name = "ContentRequirementUnsatisfiedError";
-  }
-}
-
 export async function createStructuredContentPackage(
   request: StructuredContentRequest,
   deps: { llm?: LlmService } = {},
 ): Promise<StructuredContentPackageArtifact> {
   // ── Lineage first: reject a tampered/invalid contract BEFORE any LLM spend ────
-  assertIntelligenceArtifactIntegrity(request.page_content_contract);
+  if (request.page_content_contract.artifact_type !== "page_content_contract") {
+    throw new PageContentContractInvalidError(
+      "PAGE_CONTENT_CONTRACT_INVALID: expected a page_content_contract artifact",
+    );
+  }
+  try {
+    assertIntelligenceArtifactIntegrity(request.page_content_contract);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("HASH") || message.includes("hash")) {
+      throw new PageContentContractHashMismatchError(message);
+    }
+    throw new PageContentContractInvalidError(message);
+  }
+  if (
+    request.page_content_contract.client_id !== request.client_id ||
+    request.page_content_contract.build_id !== request.build_id
+  ) {
+    throw new ArtifactLineageMismatchError(
+      `ARTIFACT_LINEAGE_MISMATCH: PageContentContract client/build ` +
+        `(${request.page_content_contract.client_id}/${request.page_content_contract.build_id}) ` +
+        `does not match request (${request.client_id}/${request.build_id})`,
+    );
+  }
 
   const llm = deps.llm ?? getLlmService();
   const contract = request.page_content_contract.payload;
@@ -112,10 +134,10 @@ export async function createStructuredContentPackage(
         llm,
       });
 
-      // 4. Second failure is terminal.
+      // 4. Second failure is terminal — no second repair loop.
       if (!routePassed(verdict)) {
-        throw new ContentRequirementUnsatisfiedError(
-          `Route "${contractRoute.route_id}" still fails validation after one bounded repair`,
+        throw new ContentRepairExhaustedError(
+          `CONTENT_REPAIR_EXHAUSTED: route "${contractRoute.route_id}" still fails validation after one bounded repair`,
           verdict.failed_requirements,
         );
       }
@@ -236,11 +258,15 @@ function reconcileStructuredRoute(
     .map((section) => section.section_id)
     .filter((id) => !contractSet.has(id));
   if (unexpected.length > 0) {
-    throw new Error(`Unexpected section_id(s) not in contract: ${unexpected.join(", ")}`);
+    throw new StructuredContentRouteMismatchError(
+      `Unexpected section_id(s) not in contract: ${unexpected.join(", ")}`,
+    );
   }
   const sections = contractSectionIds.map((id) => {
     const section = producedById.get(id);
-    if (!section) throw new Error(`Missing required section_id: ${id}`);
+    if (!section) {
+      throw new StructuredContentRouteMismatchError(`Missing required section_id: ${id}`);
+    }
     return section;
   });
 

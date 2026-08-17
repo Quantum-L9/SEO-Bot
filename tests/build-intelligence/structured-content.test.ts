@@ -154,7 +154,7 @@ describe("StructuredContentPackage — lineage, identity, bounded repair", () =>
         { client_id: "client-1", build_id: "build-1", page_content_contract: contract },
         { llm },
       ),
-    ).rejects.toThrow(/INTEL_ARTIFACT_HASH_MISMATCH/);
+    ).rejects.toThrow(/INTEL_ARTIFACT_HASH_MISMATCH|PAGE_CONTENT_CONTRACT_HASH_MISMATCH/);
     expect(counts.gen).toBe(0);
     expect(counts.val).toBe(0);
   });
@@ -192,7 +192,18 @@ describe("StructuredContentPackage — lineage, identity, bounded repair", () =>
     expect(pkg.payload.validation.unsupported_claims).toEqual([]);
   });
 
-  it("is terminal (CONTENT_REQUIREMENT_UNSATISFIED) when the route still fails after repair", async () => {
+  it("rejects a PageContentContract from a different client/build before LLM spend", async () => {
+    const { llm, counts } = fakeLlm([pass]);
+    await expect(
+      createStructuredContentPackage(
+        { client_id: "other-client", build_id: "build-1", page_content_contract: makeContract() },
+        { llm },
+      ),
+    ).rejects.toThrow(/ARTIFACT_LINEAGE_MISMATCH/);
+    expect(counts.gen).toBe(0);
+  });
+
+  it("is terminal (CONTENT_REPAIR_EXHAUSTED) when the route still fails after repair", async () => {
     const { llm, counts } = fakeLlm([fail, fail]);
     await expect(
       createStructuredContentPackage(

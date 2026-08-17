@@ -22,7 +22,16 @@ export type DomainExclusionReason =
   | "social"
   | "marketplace"
   | "publisher"
-  | "aggregator";
+  | "aggregator"
+  | "irrelevant";
+
+export type DomainQualificationStatus = "qualified" | "excluded" | "unknown";
+
+export interface DomainQualification {
+  status: DomainQualificationStatus;
+  /** Present when status is excluded or unknown. `unknown` maps to schema reason `irrelevant`. */
+  reason?: DomainExclusionReason;
+}
 
 /**
  * Canonicalize a URL or hostname to a bare registrable-ish domain:
@@ -118,7 +127,28 @@ const CLASSIFICATION: Record<DomainExclusionReason, readonly string[]> = {
     "expertise.com",
     "birdeye.com",
   ],
+  irrelevant: [],
 };
+
+/**
+ * Hosting/platform/shortener properties. These are not operating companies and
+ * are not on the structural exclusion lists, so qualification is UNKNOWN —
+ * they must not occupy a required donor slot.
+ */
+const UNKNOWN_PLATFORM_HOSTS: readonly string[] = [
+  "blogspot.com",
+  "wordpress.com",
+  "wixsite.com",
+  "wix.com",
+  "squarespace.com",
+  "weebly.com",
+  "webnode.com",
+  "github.io",
+  "bit.ly",
+  "t.co",
+  "goo.gl",
+  "tinyurl.com",
+];
 
 function matches(domain: string, entry: string): boolean {
   return domain === entry || domain.endsWith(`.${entry}`);
@@ -139,4 +169,30 @@ export function classifyDomain(domain: string): DomainExclusionReason | null {
     }
   }
   return null;
+}
+
+function isIpLiteral(domain: string): boolean {
+  return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(domain);
+}
+
+/**
+ * Qualify a canonical domain for donor selection.
+ *
+ * - Known structural non-donors → excluded (do not occupy donor slots).
+ * - Platform/hosting/shortener/IP → unknown (must not count toward the 10).
+ * - Empty/unparseable → unknown.
+ * - Otherwise → qualified operating-company candidate (exclude-list architecture).
+ *
+ * UNKNOWN never silently becomes QUALIFIED.
+ */
+export function qualifyDomain(domain: string): DomainQualification {
+  const canonical = canonicalizeDomain(domain);
+  if (!canonical) return { status: "unknown", reason: "irrelevant" };
+  if (isIpLiteral(canonical)) return { status: "unknown", reason: "irrelevant" };
+  if (UNKNOWN_PLATFORM_HOSTS.some((entry) => matches(canonical, entry))) {
+    return { status: "unknown", reason: "irrelevant" };
+  }
+  const excluded = classifyDomain(canonical);
+  if (excluded) return { status: "excluded", reason: excluded };
+  return { status: "qualified" };
 }

@@ -24,9 +24,9 @@ import { createModuleLogger } from "../core/logger.js";
 const logger = createModuleLogger("build-intelligence:store");
 
 export class ArtifactDigestConflictError extends Error {
-  readonly code = "CONTENT_CONTRACT_HASH_MISMATCH";
+  readonly code = "ARTIFACT_DIGEST_CONFLICT";
   constructor(artifactId: string) {
-    super(`Refusing to overwrite artifact ${artifactId} with a different payload digest`);
+    super(`ARTIFACT_DIGEST_CONFLICT: refusing to overwrite artifact ${artifactId} with a different payload digest`);
     this.name = "ArtifactDigestConflictError";
   }
 }

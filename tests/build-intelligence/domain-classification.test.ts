@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   canonicalizeDomain,
   classifyDomain,
+  qualifyDomain,
 } from "../../src/build-intelligence/domain-classification.js";
 
 describe("canonicalizeDomain", () => {
@@ -31,8 +32,35 @@ describe("classifyDomain", () => {
     expect(classifyDomain("forbes.com")).toBe("publisher");
     expect(classifyDomain("trustpilot.com")).toBe("aggregator");
   });
-  it("RETAINS ambiguous/unknown domains (returns null, never invents certainty)", () => {
+  it("RETAINS ambiguous operating-company domains (returns null, never invents certainty)", () => {
     expect(classifyDomain("alpha-roofing.com")).toBeNull();
     expect(classifyDomain("some-local-business.io")).toBeNull();
+  });
+});
+
+describe("qualifyDomain", () => {
+  it("qualifies a real operating company", () => {
+    expect(qualifyDomain("alpha-roofing.com")).toEqual({ status: "qualified" });
+  });
+  it("excludes directory/social/marketplace/publisher/aggregator", () => {
+    expect(qualifyDomain("yelp.com")).toEqual({ status: "excluded", reason: "directory" });
+    expect(qualifyDomain("facebook.com")).toEqual({ status: "excluded", reason: "social" });
+    expect(qualifyDomain("amazon.com")).toEqual({ status: "excluded", reason: "marketplace" });
+    expect(qualifyDomain("forbes.com")).toEqual({ status: "excluded", reason: "publisher" });
+    expect(qualifyDomain("trustpilot.com")).toEqual({ status: "excluded", reason: "aggregator" });
+  });
+  it("marks platform hosts as UNKNOWN and does not treat them as qualified", () => {
+    expect(qualifyDomain("some-roofer.blogspot.com")).toEqual({
+      status: "unknown",
+      reason: "irrelevant",
+    });
+    expect(qualifyDomain("example.wixsite.com")).toEqual({
+      status: "unknown",
+      reason: "irrelevant",
+    });
+  });
+  it("marks empty/unparseable and IP literals as UNKNOWN", () => {
+    expect(qualifyDomain("")).toEqual({ status: "unknown", reason: "irrelevant" });
+    expect(qualifyDomain("10.0.0.1")).toEqual({ status: "unknown", reason: "irrelevant" });
   });
 });

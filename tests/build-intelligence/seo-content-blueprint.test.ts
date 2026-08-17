@@ -24,35 +24,37 @@ vi.mock("../../src/core/logger.js", () => ({
   createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
-function makeLandscape(): CompetitiveLandscapeArtifact {
+function makeLandscape(
+  overrides: Partial<CompetitiveLandscapeV1> = {},
+): CompetitiveLandscapeArtifact {
+  const donors = Array.from({ length: 10 }, (_, i) => ({
+    domain: i === 0 ? "alpha-roofing.com" : `donor-${i + 1}.com`,
+    aggregate_visibility: 10 - i,
+    observation_ids: [`q1-r${i + 1}`],
+  }));
   const payload: CompetitiveLandscapeV1 = {
     schema: WEBSITE_INTELLIGENCE_SCHEMAS.competitiveLandscape,
     market: { niche: "roofing", country: "United States", language: "English", device: "desktop" },
     query_portfolio: [{ query_id: "q1", query: "metal roofing", intent: "commercial", weight: 1 }],
-    observations: [
-      {
-        observation_id: "q1-r1",
-        query_id: "q1",
-        rank: 1,
-        url: "https://alpha-roofing.com/metal",
-        domain: "alpha-roofing.com",
-        observed_at: "2024-01-01T00:00:00.000Z",
-        source: "dataforseo",
-      },
-    ],
-    domains: [
-      {
-        domain: "alpha-roofing.com",
-        aggregate_visibility: 1,
-        qualifying_query_ids: ["q1"],
-        observation_ids: ["q1-r1"],
-      },
-    ],
-    selected_donors: [
-      { domain: "alpha-roofing.com", aggregate_visibility: 1, observation_ids: ["q1-r1"] },
-    ],
+    observations: donors.map((donor, i) => ({
+      observation_id: donor.observation_ids[0]!,
+      query_id: "q1",
+      rank: i + 1,
+      url: `https://${donor.domain}/`,
+      domain: donor.domain,
+      observed_at: "2024-01-01T00:00:00.000Z",
+      source: "dataforseo" as const,
+    })),
+    domains: donors.map((donor) => ({
+      domain: donor.domain,
+      aggregate_visibility: donor.aggregate_visibility,
+      qualifying_query_ids: ["q1"],
+      observation_ids: donor.observation_ids,
+    })),
+    selected_donors: donors,
     exclusions: [],
     evidence_complete: true,
+    ...overrides,
   };
   return sealIntelligenceArtifact({
     artifact_type: "competitive_landscape",
@@ -190,7 +192,7 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
         },
         { llm, dataForSeo: fakePages },
       ),
-    ).rejects.toThrow(/Unexpected route_id/);
+    ).rejects.toThrow(/ROUTE_SET_MISMATCH|Unexpected route_id/);
   });
 
   it("carries only the CompetitiveLandscape as an input ref (no WebsiteBuildBlueprint dependency)", async () => {
@@ -235,5 +237,103 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
     expect(contract.route_shape.search_intent.journey_stage).toContain("informational");
     expect(contract.route_shape.targets.primary_query).toBeTruthy();
     expect(contract.journey_stage).toBeUndefined();
+  });
+
+  it("rejects a stale/incomplete CompetitiveLandscape", async () => {
+    const { llm } = fakeLlm([blueprintRoute("home", "/")]);
+    const incomplete = makeLandscape({
+      selected_donors: [{ domain: "alpha-roofing.com", aggregate_visibility: 1, observation_ids: ["q1-r1"] }],
+      evidence_complete: false,
+    });
+    await expect(
+      createSEOContentBlueprint(
+        {
+          client_id: "client-1",
+          build_id: "build-1",
+          competitive_landscape: incomplete,
+          routes: requestedRoutes,
+          business_facts: [],
+        },
+        { llm, dataForSeo: fakePages },
+      ),
+    ).rejects.toThrow(/COMPETITIVE_LANDSCAPE_INVALID/);
+  });
+
+  it("rejects a landscape from a different build (stale artifact)", async () => {
+    const { llm } = fakeLlm([blueprintRoute("home", "/")]);
+    const stale = makeLandscape();
+    await expect(
+      createSEOContentBlueprint(
+        {
+          client_id: "client-1",
+          build_id: "other-build",
+          competitive_landscape: stale,
+          routes: requestedRoutes,
+          business_facts: [],
+        },
+        { llm, dataForSeo: fakePages },
+      ),
+    ).rejects.toThrow(/ARTIFACT_LINEAGE_MISMATCH/);
+  });
+
+  it("rejects an unrecognized content slot", async () => {
+    const bad = {
+      ...blueprintRoute("home", "/"),
+      requirements: [
+        {
+          ...blueprintRoute("home", "/").requirements[0]!,
+          target_slots: ["hero_banner"],
+        },
+      ],
+    };
+    const { llm } = fakeLlm([bad as never]);
+    await expect(
+      createSEOContentBlueprint(
+        {
+          client_id: "client-1",
+          build_id: "build-1",
+          competitive_landscape: makeLandscape(),
+          routes: requestedRoutes,
+          business_facts: [],
+        },
+        { llm, dataForSeo: fakePages },
+      ),
+    ).rejects.toThrow(/CONTENT_SLOT_INVALID|Invalid enum/);
+  });
+
+  it("rejects an internal link that is not in the route set", async () => {
+    const withBadLink = {
+      ...blueprintRoute("home", "/"),
+      internal_links: [{ target_route_id: "ghost", purpose: "cross-link" }],
+    };
+    const { llm } = fakeLlm([withBadLink]);
+    await expect(
+      createSEOContentBlueprint(
+        {
+          client_id: "client-1",
+          build_id: "build-1",
+          competitive_landscape: makeLandscape(),
+          routes: requestedRoutes,
+          business_facts: [],
+        },
+        { llm, dataForSeo: fakePages },
+      ),
+    ).rejects.toThrow(/ROUTE_SET_MISMATCH/);
+  });
+
+  it("retains request forbidden claims on every route", async () => {
+    const { llm } = fakeLlm([blueprintRoute("home", "/")]);
+    const artifact = await createSEOContentBlueprint(
+      {
+        client_id: "client-1",
+        build_id: "build-1",
+        competitive_landscape: makeLandscape(),
+        routes: requestedRoutes,
+        business_facts: [],
+        seo_config: { forbidden_claims: ["decades of experience"] },
+      },
+      { llm, dataForSeo: fakePages },
+    );
+    expect(artifact.payload.routes[0]!.forbidden_claims).toContain("decades of experience");
   });
 });
