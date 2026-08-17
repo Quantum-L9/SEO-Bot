@@ -77,7 +77,10 @@ export type StructuredContentReceiptLeg =
       route_parity: boolean;
       unsupported_claim_count: number;
       failed_requirement_count: number;
+      /** Total repairs across the package — at most one per repaired route. */
       repair_attempts: number;
+      /** How many distinct routes needed a repair. */
+      repaired_route_count: number;
       router_only_llm: boolean;
       direct_provider_calls: number;
     };
@@ -192,9 +195,16 @@ export function validateIntegrityReceipt(
         `structured_content.failed_requirement_count is ${content.failed_requirement_count}, must be 0`,
       );
     }
-    if (content.repair_attempts > MAX_CONTENT_REPAIR_ATTEMPTS) {
+    // The bound is per route, not per package: a five-route package may legally
+    // repair five routes, but never any route twice.
+    if (content.repaired_route_count > content.contract_route_count) {
       contentViolations.push(
-        `structured_content.repair_attempts is ${content.repair_attempts}, at most ${MAX_CONTENT_REPAIR_ATTEMPTS} is permitted`,
+        `structured_content.repaired_route_count is ${content.repaired_route_count}, more than the ${content.contract_route_count} route(s) in the contract`,
+      );
+    }
+    if (content.repair_attempts > content.repaired_route_count * MAX_CONTENT_REPAIR_ATTEMPTS) {
+      contentViolations.push(
+        `structured_content.repair_attempts is ${content.repair_attempts} across ${content.repaired_route_count} repaired route(s); at most ${MAX_CONTENT_REPAIR_ATTEMPTS} per route is permitted`,
       );
     }
     if (!content.router_only_llm || content.direct_provider_calls !== 0) {

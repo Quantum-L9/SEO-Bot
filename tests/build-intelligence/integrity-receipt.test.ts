@@ -82,6 +82,7 @@ function passingReceipt(): SeoBuildIntelligenceIntegrityReceipt {
       unsupported_claim_count: 0,
       failed_requirement_count: 0,
       repair_attempts: 1,
+      repaired_route_count: 1,
       router_only_llm: true,
       direct_provider_calls: 0,
     },
@@ -177,10 +178,31 @@ describe("SeoBuildIntelligenceIntegrityReceipt — PASS requires all three legs"
     expect(result.violations.join(" ")).toMatch(/unsupported_claim_count/);
   });
 
-  it("fails on more than one content repair attempt", () => {
+  it("fails when a route was repaired more than once", () => {
     const receipt = passingReceipt();
     if (receipt.structured_content.executed) {
       receipt.structured_content.repair_attempts = 2;
+      receipt.structured_content.repaired_route_count = 1;
+    }
+    const result = validateIntegrityReceipt(receipt);
+    expect(result.verdict).toBe("FAIL");
+    expect(result.violations.join(" ")).toMatch(/at most 1 per route/);
+  });
+
+  it("allows one repair per route across a multi-route package", () => {
+    const receipt = passingReceipt();
+    if (receipt.structured_content.executed) {
+      receipt.structured_content.repair_attempts = 3;
+      receipt.structured_content.repaired_route_count = 3;
+    }
+    expect(validateIntegrityReceipt(receipt).verdict).toBe("PASS");
+  });
+
+  it("fails when more routes were repaired than the contract declares", () => {
+    const receipt = passingReceipt();
+    if (receipt.structured_content.executed) {
+      receipt.structured_content.repaired_route_count = 9;
+      receipt.structured_content.repair_attempts = 9;
     }
     expect(validateIntegrityReceipt(receipt).verdict).toBe("FAIL");
   });

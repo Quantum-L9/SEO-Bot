@@ -90,10 +90,39 @@ export class ArtifactLineageMismatchError extends Error {
   }
 }
 
+/**
+ * Measured evidence about the run, for the integrity receipt. `repair_attempts`
+ * is COUNTED, never inferred — a sealed package always has a clean validation
+ * block, so the block itself cannot tell you whether a repair happened.
+ */
+export interface StructuredContentEvidence {
+  route_count: number;
+  generation_calls: number;
+  validation_calls: number;
+  repair_attempts: number;
+  repaired_route_ids: string[];
+}
+
+export interface StructuredContentResult {
+  artifact: StructuredContentPackageArtifact;
+  evidence: StructuredContentEvidence;
+}
+
+/**
+ * Produce the sealed package. Use `createStructuredContentPackageWithEvidence`
+ * when the caller also needs measured run evidence (the seam proof does).
+ */
 export async function createStructuredContentPackage(
   request: StructuredContentRequest,
   deps: { llm?: LlmService } = {},
 ): Promise<StructuredContentPackageArtifact> {
+  return (await createStructuredContentPackageWithEvidence(request, deps)).artifact;
+}
+
+export async function createStructuredContentPackageWithEvidence(
+  request: StructuredContentRequest,
+  deps: { llm?: LlmService } = {},
+): Promise<StructuredContentResult> {
   // ── Lineage first: reject a tampered/invalid/foreign contract BEFORE any
   //    LLM spend. Integrity, identity, and structure are all checked here.
   assertContractUsable(request);
@@ -106,12 +135,16 @@ export async function createStructuredContentPackage(
 
   const routes: StructuredContentRoute[] = [];
   const verdicts: RouteValidationVerdict[] = [];
+  const repairedRouteIds: string[] = [];
+  let generationCalls = 0;
+  let validationCalls = 0;
 
   for (const contractRoute of contract.routes) {
     const blueprintRoute = blueprintRoutes.get(contractRoute.route_id);
 
     // 1. Generate prose for this route only.
     let generated = await generateRoute(llm, request, contractRoute);
+    generationCalls += 1;
 
     // 2. Validate (deterministic then semantic).
     let verdict = await validateRoute(generated, contractRoute, {
@@ -120,9 +153,11 @@ export async function createStructuredContentPackage(
       blueprintRoute,
       llm,
     });
+    validationCalls += 1;
 
     // 3. ONE bounded repair, scoped to this route + its failed requirements.
     if (!routePassed(verdict)) {
+      repairedRouteIds.push(contractRoute.route_id);
       logger.warn(
         {
           routeId: contractRoute.route_id,
@@ -135,12 +170,14 @@ export async function createStructuredContentPackage(
         failed_requirements: verdict.failed_requirements,
         unsupported_claims: verdict.unsupported_claims,
       });
+      generationCalls += 1;
       verdict = await validateRoute(generated, contractRoute, {
         clientId: request.client_id,
         buildId: request.build_id,
         blueprintRoute,
         llm,
       });
+      validationCalls += 1;
 
       // 4. Second failure is terminal. There is no second repair.
       if (!routePassed(verdict)) {
@@ -189,11 +226,22 @@ export async function createStructuredContentPackage(
       routes: routes.length,
       pageContentContractRef: payload.page_content_contract_ref.artifact_id,
       artifactId: artifact.artifact_id,
+      repairedRoutes: repairedRouteIds.length,
     },
     "StructuredContentPackage sealed",
   );
 
-  return artifact;
+  return {
+    artifact,
+    evidence: {
+      route_count: routes.length,
+      generation_calls: generationCalls,
+      validation_calls: validationCalls,
+      // Bounded at one per route by construction; a second failure is terminal.
+      repair_attempts: repairedRouteIds.length,
+      repaired_route_ids: repairedRouteIds,
+    },
+  };
 }
 
 /**

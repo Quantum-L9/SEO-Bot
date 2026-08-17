@@ -18,6 +18,7 @@ import type { ContentValidationVerdict } from "../../src/build-intelligence/sche
 import {
   ContentRequirementUnsatisfiedError,
   createStructuredContentPackage,
+  createStructuredContentPackageWithEvidence,
 } from "../../src/build-intelligence/structured-content.js";
 import type { LlmService } from "../../src/services/llm.js";
 
@@ -228,6 +229,29 @@ describe("StructuredContentPackage — lineage, identity, bounded repair", () =>
       ),
     ).rejects.toBeInstanceOf(ContentRequirementUnsatisfiedError);
     expect(counts.gen).toBe(2); // no unbounded retry beyond the single repair
+  });
+
+  it("MEASURES the repair count rather than inferring it from the sealed block", async () => {
+    const clean = fakeLlm([pass]);
+    const noRepair = await createStructuredContentPackageWithEvidence(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+      { llm: clean.llm },
+    );
+    expect(noRepair.evidence.repair_attempts).toBe(0);
+    expect(noRepair.evidence.generation_calls).toBe(1);
+
+    const repaired = fakeLlm([fail, pass]);
+    const withRepair = await createStructuredContentPackageWithEvidence(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+      { llm: repaired.llm },
+    );
+    expect(withRepair.evidence.repair_attempts).toBe(1);
+    expect(withRepair.evidence.repaired_route_ids).toEqual(["home"]);
+    expect(withRepair.evidence.generation_calls).toBe(2);
+    expect(withRepair.evidence.validation_calls).toBe(2);
+    // Both packages seal with an identical clean validation block — which is
+    // exactly why the count cannot be read back out of it.
+    expect(withRepair.artifact.payload.validation).toEqual(noRepair.artifact.payload.validation);
   });
 
   it("scopes the repair to the failed dimensions only", async () => {

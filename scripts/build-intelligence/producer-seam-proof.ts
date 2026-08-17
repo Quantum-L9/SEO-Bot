@@ -51,7 +51,7 @@ import {
   validateIntegrityReceipt,
 } from "../../src/build-intelligence/integrity-receipt.js";
 import { createSEOContentBlueprint } from "../../src/build-intelligence/seo-content-blueprint.js";
-import { createStructuredContentPackage } from "../../src/build-intelligence/structured-content.js";
+import { createStructuredContentPackageWithEvidence } from "../../src/build-intelligence/structured-content.js";
 
 const require = createRequire(import.meta.url);
 
@@ -148,12 +148,13 @@ async function main(): Promise<number> {
     const contract = JSON.parse(
       readFileSync(resolve(pccPath), "utf8"),
     ) as PageContentContractArtifact;
-    const pkg = await createStructuredContentPackage({
-      client_id: config.client_id,
-      build_id: config.build_id,
-      page_content_contract: contract,
-      seo_content_blueprint: blueprint,
-    });
+    const { artifact: pkg, evidence: contentEvidence } =
+      await createStructuredContentPackageWithEvidence({
+        client_id: config.client_id,
+        build_id: config.build_id,
+        page_content_contract: contract,
+        seo_content_blueprint: blueprint,
+      });
     structuredContent = {
       executed: true,
       page_content_contract_ref: refForArtifact(contract),
@@ -165,13 +166,16 @@ async function main(): Promise<number> {
       ),
       unsupported_claim_count: pkg.payload.validation.unsupported_claims.length,
       failed_requirement_count: pkg.payload.validation.failed_requirements.length,
-      // The producer permits at most one; a second failure is terminal, so a
-      // sealed package is proof the bound held.
-      repair_attempts: pkg.payload.validation.failed_requirements.length > 0 ? 1 : 0,
+      // Counted during the run, not inferred from the sealed validation block.
+      repair_attempts: contentEvidence.repair_attempts,
+      repaired_route_count: contentEvidence.repaired_route_ids.length,
       router_only_llm: true,
       direct_provider_calls: 0,
     };
-    console.log(`[seam-proof] STEP 3 ok — ${pkg.payload.routes.length} routes`);
+    console.log(
+      `[seam-proof] STEP 3 ok — ${pkg.payload.routes.length} routes, ` +
+        `${contentEvidence.repair_attempts} repair(s)`,
+    );
   }
 
   const receipt: SeoBuildIntelligenceIntegrityReceipt = {
