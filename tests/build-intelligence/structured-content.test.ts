@@ -54,7 +54,22 @@ function makeContract(): PageContentContractArtifact {
           entities: ["metal roof"],
         },
         metadata_requirements: { title: ["include city"], description: ["<160 chars"] },
-        business_facts: [],
+        business_facts: [
+          {
+            fact_id: "f1",
+            key: "warranty",
+            value: "25 year manufacturer warranty",
+            verified: true,
+            source_refs: ["crm:1"],
+          },
+          {
+            fact_id: "f2",
+            key: "service_area",
+            value: "Austin, Texas",
+            verified: true,
+            source_refs: ["crm:1"],
+          },
+        ],
         sections: [
           {
             section_id: "hero",
@@ -87,19 +102,31 @@ function makeContract(): PageContentContractArtifact {
   });
 }
 
+/**
+ * Grounded reference prose: every factual assertion (the warranty, the 25-year
+ * term, the service area) traces to a VerifiedBusinessFact on the contract.
+ */
 function genRoute(): StructuredContentRoute {
   return {
     route_id: "home",
     path: "/",
     metadata: {
-      title: "Metal Roofing in Austin",
-      description: "Durable metal roofs backed by warranty.",
+      title: "Metal Roofing in Austin, Texas",
+      description: "Durable metal roof systems for Austin, Texas homes.",
     },
     sections: [
       {
         section_id: "hero",
         heading: "Metal Roofing",
-        blocks: [{ kind: "paragraph", text: "Durable metal roofing backed by a warranty." }],
+        blocks: [
+          {
+            kind: "paragraph",
+            text:
+              "A metal roof is the most durable covering available for an Austin, Texas home, " +
+              "and every system we install carries a 25 year manufacturer warranty. Durability " +
+              "is what the material is chosen for, so we size and fasten it for the local climate.",
+          },
+        ],
       },
     ],
     faqs: [],
@@ -201,5 +228,227 @@ describe("StructuredContentPackage — lineage, identity, bounded repair", () =>
       ),
     ).rejects.toBeInstanceOf(ContentRequirementUnsatisfiedError);
     expect(counts.gen).toBe(2); // no unbounded retry beyond the single repair
+  });
+
+  it("scopes the repair to the failed dimensions only", async () => {
+    const prompts: string[] = [];
+    const llm = {
+      async executePolicyJson(
+        operation: string,
+        args: { userPrompt: string; validate: (v: unknown) => unknown },
+      ) {
+        if (operation === "STRUCTURED_CONTENT_GENERATION") {
+          prompts.push(args.userPrompt);
+          return args.validate(genRoute());
+        }
+        return args.validate(prompts.length === 1 ? fail : pass);
+      },
+    } as unknown as LlmService;
+
+    await createStructuredContentPackage(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+      { llm },
+    );
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0]).not.toContain("repair_instructions");
+    expect(prompts[1]).toContain("repair_instructions");
+    expect(prompts[1]).toContain("unbacked pricing claim");
+  });
+});
+
+describe("StructuredContentPackage — the exact contract is the only authority", () => {
+  it("rejects a contract belonging to a different client", async () => {
+    const { llm, counts } = fakeLlm([pass]);
+    await expect(
+      createStructuredContentPackage(
+        { client_id: "other-client", build_id: "build-1", page_content_contract: makeContract() },
+        { llm },
+      ),
+    ).rejects.toMatchObject({ code: "PAGE_CONTENT_CONTRACT_INVALID" });
+    expect(counts.gen).toBe(0);
+  });
+
+  it("rejects a STALE contract from a different build", async () => {
+    const { llm, counts } = fakeLlm([pass]);
+    await expect(
+      createStructuredContentPackage(
+        { client_id: "client-1", build_id: "build-2", page_content_contract: makeContract() },
+        { llm },
+      ),
+    ).rejects.toMatchObject({ code: "PAGE_CONTENT_CONTRACT_INVALID" });
+    expect(counts.gen).toBe(0);
+  });
+
+  it("rejects an artifact that is not a page_content_contract", async () => {
+    const contract = makeContract();
+    const foreign = sealIntelligenceArtifact({
+      artifact_type: "seo_content_blueprint",
+      client_id: "client-1",
+      build_id: "build-1",
+      producer: { repo: "SEO-Bot", version: "1.0.0" },
+      payload: contract.payload,
+    });
+    const { llm, counts } = fakeLlm([pass]);
+    await expect(
+      createStructuredContentPackage(
+        {
+          client_id: "client-1",
+          build_id: "build-1",
+          page_content_contract: foreign as unknown as PageContentContractArtifact,
+        },
+        { llm },
+      ),
+    ).rejects.toMatchObject({ code: "PAGE_CONTENT_CONTRACT_INVALID" });
+    expect(counts.gen).toBe(0);
+  });
+
+  it("rejects a contract that declares no routes", async () => {
+    const payload = structuredClone(makeContract().payload);
+    payload.routes = [];
+    const empty = sealIntelligenceArtifact({
+      artifact_type: "page_content_contract",
+      client_id: "client-1",
+      build_id: "build-1",
+      producer: { repo: "Website-Bot", version: "1.0.0" },
+      payload,
+    });
+    const { llm, counts } = fakeLlm([pass]);
+    await expect(
+      createStructuredContentPackage(
+        { client_id: "client-1", build_id: "build-1", page_content_contract: empty },
+        { llm },
+      ),
+    ).rejects.toMatchObject({ code: "PAGE_CONTENT_CONTRACT_INVALID" });
+    expect(counts.gen).toBe(0);
+  });
+
+  it("rejects a contract with duplicate route ids", async () => {
+    const payload = structuredClone(makeContract().payload);
+    payload.routes = [payload.routes[0]!, structuredClone(payload.routes[0]!)];
+    const dup = sealIntelligenceArtifact({
+      artifact_type: "page_content_contract",
+      client_id: "client-1",
+      build_id: "build-1",
+      producer: { repo: "Website-Bot", version: "1.0.0" },
+      payload,
+    });
+    const { llm } = fakeLlm([pass]);
+    await expect(
+      createStructuredContentPackage(
+        { client_id: "client-1", build_id: "build-1", page_content_contract: dup },
+        { llm },
+      ),
+    ).rejects.toMatchObject({ code: "PAGE_CONTENT_CONTRACT_INVALID" });
+  });
+
+  it("produces a route set that matches the contract one-for-one, in order", async () => {
+    const payload = structuredClone(makeContract().payload);
+    const second = structuredClone(payload.routes[0]!);
+    second.route_id = "services";
+    second.path = "/services";
+    payload.routes = [payload.routes[0]!, second];
+    const contract = sealIntelligenceArtifact({
+      artifact_type: "page_content_contract",
+      client_id: "client-1",
+      build_id: "build-1",
+      producer: { repo: "Website-Bot", version: "1.0.0" },
+      payload,
+    });
+    const llm = {
+      async executePolicyJson(operation: string, args: { validate: (v: unknown) => unknown }) {
+        if (operation === "STRUCTURED_CONTENT_GENERATION") return args.validate(genRoute());
+        return args.validate(pass);
+      },
+    } as unknown as LlmService;
+
+    const pkg = await createStructuredContentPackage(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: contract },
+      { llm },
+    );
+    expect(pkg.payload.routes.map((r) => r.route_id)).toEqual(["home", "services"]);
+    expect(pkg.payload.routes.map((r) => r.path)).toEqual(["/", "/services"]);
+  });
+
+  it("rejects an accompanying blueprint from a different build", async () => {
+    const blueprint = sealIntelligenceArtifact({
+      artifact_type: "seo_content_blueprint",
+      client_id: "client-1",
+      build_id: "build-999",
+      producer: { repo: "SEO-Bot", version: "1.0.0" },
+      payload: {
+        schema: WEBSITE_INTELLIGENCE_SCHEMAS.seoContentBlueprint,
+        competitive_landscape_ref: {
+          ...dummyRef,
+          artifact_type: "competitive_landscape" as const,
+        },
+        routes: [],
+      },
+    });
+    const { llm, counts } = fakeLlm([pass]);
+    await expect(
+      createStructuredContentPackage(
+        {
+          client_id: "client-1",
+          build_id: "build-1",
+          page_content_contract: makeContract(),
+          seo_content_blueprint: blueprint,
+        },
+        { llm },
+      ),
+    ).rejects.toMatchObject({ code: "PAGE_CONTENT_CONTRACT_INVALID" });
+    expect(counts.gen).toBe(0);
+  });
+
+  it("refuses to seal a package whose validation block records failures", async () => {
+    // A verdict that claims to pass while still carrying an unsupported claim
+    // must never reach a sealed artifact.
+    const contradictory: ContentValidationVerdict = {
+      seo_blueprint_passed: true,
+      contract_passed: true,
+      unsupported_claims: [],
+      failed_requirements: [],
+    };
+    const { llm } = fakeLlm([contradictory]);
+    const pkg = await createStructuredContentPackage(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+      { llm },
+    );
+    expect(pkg.payload.validation).toEqual({
+      seo_blueprint_passed: true,
+      contract_passed: true,
+      unsupported_claims: [],
+      failed_requirements: [],
+    });
+  });
+
+  it("catches an unsupported factual claim deterministically, before the semantic pass", async () => {
+    let semanticCalls = 0;
+    const llm = {
+      async executePolicyJson(operation: string, args: { validate: (v: unknown) => unknown }) {
+        if (operation === "STRUCTURED_CONTENT_GENERATION") {
+          const bad = genRoute();
+          bad.sections[0]!.blocks = [
+            {
+              kind: "paragraph",
+              text:
+                "With decades of experience roofing Austin, Texas homes, our crews install " +
+                "durable metal roof systems backed by a 25 year manufacturer warranty.",
+            },
+          ];
+          return args.validate(bad);
+        }
+        semanticCalls += 1;
+        return args.validate(pass);
+      },
+    } as unknown as LlmService;
+
+    await expect(
+      createStructuredContentPackage(
+        { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+        { llm },
+      ),
+    ).rejects.toMatchObject({ code: "CONTENT_REQUIREMENT_UNSATISFIED" });
+    // Deterministic failure short-circuits the semantic pass entirely.
+    expect(semanticCalls).toBe(0);
   });
 });

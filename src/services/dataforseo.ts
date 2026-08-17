@@ -57,6 +57,40 @@ export interface OrganicSerpResult {
   items: OrganicSerpItem[];
 }
 
+/**
+ * Transport / account / top-level API failure. The provider could not be reached
+ * or refused the request — there is no SERP evidence, and none may be inferred.
+ */
+export class DataForSeoUnavailableError extends Error {
+  readonly code = "DATAFORSEO_UNAVAILABLE";
+  constructor(message: string) {
+    super(message);
+    this.name = "DataForSeoUnavailableError";
+  }
+}
+
+/**
+ * The request reached DataForSEO but the individual task failed (bad location,
+ * quota, provider-side error). Distinct from a task that legitimately returned
+ * zero organic results — that is a VALID EMPTY RESULT and returns normally.
+ */
+export class DataForSeoTaskError extends Error {
+  readonly code = "DATAFORSEO_TASK_ERROR";
+  constructor(message: string) {
+    super(message);
+    this.name = "DataForSeoTaskError";
+  }
+}
+
+/** The task succeeded but its payload is not usable ranking evidence. */
+export class SerpEvidenceInvalidError extends Error {
+  readonly code = "SERP_EVIDENCE_INVALID";
+  constructor(message: string) {
+    super(message);
+    this.name = "SerpEvidenceInvalidError";
+  }
+}
+
 export class DataForSeoClient {
   private readonly baseUrl = "https://api.dataforseo.com/v3";
   private readonly auth: string;
@@ -69,16 +103,26 @@ export class DataForSeoClient {
   }
 
   private async request(endpoint: string, data: any[]): Promise<any> {
-    const response = await axios.post(`${this.baseUrl}${endpoint}`, data, {
-      headers: {
-        Authorization: `Basic ${this.auth}`,
-        "Content-Type": "application/json",
-      },
-      timeout: 30000,
-    });
+    let response: { data: any };
+    try {
+      response = await axios.post(`${this.baseUrl}${endpoint}`, data, {
+        headers: {
+          Authorization: `Basic ${this.auth}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 30000,
+      });
+    } catch (error) {
+      // Transport, timeout, auth, and non-2xx responses are all "no evidence".
+      throw new DataForSeoUnavailableError(
+        `DataForSEO request to ${endpoint} failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
 
-    if (response.data.status_code !== 20000) {
-      throw new Error(`DataForSEO error: ${response.data.status_message}`);
+    if (response.data?.status_code !== 20000) {
+      throw new DataForSeoUnavailableError(
+        `DataForSEO error: ${response.data?.status_message ?? "unknown"} (status ${response.data?.status_code ?? "unknown"})`,
+      );
     }
 
     return response.data;
@@ -114,33 +158,58 @@ export class DataForSeoClient {
     // organic items — a real provider error must not masquerade as "no results".
     const taskContainer = result.tasks?.[0];
     if (taskContainer?.status_code !== undefined && taskContainer.status_code !== 20000) {
-      throw new Error(
+      throw new DataForSeoTaskError(
         `DataForSEO task error: ${taskContainer.status_message ?? "unknown"} (status ${taskContainer.status_code})`,
       );
     }
     if (!Array.isArray(taskContainer?.result) || taskContainer.result.length === 0) {
-      throw new Error(
+      throw new DataForSeoTaskError(
         `DataForSEO task error: ${taskContainer?.status_message ?? "no result returned"} (status ${taskContainer?.status_code ?? "unknown"})`,
       );
     }
     const task = taskContainer.result[0];
-    const rawItems = task?.items || [];
-    const serpFeatures: string[] = task?.item_types || [];
+    // A task that ran and found nothing returns `items: []` (or a null items
+    // field) — that is a VALID EMPTY RESULT, not a provider failure. Anything
+    // else in the items position is a malformed payload and fails closed.
+    const rawItems = task?.items ?? [];
+    if (!Array.isArray(rawItems)) {
+      throw new SerpEvidenceInvalidError(
+        `DataForSEO returned a malformed items payload for "${params.keyword}" (${typeof task?.items})`,
+      );
+    }
+    const serpFeatures: string[] = Array.isArray(task?.item_types) ? task.item_types : [];
     const observedAt = normalizeSerpDatetime(task?.datetime) ?? taskContainer.time ?? "";
 
     const items: OrganicSerpItem[] = [];
     for (const item of rawItems) {
+      if (!item || typeof item !== "object") {
+        throw new SerpEvidenceInvalidError(
+          `DataForSEO returned a malformed SERP item for "${params.keyword}"`,
+        );
+      }
       if (item.type !== "organic") continue;
-      if (typeof item.url !== "string") continue;
+      if (typeof item.url !== "string") {
+        throw new SerpEvidenceInvalidError(
+          `DataForSEO organic item for "${params.keyword}" is missing a URL`,
+        );
+      }
+      const rank = item.rank_group ?? item.rank_absolute;
+      if (typeof rank !== "number" || !Number.isFinite(rank) || rank < 1) {
+        throw new SerpEvidenceInvalidError(
+          `DataForSEO organic item for "${params.keyword}" has no usable rank (${String(rank)})`,
+        );
+      }
       let domain: string;
       try {
         domain = new URL(item.url).hostname.replace("www.", "");
       } catch {
-        continue; // unparseable URL cannot be ranking truth
+        throw new SerpEvidenceInvalidError(
+          `DataForSEO organic item for "${params.keyword}" has an unparseable URL: ${item.url}`,
+        );
       }
       items.push({
         rankAbsolute: item.rank_absolute,
-        rankGroup: item.rank_group ?? item.rank_absolute,
+        rankGroup: rank,
         url: item.url,
         domain,
         title: item.title || "",

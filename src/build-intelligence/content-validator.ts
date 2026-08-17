@@ -27,6 +27,7 @@ import type {
   StructuredContentRoute,
 } from "@quantum-l9/bot-interop";
 import { getLlmService, type LlmService } from "../services/llm.js";
+import { checkRouteGrounding } from "./claim-grounding.js";
 import { contentValidationVerdictSchema } from "./schema-guards.js";
 
 export interface RouteValidationVerdict {
@@ -44,6 +45,31 @@ export interface RouteValidationVerdict {
  * defence-in-depth backstop even though generation already enforces it.
  */
 export function validateRouteDeterministic(
+  route: StructuredContentRoute,
+  contractRoute: PageContentContractRoute,
+): string[] {
+  return deterministicVerdict(route, contractRoute).failed_requirements;
+}
+
+/**
+ * Full deterministic verdict for one route: structural contract checks plus
+ * zero-token claim grounding. Unsupported factual claims are reported
+ * separately from requirement failures because the sealed `validation` block
+ * and the bounded repair both distinguish them.
+ */
+export function deterministicVerdict(
+  route: StructuredContentRoute,
+  contractRoute: PageContentContractRoute,
+): { failed_requirements: string[]; unsupported_claims: string[] } {
+  const failures = structuralFailures(route, contractRoute);
+  const grounding = checkRouteGrounding(route, contractRoute);
+  return {
+    failed_requirements: [...failures, ...grounding.failures],
+    unsupported_claims: grounding.unsupportedClaims,
+  };
+}
+
+function structuralFailures(
   route: StructuredContentRoute,
   contractRoute: PageContentContractRoute,
 ): string[] {
@@ -159,18 +185,21 @@ export async function validateRoute(
     llm?: LlmService;
   },
 ): Promise<RouteValidationVerdict> {
-  const deterministicFailures = validateRouteDeterministic(route, contractRoute);
-  if (deterministicFailures.length > 0) {
+  const deterministic = deterministicVerdict(route, contractRoute);
+  if (deterministic.failed_requirements.length > 0 || deterministic.unsupported_claims.length > 0) {
     return {
       route_id: contractRoute.route_id,
       contract_passed: false,
       seo_blueprint_passed: false,
-      unsupported_claims: [],
-      failed_requirements: deterministicFailures,
+      unsupported_claims: deterministic.unsupported_claims,
+      failed_requirements: deterministic.failed_requirements,
     };
   }
 
   const verdict = await validateRouteSemantics(route, contractRoute, args);
+  // Semantic validation is secondary authority: it may only ADD failures, never
+  // clear a deterministic one (there are none left at this point) and never
+  // turn a failing verdict into a pass.
   return {
     route_id: contractRoute.route_id,
     contract_passed: verdict.contract_passed,

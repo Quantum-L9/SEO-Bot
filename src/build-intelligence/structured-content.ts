@@ -30,6 +30,7 @@ import {
   type StructuredContentPackageArtifact,
   type StructuredContentPackageV1,
   type StructuredContentRoute,
+  sameArtifactRef,
   sealIntelligenceArtifact,
   WEBSITE_INTELLIGENCE_SCHEMAS,
 } from "@quantum-l9/bot-interop";
@@ -55,9 +56,37 @@ export class ContentRequirementUnsatisfiedError extends Error {
   constructor(
     message: string,
     readonly failedRequirements: string[],
+    readonly unsupportedClaims: string[] = [],
   ) {
     super(message);
     this.name = "ContentRequirementUnsatisfiedError";
+  }
+}
+
+/** The supplied PageContentContract is not a usable generation authority. */
+export class PageContentContractInvalidError extends Error {
+  readonly code = "PAGE_CONTENT_CONTRACT_INVALID";
+  constructor(message: string) {
+    super(message);
+    this.name = "PageContentContractInvalidError";
+  }
+}
+
+/** The sealed package's route set does not exactly match the contract's. */
+export class StructuredContentRouteMismatchError extends Error {
+  readonly code = "STRUCTURED_CONTENT_ROUTE_MISMATCH";
+  constructor(message: string) {
+    super(message);
+    this.name = "StructuredContentRouteMismatchError";
+  }
+}
+
+/** The sealed package does not reference the exact contract it was built from. */
+export class ArtifactLineageMismatchError extends Error {
+  readonly code = "ARTIFACT_LINEAGE_MISMATCH";
+  constructor(message: string) {
+    super(message);
+    this.name = "ArtifactLineageMismatchError";
   }
 }
 
@@ -65,8 +94,9 @@ export async function createStructuredContentPackage(
   request: StructuredContentRequest,
   deps: { llm?: LlmService } = {},
 ): Promise<StructuredContentPackageArtifact> {
-  // ── Lineage first: reject a tampered/invalid contract BEFORE any LLM spend ────
-  assertIntelligenceArtifactIntegrity(request.page_content_contract);
+  // ── Lineage first: reject a tampered/invalid/foreign contract BEFORE any
+  //    LLM spend. Integrity, identity, and structure are all checked here.
+  assertContractUsable(request);
 
   const llm = deps.llm ?? getLlmService();
   const contract = request.page_content_contract.payload;
@@ -112,11 +142,12 @@ export async function createStructuredContentPackage(
         llm,
       });
 
-      // 4. Second failure is terminal.
+      // 4. Second failure is terminal. There is no second repair.
       if (!routePassed(verdict)) {
         throw new ContentRequirementUnsatisfiedError(
           `Route "${contractRoute.route_id}" still fails validation after one bounded repair`,
           verdict.failed_requirements,
+          verdict.unsupported_claims,
         );
       }
     }
@@ -132,19 +163,22 @@ export async function createStructuredContentPackage(
     failed_requirements: dedupe(verdicts.flatMap((verdict) => verdict.failed_requirements)),
   };
 
+  const contractRef = refForArtifact(request.page_content_contract);
   const payload: StructuredContentPackageV1 = {
     schema: WEBSITE_INTELLIGENCE_SCHEMAS.structuredContentPackage,
-    page_content_contract_ref: refForArtifact(request.page_content_contract),
+    page_content_contract_ref: contractRef,
     routes,
     validation,
   };
+
+  assertPackageLineage(payload, contract.routes, contractRef);
 
   const artifact = sealIntelligenceArtifact({
     artifact_type: "structured_content_package",
     client_id: request.client_id,
     build_id: request.build_id,
     producer: PRODUCER,
-    input_refs: [refForArtifact(request.page_content_contract)],
+    input_refs: [contractRef],
     payload,
   });
 
@@ -160,6 +194,121 @@ export async function createStructuredContentPackage(
   );
 
   return artifact;
+}
+
+/**
+ * The exact supplied PageContentContract is the ONLY generation authority.
+ * Everything that could make it the wrong authority is rejected here, before a
+ * single token is spent: tampered integrity, wrong artifact type, wrong schema,
+ * a different client, a different build, or an unusable route structure.
+ */
+function assertContractUsable(request: StructuredContentRequest): void {
+  const artifact = request.page_content_contract;
+  // Throws INTEL_ARTIFACT_HASH_MISMATCH / INTEL_ARTIFACT_SCHEMA_MISMATCH.
+  assertIntelligenceArtifactIntegrity(artifact);
+
+  if (artifact.artifact_type !== "page_content_contract") {
+    throw new PageContentContractInvalidError(
+      `expected a page_content_contract artifact, received ${artifact.artifact_type}`,
+    );
+  }
+  if (artifact.payload?.schema !== WEBSITE_INTELLIGENCE_SCHEMAS.pageContentContract) {
+    throw new PageContentContractInvalidError(
+      `unexpected PageContentContract payload schema: ${String(artifact.payload?.schema)}`,
+    );
+  }
+  if (artifact.client_id !== request.client_id) {
+    throw new PageContentContractInvalidError(
+      `contract client_id "${artifact.client_id}" does not match request client_id "${request.client_id}"`,
+    );
+  }
+  if (artifact.build_id !== request.build_id) {
+    throw new PageContentContractInvalidError(
+      `contract build_id "${artifact.build_id}" does not match request build_id "${request.build_id}"`,
+    );
+  }
+
+  const routes = artifact.payload.routes;
+  if (!Array.isArray(routes) || routes.length === 0) {
+    throw new PageContentContractInvalidError("contract declares no routes");
+  }
+  const seenRouteIds = new Set<string>();
+  for (const route of routes) {
+    if (seenRouteIds.has(route.route_id)) {
+      throw new PageContentContractInvalidError(
+        `duplicate route_id in contract: ${route.route_id}`,
+      );
+    }
+    seenRouteIds.add(route.route_id);
+    if (!Array.isArray(route.sections) || route.sections.length === 0) {
+      throw new PageContentContractInvalidError(
+        `contract route "${route.route_id}" declares no sections`,
+      );
+    }
+    const seenSectionIds = new Set<string>();
+    for (const section of route.sections) {
+      if (seenSectionIds.has(section.section_id)) {
+        throw new PageContentContractInvalidError(
+          `duplicate section_id "${section.section_id}" in contract route "${route.route_id}"`,
+        );
+      }
+      seenSectionIds.add(section.section_id);
+    }
+  }
+
+  // An accompanying blueprint, when supplied, must belong to the same build.
+  const blueprint = request.seo_content_blueprint;
+  if (blueprint && blueprint.build_id !== request.build_id) {
+    throw new PageContentContractInvalidError(
+      `seo_content_blueprint build_id "${blueprint.build_id}" does not match request build_id "${request.build_id}"`,
+    );
+  }
+}
+
+/**
+ * Website-Bot must be able to prove the package belongs to exactly the contract
+ * it requested: identical ref, and a route set that matches one-for-one in the
+ * contract's own order — no missing route, no extra route, no reordering.
+ */
+function assertPackageLineage(
+  payload: StructuredContentPackageV1,
+  contractRoutes: PageContentContractRoute[],
+  contractRef: ReturnType<typeof refForArtifact>,
+): void {
+  if (!sameArtifactRef(payload.page_content_contract_ref, contractRef)) {
+    throw new ArtifactLineageMismatchError(
+      "Sealed package does not reference the exact PageContentContract supplied in the request",
+    );
+  }
+  if (payload.routes.length !== contractRoutes.length) {
+    throw new StructuredContentRouteMismatchError(
+      `package has ${payload.routes.length} route(s); contract requires ${contractRoutes.length}`,
+    );
+  }
+  for (let i = 0; i < contractRoutes.length; i++) {
+    const expected = contractRoutes[i]!;
+    const actual = payload.routes[i]!;
+    if (actual.route_id !== expected.route_id) {
+      throw new StructuredContentRouteMismatchError(
+        `route ${i} is "${actual.route_id}"; contract requires "${expected.route_id}"`,
+      );
+    }
+    if (actual.path !== expected.path) {
+      throw new StructuredContentRouteMismatchError(
+        `route "${expected.route_id}" path "${actual.path}" does not match contract path "${expected.path}"`,
+      );
+    }
+  }
+  if (
+    !payload.validation.contract_passed ||
+    !payload.validation.seo_blueprint_passed ||
+    payload.validation.failed_requirements.length > 0 ||
+    payload.validation.unsupported_claims.length > 0
+  ) {
+    throw new StructuredContentRouteMismatchError(
+      "refusing to seal a package whose validation block records unresolved failures",
+    );
+  }
 }
 
 /**
