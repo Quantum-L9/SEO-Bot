@@ -39,8 +39,84 @@ import { getLlmService, type LlmService } from "../services/llm.js";
 import { type RouteValidationVerdict, validateRoute } from "./content-validator.js";
 import { PRODUCER } from "./producer.js";
 import { structuredContentRouteSchema } from "./schema-guards.js";
+import { z } from "zod";
 
 const logger = createModuleLogger("build-intelligence:structured-content");
+
+/**
+ * Canonical prompt-side description of the exact block union the runtime Zod
+ * schema enforces. Included in the generation prompt so generation AGREES with
+ * validation: every section MUST contain `blocks`, each block MUST carry a
+ * supported `kind`, and no alias (content/body/copy/paragraphs/text) is ever
+ * accepted. Zod (`structuredContentRouteSchema`) stays the validation authority.
+ */
+export const STRUCTURED_CONTENT_OUTPUT_CONTRACT = {
+  route_id: "string",
+  path: "string",
+  metadata: {
+    title: "non-empty string",
+    description: "non-empty string",
+  },
+  sections: [
+    {
+      section_id: "exact required section_id",
+      eyebrow: "optional string",
+      heading: "optional string",
+      subheading: "optional string",
+      blocks: [
+        {
+          kind: "paragraph",
+          text: "string",
+        },
+        // OR:
+        {
+          kind: "bullets",
+          items: ["string"],
+        },
+        // OR:
+        {
+          kind: "steps",
+          items: ["string"],
+        },
+        // OR:
+        {
+          kind: "quote",
+          text: "string",
+          attribution: "optional string",
+        },
+      ],
+      cta: {
+        label: "string",
+        action: "string",
+      },
+    },
+  ],
+  faqs: [
+    {
+      question: "string",
+      answer: "string",
+    },
+  ],
+  internal_links: [
+    {
+      target_route_id: "string",
+      anchor_text: "string",
+    },
+  ],
+  schema_content_inputs: {
+    faq: "optional boolean",
+    service: "optional boolean",
+    local_business: "optional boolean",
+  },
+};
+
+/** Repair evidence attached to the single bounded repair per route. */
+interface RouteRepairEvidence {
+  reason: "SCHEMA_FAILURE" | "CONTENT_VALIDATION_FAILURE";
+  failed_requirements?: string[];
+  unsupported_claims?: string[];
+  validation_issues?: Array<{ path: string; message: string }>;
+}
 
 export interface StructuredContentRequest {
   client_id: string;
@@ -142,9 +218,24 @@ export async function createStructuredContentPackageWithEvidence(
   for (const contractRoute of contract.routes) {
     const blueprintRoute = blueprintRoutes.get(contractRoute.route_id);
 
-    // 1. Generate prose for this route only.
-    let generated = await generateRoute(llm, request, contractRoute);
+    // 1. Generate prose for this route only. Schema failures surface here
+    //    (generateRoute runs with schemaRepairAttempts: 0), so the ONE
+    //    bounded repair below can carry the real failure evidence.
+    let generated: StructuredContentRoute;
+    let schemaRepaired = false;
     generationCalls += 1;
+    try {
+      generated = await generateRoute(llm, request, contractRoute);
+    } catch (error) {
+      schemaRepaired = true;
+      repairedRouteIds.push(contractRoute.route_id);
+      generationCalls += 1;
+      generated = await generateRoute(llm, request, contractRoute, {
+        reason: "SCHEMA_FAILURE",
+        validation_issues: schemaFailureIssues(error),
+      });
+      // A second schema failure throws here — terminal, no further repair.
+    }
 
     // 2. Validate (deterministic then semantic).
     let verdict = await validateRoute(generated, contractRoute, {
@@ -155,8 +246,16 @@ export async function createStructuredContentPackageWithEvidence(
     });
     validationCalls += 1;
 
-    // 3. ONE bounded repair, scoped to this route + its failed requirements.
+    // 3. ONE bounded repair per route — schema OR content, never both.
     if (!routePassed(verdict)) {
+      if (schemaRepaired) {
+        // The repair budget for this route was spent on the schema failure.
+        throw new ContentRequirementUnsatisfiedError(
+          `Route "${contractRoute.route_id}" fails validation after its one schema repair`,
+          verdict.failed_requirements,
+          verdict.unsupported_claims,
+        );
+      }
       repairedRouteIds.push(contractRoute.route_id);
       logger.warn(
         {
@@ -167,6 +266,7 @@ export async function createStructuredContentPackageWithEvidence(
         "Route failed validation; running one bounded repair",
       );
       generated = await generateRoute(llm, request, contractRoute, {
+        reason: "CONTENT_VALIDATION_FAILURE",
         failed_requirements: verdict.failed_requirements,
         unsupported_claims: verdict.unsupported_claims,
       });
@@ -363,12 +463,15 @@ function assertPackageLineage(
  * Generate a single route's final content from ONLY its contract route. An
  * optional `repair` payload appends the specific failures to fix — scoping the
  * repair to this route without regenerating anything that already passed.
+ * The call runs with `schemaRepairAttempts: 0` so StructuredContent owns the
+ * ONLY repair and can attach real failure evidence (SCHEMA_FAILURE or
+ * CONTENT_VALIDATION_FAILURE) to the repair prompt.
  */
 async function generateRoute(
   llm: LlmService,
   request: StructuredContentRequest,
   contractRoute: PageContentContractRoute,
-  repair?: { failed_requirements: string[]; unsupported_claims: string[] },
+  repair?: RouteRepairEvidence,
 ): Promise<StructuredContentRoute> {
   const systemPrompt =
     "You are the sole owner of final website prose for one route. Write ONLY from " +
@@ -378,15 +481,29 @@ async function generateRoute(
     "requirements. Produce a metadata title and description that satisfy their " +
     "requirements. Produce exactly one section object per contract section_id (same " +
     "ids), plus faqs, internal links (including every required internal-link target), " +
-    "and schema_content_inputs. Respond with ONLY a single JSON object for this " +
-    "route — no markdown fences, no commentary.";
+    "and schema_content_inputs. Every section MUST contain `blocks`. Do not use any " +
+    "of these aliases: content, body, copy, paragraphs, text — for section content. " +
+    "All section prose must exist inside `blocks`. Each block MUST contain a " +
+    "supported `kind`. Allowed block shapes are exactly: paragraph { kind, text }, " +
+    "bullets { kind, items }, steps { kind, items }, quote { kind, text, attribution? }. " +
+    "Do not add fields not defined by the output contract. Respond with ONLY a " +
+    "single JSON object for this route — no markdown fences, no commentary.";
 
   const repairBlock = repair
     ? {
         repair_instructions: {
+          reason: repair.reason,
           note: "Your previous output failed validation. Fix ONLY the items below; keep everything else compliant.",
-          failed_requirements: repair.failed_requirements,
-          remove_or_support_unsupported_claims: repair.unsupported_claims,
+          ...(repair.failed_requirements?.length
+            ? { failed_requirements: repair.failed_requirements }
+            : {}),
+          ...(repair.unsupported_claims?.length
+            ? { remove_or_support_unsupported_claims: repair.unsupported_claims }
+            : {}),
+          ...(repair.validation_issues?.length
+            ? { validation_issues: repair.validation_issues }
+            : {}),
+          output_contract: STRUCTURED_CONTENT_OUTPUT_CONTRACT,
         },
       }
     : {};
@@ -398,6 +515,7 @@ async function generateRoute(
         (link) => link.target_route_id,
       ),
       required_section_ids: contractRoute.sections.map((section) => section.section_id),
+      output_contract: STRUCTURED_CONTENT_OUTPUT_CONTRACT,
       ...repairBlock,
     },
     null,
@@ -411,7 +529,24 @@ async function generateRoute(
     systemPrompt,
     userPrompt,
     validate: (value) => reconcileStructuredRoute(value, contractRoute),
+    schemaRepairAttempts: 0,
   });
+}
+
+/**
+ * Turn a schema/parse failure into the repair payload's validation_issues:
+ * zod issues with their exact path, or the raw message when the failure is not
+ * zod-shaped (e.g. JSON parse failure).
+ */
+function schemaFailureIssues(error: unknown): Array<{ path: string; message: string }> {
+  if (error instanceof z.ZodError) {
+    return error.issues.slice(0, 10).map((issue) => ({
+      path: issue.path.join("."),
+      message: issue.message,
+    }));
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return [{ path: "", message }];
 }
 
 /**
@@ -429,6 +564,9 @@ function reconcileStructuredRoute(
   const contractSet = new Set(contractSectionIds);
   const producedById = new Map(parsed.sections.map((section) => [section.section_id, section]));
 
+  if (producedById.size !== parsed.sections.length) {
+    throw new Error("Duplicate section_id in model output");
+  }
   const unexpected = parsed.sections
     .map((section) => section.section_id)
     .filter((id) => !contractSet.has(id));

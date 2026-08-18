@@ -223,6 +223,11 @@ export class LlmService {
    * provider, or model. Parse+validate failures trigger EXACTLY ONE bounded
    * repair scoped to the same operation; a second failure is terminal (the
    * validator's error propagates). No infinite retry.
+   *
+   * `schemaRepairAttempts: 0` opts the caller OUT of the embedded repair —
+   * the caller then owns the ONLY repair (e.g. StructuredContent, which must
+   * attach real failure evidence to its repair prompt). Default (undefined or
+   * 1) preserves the embedded single repair for existing callers.
    */
   async executePolicyJson<T>(
     operation: SeoImproveLlmOperation,
@@ -233,10 +238,15 @@ export class LlmService {
       systemPrompt: string;
       userPrompt: string;
       validate: (value: unknown) => T;
+      schemaRepairAttempts?: 0 | 1;
     },
   ): Promise<T> {
     const task = seoImproveTask(operation, args.clientId, `[${args.module}] ${args.purpose}`);
     const first = await this.execute(task, args.systemPrompt, args.userPrompt);
+    if ((args.schemaRepairAttempts ?? 1) === 0) {
+      // Caller owns the single repair: schema failures surface to the caller.
+      return args.validate(parseJsonFromLlm<unknown>(first.content));
+    }
     try {
       return args.validate(parseJsonFromLlm<unknown>(first.content));
     } catch (error) {
