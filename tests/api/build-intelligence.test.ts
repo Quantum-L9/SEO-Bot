@@ -14,6 +14,7 @@ vi.mock("../../src/core/logger.js", () => ({
 vi.mock("../../src/core/config.js", () => ({
   getConfig: () => ({
     OPERATOR_API_KEY: "op-key",
+    SEO_BOT_API_KEY: "machine-key",
     TRUST_PROXY: false,
     DASHBOARD_ALLOWED_ORIGINS: undefined,
   }),
@@ -153,10 +154,10 @@ afterEach(async () => {
   await app.close();
 });
 
-const AUTH = { authorization: "Bearer op-key" };
+const AUTH = { authorization: "Bearer machine-key" };
 
 describe("POST /api/build-intelligence/competitive-landscape", () => {
-  it("enforces operator authentication (401 without credentials)", async () => {
+  it("enforces machine authentication (401 without credentials)", async () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/build-intelligence/competitive-landscape",
@@ -311,5 +312,48 @@ describe("build-intelligence — producer failure never becomes a fake success",
     });
     expect(res.statusCode).toBe(201);
     expect(res.json().artifact_type).toBe("competitive_landscape");
+  });
+});
+
+describe("GET /api/build-intelligence/preflight", () => {
+  it("requires machine authentication (401 without credentials)", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/build-intelligence/preflight" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("returns non-secret readiness metadata for an authenticated machine call", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/build-intelligence/preflight",
+      headers: AUTH,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body).toMatchObject({
+      status: "ready",
+      service: "SEO-Bot",
+      capabilities: {
+        competitive_landscape: true,
+        seo_content_blueprint: true,
+        structured_content: true,
+      },
+    });
+    expect(typeof body.version).toBe("string");
+    expect(typeof body.bot_interop_version).toBe("string");
+    expect(typeof body.llm_router_version).toBe("string");
+    expect(typeof body.configuration.dataforseo_configured).toBe("boolean");
+    expect(typeof body.configuration.llm_provider_configured).toBe("boolean");
+  });
+
+  it("never returns key values in the preflight payload", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/build-intelligence/preflight",
+      headers: AUTH,
+    });
+    expect(res.statusCode).toBe(200);
+    const serialized = res.body;
+    expect(serialized).not.toContain("machine-key");
+    expect(serialized).not.toContain("op-key");
   });
 });

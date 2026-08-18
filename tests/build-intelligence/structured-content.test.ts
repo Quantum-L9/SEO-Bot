@@ -14,7 +14,10 @@ import {
   WEBSITE_INTELLIGENCE_SCHEMAS,
 } from "@quantum-l9/bot-interop";
 import { describe, expect, it, vi } from "vitest";
-import type { ContentValidationVerdict } from "../../src/build-intelligence/schema-guards.js";
+import {
+  type ContentValidationVerdict,
+  structuredContentRouteSchema,
+} from "../../src/build-intelligence/schema-guards.js";
 import {
   ContentRequirementUnsatisfiedError,
   createStructuredContentPackage,
@@ -155,7 +158,15 @@ function fakeLlm(verdicts: ContentValidationVerdict[]): {
 } {
   const counts = { gen: 0, val: 0 };
   const llm = {
-    async executePolicyJson(operation: string, args: { validate: (v: unknown) => unknown }) {
+    async executePolicyJson(
+      operation: string,
+      args: { validate: (v: unknown) => unknown; callCounter?: { value: number } },
+    ) {
+      // Mirror the real service: one counter increment per ACTUAL LLM call.
+      // Generation runs with schemaRepairAttempts=0, so one invocation = one
+      // call; the semantic verdicts here always parse, so one invocation = one
+      // call there too.
+      if (args.callCounter) args.callCounter.value += 1;
       if (operation === "STRUCTURED_CONTENT_GENERATION") {
         counts.gen += 1;
         return args.validate(genRoute());
@@ -238,7 +249,9 @@ describe("StructuredContentPackage — lineage, identity, bounded repair", () =>
       { llm: clean.llm },
     );
     expect(noRepair.evidence.repair_attempts).toBe(0);
-    expect(noRepair.evidence.generation_calls).toBe(1);
+    expect(noRepair.evidence.generation_llm_calls).toBe(1);
+    expect(noRepair.evidence.semantic_validation_llm_calls).toBe(1);
+    expect(noRepair.evidence.schema_failure_count).toBe(0);
 
     const repaired = fakeLlm([fail, pass]);
     const withRepair = await createStructuredContentPackageWithEvidence(
@@ -247,8 +260,9 @@ describe("StructuredContentPackage — lineage, identity, bounded repair", () =>
     );
     expect(withRepair.evidence.repair_attempts).toBe(1);
     expect(withRepair.evidence.repaired_route_ids).toEqual(["home"]);
-    expect(withRepair.evidence.generation_calls).toBe(2);
-    expect(withRepair.evidence.validation_calls).toBe(2);
+    expect(withRepair.evidence.generation_llm_calls).toBe(2);
+    expect(withRepair.evidence.semantic_validation_llm_calls).toBe(2);
+    expect(withRepair.evidence.schema_failure_count).toBe(0);
     // Both packages seal with an identical clean validation block — which is
     // exactly why the count cannot be read back out of it.
     expect(withRepair.artifact.payload.validation).toEqual(noRepair.artifact.payload.validation);
@@ -277,6 +291,9 @@ describe("StructuredContentPackage — lineage, identity, bounded repair", () =>
     expect(prompts[0]).not.toContain("repair_instructions");
     expect(prompts[1]).toContain("repair_instructions");
     expect(prompts[1]).toContain("unbacked pricing claim");
+    // The repair prompt always carries the schema-failure slot (empty here) so
+    // the evidence shape is stable across schema- and semantic-failure repairs.
+    expect(prompts[1]).toContain("schema_failures");
   });
 });
 
@@ -474,5 +491,208 @@ describe("StructuredContentPackage — the exact contract is the only authority"
     ).rejects.toMatchObject({ code: "CONTENT_REQUIREMENT_UNSATISFIED" });
     // Deterministic failure short-circuits the semantic pass entirely.
     expect(semanticCalls).toBe(0);
+  });
+});
+
+/* ── Schema-contract regression suite (blocks union, forbidden aliases) ────── */
+
+describe("StructuredContentPackage — blocks-union output contract (schema regression)", () => {
+  it("rejects a section that uses the forbidden `content` alias instead of blocks", () => {
+    const route: any = structuredClone(genRoute());
+    route.sections[0] = { section_id: "hero", content: "prose smuggled outside blocks" };
+    expect(structuredContentRouteSchema.safeParse(route).success).toBe(false);
+  });
+
+  it("rejects a section with no blocks at all", () => {
+    const route: any = structuredClone(genRoute());
+    route.sections[0] = { section_id: "hero", heading: "h" };
+    expect(structuredContentRouteSchema.safeParse(route).success).toBe(false);
+  });
+
+  it("rejects `blocks` supplied as a string instead of an array", () => {
+    const route: any = structuredClone(genRoute());
+    route.sections[0].blocks = "a paragraph of prose";
+    expect(structuredContentRouteSchema.safeParse(route).success).toBe(false);
+  });
+
+  it("rejects an unknown block kind", () => {
+    const route: any = structuredClone(genRoute());
+    route.sections[0].blocks = [{ kind: "rich_text", html: "<p>x</p>" }];
+    expect(structuredContentRouteSchema.safeParse(route).success).toBe(false);
+  });
+
+  it("rejects a paragraph block without text", () => {
+    const route: any = structuredClone(genRoute());
+    route.sections[0].blocks = [{ kind: "paragraph" }];
+    expect(structuredContentRouteSchema.safeParse(route).success).toBe(false);
+  });
+
+  it("rejects a bullets block without items", () => {
+    const route: any = structuredClone(genRoute());
+    route.sections[0].blocks = [{ kind: "bullets" }];
+    expect(structuredContentRouteSchema.safeParse(route).success).toBe(false);
+  });
+
+  it("rejects a quote block without text", () => {
+    const route: any = structuredClone(genRoute());
+    route.sections[0].blocks = [{ kind: "quote", attribution: "anon" }];
+    expect(structuredContentRouteSchema.safeParse(route).success).toBe(false);
+  });
+
+  it("rejects malformed metadata (missing description)", () => {
+    const route: any = structuredClone(genRoute());
+    route.metadata = { title: "t" };
+    expect(structuredContentRouteSchema.safeParse(route).success).toBe(false);
+  });
+
+  it("accepts every block variant of the taught union", () => {
+    const route: any = structuredClone(genRoute());
+    route.sections[0].blocks = [
+      { kind: "paragraph", text: "p" },
+      { kind: "bullets", items: ["a", "b"] },
+      { kind: "steps", items: ["1", "2"] },
+      { kind: "quote", text: "q", attribution: "owner" },
+    ];
+    expect(structuredContentRouteSchema.safeParse(route).success).toBe(true);
+  });
+
+  it("teaches the blocks union and the forbidden aliases in the generation system prompt", async () => {
+    const systemPrompts: string[] = [];
+    const llm = {
+      async executePolicyJson(operation: string, args: { systemPrompt: string; validate: (v: unknown) => unknown }) {
+        if (operation === "STRUCTURED_CONTENT_GENERATION") {
+          systemPrompts.push(args.systemPrompt);
+          return args.validate(genRoute());
+        }
+        return args.validate(pass);
+      },
+    } as unknown as LlmService;
+
+    await createStructuredContentPackage(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+      { llm },
+    );
+    expect(systemPrompts).toHaveLength(1);
+    expect(systemPrompts[0]).toContain('kind: "paragraph"');
+    expect(systemPrompts[0]).toContain('kind: "bullets"');
+    expect(systemPrompts[0]).toContain('kind: "steps"');
+    expect(systemPrompts[0]).toContain('kind: "quote"');
+    expect(systemPrompts[0]).toContain(
+      "FORBIDDEN field aliases: content, body, copy, html, paragraphs",
+    );
+  });
+});
+
+/* ── One-repair budget: generation ≤ 2 calls per route, no hidden nested repair ─ */
+
+describe("StructuredContentPackage — one repair budget (schema + semantic)", () => {
+  /** Generations return the given values in order; validations return the given verdicts. */
+  function fakeGenerations(
+    genValues: unknown[],
+    verdicts: ContentValidationVerdict[],
+  ): { llm: LlmService; prompts: string[] } {
+    const prompts: string[] = [];
+    let genIdx = 0;
+    let valIdx = 0;
+    const llm = {
+      async executePolicyJson(
+        operation: string,
+        args: {
+          userPrompt: string;
+          systemPrompt?: string;
+          validate: (v: unknown) => unknown;
+          callCounter?: { value: number };
+        },
+      ) {
+        if (args.callCounter) args.callCounter.value += 1;
+        if (operation === "STRUCTURED_CONTENT_GENERATION") {
+          prompts.push(args.userPrompt);
+          const value = genValues[Math.min(genIdx, genValues.length - 1)];
+          genIdx += 1;
+          return args.validate(value);
+        }
+        if (operation === "CONTENT_VALIDATION") {
+          const verdict = verdicts[Math.min(valIdx, verdicts.length - 1)];
+          valIdx += 1;
+          return args.validate(verdict);
+        }
+        throw new Error(`unexpected op ${operation}`);
+      },
+    } as unknown as LlmService;
+    return { llm, prompts };
+  }
+
+  const routeWithContentAlias: unknown = (() => {
+    const route: any = structuredClone(genRoute());
+    route.sections[0] = { section_id: "hero", content: "alias prose" };
+    return route;
+  })();
+
+  it("first generation schema-invalid → one repair with schema_failures evidence → seals", async () => {
+    const { llm, prompts } = fakeGenerations([routeWithContentAlias, genRoute()], [pass]);
+    const { evidence } = await createStructuredContentPackageWithEvidence(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+      { llm },
+    );
+    expect(evidence.generation_llm_calls).toBe(2);
+    expect(evidence.semantic_validation_llm_calls).toBe(1); // only after the repair parses
+    expect(evidence.repair_attempts).toBe(1);
+    expect(evidence.schema_failure_count).toBe(1);
+    expect(evidence.repaired_route_ids).toEqual(["home"]);
+    // The repair prompt carries the exact schema failure evidence and the
+    // exact output contract again.
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("schema_failures");
+    expect(prompts[1]).toContain("The exact output contract again");
+    expect(prompts[1]).toContain("FORBIDDEN field aliases");
+  });
+
+  it("is terminal when the repair output is still schema-invalid", async () => {
+    const { llm } = fakeGenerations([routeWithContentAlias, routeWithContentAlias], [pass]);
+    await expect(
+      createStructuredContentPackageWithEvidence(
+        { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+        { llm },
+      ),
+    ).rejects.toBeInstanceOf(ContentRequirementUnsatisfiedError);
+  });
+
+  it("never issues a hidden nested repair: schema-fail then semantic-fail stays within two generation calls", async () => {
+    const { llm, prompts } = fakeGenerations([routeWithContentAlias, genRoute()], [fail]);
+    await expect(
+      createStructuredContentPackageWithEvidence(
+        { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+        { llm },
+      ),
+    ).rejects.toMatchObject({ code: "CONTENT_REQUIREMENT_UNSATISFIED" });
+    // The route consumed its one repair on the schema failure; the semantic
+    // failure is terminal. Under the old nested-repair bug this would have
+    // made up to four generation calls.
+    expect(prompts).toHaveLength(2);
+  });
+
+  it("reports repair_attempts ≤ route_count and at most one per route across two routes", async () => {
+    const payload = structuredClone(makeContract().payload);
+    const second = structuredClone(payload.routes[0]!);
+    second.route_id = "services";
+    second.path = "/services";
+    payload.routes = [payload.routes[0]!, second];
+    const contract = sealIntelligenceArtifact({
+      artifact_type: "page_content_contract",
+      client_id: "client-1",
+      build_id: "build-1",
+      producer: { repo: "Website-Bot", version: "1.0.0" },
+      payload,
+    });
+    const { llm } = fakeLlm([fail, pass, fail, pass]);
+    const { evidence } = await createStructuredContentPackageWithEvidence(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: contract },
+      { llm },
+    );
+    expect(evidence.route_count).toBe(2);
+    expect(evidence.repair_attempts).toBe(2);
+    expect(evidence.repair_attempts).toBeLessThanOrEqual(evidence.route_count);
+    expect(evidence.repaired_route_ids).toEqual(["home", "services"]);
+    expect(evidence.generation_llm_calls).toBe(4); // exactly two per route
   });
 });

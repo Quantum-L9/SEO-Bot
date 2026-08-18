@@ -300,3 +300,98 @@ describe("LlmService public methods route the correct task type + complexity (GA
     });
   });
 });
+
+describe("LlmService.executePolicyJson — schemaRepairAttempts + actual-call counting", () => {
+  const baseArgs = (validate: (v: unknown) => unknown, extra: Record<string, unknown> = {}) => ({
+    clientId: "c1",
+    module: "build-intelligence" as any,
+    purpose: "policy-json-test",
+    systemPrompt: "sys",
+    userPrompt: "user",
+    validate,
+    ...extra,
+  });
+
+  it("defaults to one bounded repair when the validator rejects the first parse", async () => {
+    const svc = new LlmService();
+    const validate = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error("bad json");
+      })
+      .mockImplementationOnce((value: unknown) => value);
+    const result = await svc.executePolicyJson<unknown>(
+      "STRUCTURED_CONTENT_GENERATION",
+      baseArgs(validate),
+    );
+    expect(executeMock).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("propagates the second failure terminally — no further retry", async () => {
+    const svc = new LlmService();
+    const validate = vi.fn().mockImplementation(() => {
+      throw new Error("still bad");
+    });
+    await expect(
+      svc.executePolicyJson("STRUCTURED_CONTENT_GENERATION", baseArgs(validate)),
+    ).rejects.toThrow("still bad");
+    expect(executeMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("schemaRepairAttempts: 0 hands the repair to the caller — one call, error propagates", async () => {
+    const svc = new LlmService();
+    const validate = vi.fn().mockImplementation(() => {
+      throw new Error("rejected");
+    });
+    await expect(
+      svc.executePolicyJson(
+        "STRUCTURED_CONTENT_GENERATION",
+        baseArgs(validate, { schemaRepairAttempts: 0 }),
+      ),
+    ).rejects.toThrow("rejected");
+    expect(executeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects any schemaRepairAttempts value other than 0 or 1 before spending a call", async () => {
+    const svc = new LlmService();
+    await expect(
+      svc.executePolicyJson(
+        "STRUCTURED_CONTENT_GENERATION",
+        baseArgs(vi.fn(), { schemaRepairAttempts: 2 as any }),
+      ),
+    ).rejects.toThrow("schemaRepairAttempts must be 0 or 1");
+    expect(executeMock).not.toHaveBeenCalled();
+  });
+
+  it("callCounter increments once per ACTUAL call — twice when the bounded repair runs", async () => {
+    const svc = new LlmService();
+    const counter = { value: 0 };
+    const validate = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error("bad");
+      })
+      .mockImplementationOnce((value: unknown) => value);
+    await svc.executePolicyJson(
+      "STRUCTURED_CONTENT_GENERATION",
+      baseArgs(validate, { callCounter: counter }),
+    );
+    expect(counter.value).toBe(2);
+  });
+
+  it("callCounter increments exactly once with schemaRepairAttempts: 0, even on failure", async () => {
+    const svc = new LlmService();
+    const counter = { value: 0 };
+    const validate = vi.fn().mockImplementation(() => {
+      throw new Error("bad");
+    });
+    await expect(
+      svc.executePolicyJson(
+        "STRUCTURED_CONTENT_GENERATION",
+        baseArgs(validate, { schemaRepairAttempts: 0, callCounter: counter }),
+      ),
+    ).rejects.toThrow("bad");
+    expect(counter.value).toBe(1);
+  });
+});

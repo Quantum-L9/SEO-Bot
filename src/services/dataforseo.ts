@@ -91,9 +91,54 @@ export class SerpEvidenceInvalidError extends Error {
   }
 }
 
+/** One initial attempt plus at most one retry, transient conditions only. */
+const MAX_DATAFORSEO_ATTEMPTS = 2;
+/** HTTP statuses that indicate a transient provider-side condition. */
+const RETRYABLE_HTTP_STATUS = new Set([429, 502, 503, 504]);
+/** Default backoff when no Retry-After is present (~500 ms per the contract). */
+const RETRY_DELAY_MS = 500;
+/** Retry-After cap: honor the header but never wait more than ~2 seconds. */
+const RETRY_AFTER_CAP_MS = 2000;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Per-attempt telemetry; never contains credentials or auth headers. */
+export interface DataForSeoAttemptRecord {
+  endpoint: string;
+  attempt: number;
+  status: string;
+  retry: boolean;
+}
+
+export function retryAfterDelayMs(error: unknown): number {
+  if (!axios.isAxiosError(error)) return RETRY_DELAY_MS;
+  const header = error.response?.headers?.["retry-after"];
+  const seconds = typeof header === "string" ? Number(header) : Number.NaN;
+  if (!Number.isFinite(seconds) || seconds <= 0) return RETRY_DELAY_MS;
+  return Math.min(Math.round(seconds * 1000), RETRY_AFTER_CAP_MS);
+}
+
+export function failureClass(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    if (error.response) return `HTTP ${error.response.status}`;
+    if (error.code === "ECONNABORTED") return "timeout";
+    return error.code ?? "network";
+  }
+  return error instanceof Error ? error.name : "unknown";
+}
+
+/** Transient transport/provider failures only; deterministic failures never. */
+export function isRetryableTransportFailure(error: unknown): boolean {
+  if (!axios.isAxiosError(error)) return false;
+  if (error.response) return RETRYABLE_HTTP_STATUS.has(error.response.status);
+  // No response: connection reset / establishment failure / bounded timeout.
+  return true;
+}
+
 export class DataForSeoClient {
   private readonly baseUrl = "https://api.dataforseo.com/v3";
   private readonly auth: string;
+  private readonly attemptLog: DataForSeoAttemptRecord[] = [];
 
   constructor() {
     const config = getConfig();
@@ -102,7 +147,17 @@ export class DataForSeoClient {
     );
   }
 
-  private async request(endpoint: string, data: any[]): Promise<any> {
+  /** Total provider attempts across all calls — DataForSEO requests are billable. */
+  get providerAttempts(): number {
+    return this.attemptLog.length;
+  }
+
+  /** Per-attempt telemetry (endpoint, attempt, status class, retry flag). */
+  getProviderAttemptLog(): readonly DataForSeoAttemptRecord[] {
+    return this.attemptLog;
+  }
+
+  private async requestOnce(endpoint: string, data: any[]): Promise<any> {
     let response: { data: any };
     try {
       response = await axios.post(`${this.baseUrl}${endpoint}`, data, {
@@ -113,10 +168,8 @@ export class DataForSeoClient {
         timeout: 30000,
       });
     } catch (error) {
-      // Transport, timeout, auth, and non-2xx responses are all "no evidence".
-      throw new DataForSeoUnavailableError(
-        `DataForSEO request to ${endpoint} failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      // Re-thrown as the raw axios error so the retry loop can classify it.
+      throw error;
     }
 
     if (response.data?.status_code !== 20000) {
@@ -126,6 +179,39 @@ export class DataForSeoClient {
     }
 
     return response.data;
+  }
+
+  private async request(endpoint: string, data: any[]): Promise<any> {
+    for (let attempt = 1; attempt <= MAX_DATAFORSEO_ATTEMPTS; attempt++) {
+      try {
+        const result = await this.requestOnce(endpoint, data);
+        this.attemptLog.push({ endpoint, attempt, status: "ok", retry: false });
+        return result;
+      } catch (error) {
+        // Provider/task-level errors (the 20000-status guard above) are
+        // deterministic: classify and fail without retrying.
+        if (error instanceof DataForSeoUnavailableError) {
+          this.attemptLog.push({ endpoint, attempt, status: "provider", retry: false });
+          throw error;
+        }
+        const status = failureClass(error);
+        const retry = attempt < MAX_DATAFORSEO_ATTEMPTS && isRetryableTransportFailure(error);
+        this.attemptLog.push({ endpoint, attempt, status, retry });
+        if (!retry) {
+          // Transport-class failures become DATAFORSEO_UNAVAILABLE; task-level
+          // and evidence errors keep their distinct classes (unchanged from
+          // before this retry was added).
+          if (axios.isAxiosError(error)) {
+            throw new DataForSeoUnavailableError(
+              `DataForSEO request to ${endpoint} failed: ${error.message}`,
+            );
+          }
+          throw error;
+        }
+        await sleep(retryAfterDelayMs(error));
+      }
+    }
+    throw new DataForSeoUnavailableError(`DataForSEO request to ${endpoint} exhausted retries`);
   }
 
   /**
