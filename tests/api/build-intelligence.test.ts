@@ -14,6 +14,7 @@ vi.mock("../../src/core/logger.js", () => ({
 vi.mock("../../src/core/config.js", () => ({
   getConfig: () => ({
     OPERATOR_API_KEY: "op-key",
+    SEO_BOT_API_KEY: "machine-key",
     TRUST_PROXY: false,
     DASHBOARD_ALLOWED_ORIGINS: undefined,
   }),
@@ -153,10 +154,10 @@ afterEach(async () => {
   await app.close();
 });
 
-const AUTH = { authorization: "Bearer op-key" };
+const AUTH = { authorization: "Bearer machine-key" };
 
 describe("POST /api/build-intelligence/competitive-landscape", () => {
-  it("enforces operator authentication (401 without credentials)", async () => {
+  it("enforces machine authentication (401 without credentials)", async () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/build-intelligence/competitive-landscape",
