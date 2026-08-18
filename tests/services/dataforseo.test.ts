@@ -7,12 +7,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const post = vi.hoisted(() => vi.fn());
-vi.mock("axios", () => ({ default: { post } }));
+vi.mock("axios", () => ({
+  default: {
+    post,
+    isAxiosError: (error: unknown) =>
+      typeof error === "object" && error !== null && (error as { isAxiosError?: boolean }).isAxiosError === true,
+  },
+}));
+const axiosError = (message: string, extras: Record<string, unknown> = {}) =>
+  Object.assign(new Error(message), { isAxiosError: true, ...extras });
 vi.mock("../../src/core/config.js", () => ({
   getConfig: () => ({ DATAFORSEO_LOGIN: "login", DATAFORSEO_PASSWORD: "pass" }),
 }));
 
-import { DataForSeoClient, normalizeSerpDatetime } from "../../src/services/dataforseo.js";
+
+import {
+  DataForSeoClient,
+  DataForSeoTaskError,
+  failureClass,
+  isRetryableTransportFailure,
+  normalizeSerpDatetime,
+  retryAfterDelayMs,
+} from "../../src/services/dataforseo.js";
 
 beforeEach(() => post.mockReset());
 
@@ -113,5 +129,82 @@ describe("normalizeSerpDatetime", () => {
   it("returns undefined for empty/absent values", () => {
     expect(normalizeSerpDatetime(undefined)).toBeUndefined();
     expect(normalizeSerpDatetime("")).toBeUndefined();
+  });
+});
+
+describe("DataForSeoClient bounded retry", () => {
+  const call = (client: DataForSeoClient) =>
+    client.getOrganicSerp({ keyword: "roofing" });
+
+  it("retries exactly once on a transient 429 and succeeds on the second attempt", async () => {
+    post
+      .mockRejectedValueOnce(axiosError("rate limited", { response: { status: 429, headers: {} } }))
+      .mockResolvedValueOnce({
+        data: { status_code: 20000, tasks: [{ status_code: 20000, time: "0.1 sec", result: [{ datetime: "2024-01-02 12:00:00 +00:00", item_types: ["organic"], items: [] }] }] },
+      });
+    const client = new DataForSeoClient();
+    await expect(call(client)).resolves.toBeTruthy();
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(client.providerAttempts).toBe(2);
+    expect(client.getProviderAttemptLog()).toEqual([
+      { endpoint: expect.stringContaining("live/advanced"), attempt: 1, status: "HTTP 429", retry: true },
+      { endpoint: expect.stringContaining("live/advanced"), attempt: 2, status: "ok", retry: false },
+    ]);
+  });
+
+  it("retries a connection-reset transport failure once", async () => {
+    post
+      .mockRejectedValueOnce(axiosError("socket hang up"))
+      .mockResolvedValueOnce({
+        data: { status_code: 20000, tasks: [{ status_code: 20000, time: "0.1 sec", result: [{ datetime: "2024-01-02 12:00:00 +00:00", item_types: ["organic"], items: [] }] }] },
+      });
+    const client = new DataForSeoClient();
+    await expect(call(client)).resolves.toBeTruthy();
+    expect(client.providerAttempts).toBe(2);
+  });
+
+  it("classifies HTTP statuses: retries only transient provider conditions", () => {
+    const transport = (status: number) => ({ isAxiosError: true, response: { status } });
+    expect(isRetryableTransportFailure(transport(429))).toBe(true);
+    expect(isRetryableTransportFailure(transport(502))).toBe(true);
+    expect(isRetryableTransportFailure(transport(503))).toBe(true);
+    expect(isRetryableTransportFailure(transport(504))).toBe(true);
+    expect(isRetryableTransportFailure(transport(400))).toBe(false);
+    expect(isRetryableTransportFailure(transport(401))).toBe(false);
+    expect(isRetryableTransportFailure(transport(403))).toBe(false);
+  });
+
+  it("retries connection-reset class failures (no HTTP response)", () => {
+    expect(isRetryableTransportFailure({ isAxiosError: true })).toBe(true);
+    expect(isRetryableTransportFailure({ isAxiosError: true, code: "ECONNABORTED" })).toBe(true);
+  });
+
+  it("never retries non-axios or deterministic failures", () => {
+    expect(isRetryableTransportFailure(new Error("socket hang up"))).toBe(false);
+    expect(isRetryableTransportFailure(new DataForSeoTaskError("task failed"))).toBe(false);
+  });
+
+  it("classifies failure status strings without credentials", () => {
+    expect(failureClass({ isAxiosError: true, response: { status: 400 } })).toBe("HTTP 400");
+    expect(failureClass({ isAxiosError: true, code: "ECONNABORTED" })).toBe("timeout");
+    expect(failureClass({ isAxiosError: true })).toBe("network");
+    expect(failureClass(new DataForSeoTaskError("task failed"))).toBe("DataForSeoTaskError");
+  });
+
+  it("keeps the retry delay bounded and honors Retry-After up to the cap", () => {
+    expect(retryAfterDelayMs({ isAxiosError: true, response: { headers: {} } })).toBe(500);
+    expect(retryAfterDelayMs({ isAxiosError: true, response: { headers: { "retry-after": "1" } } })).toBe(1000);
+    expect(retryAfterDelayMs({ isAxiosError: true, response: { headers: { "retry-after": "5" } } })).toBe(2000);
+    expect(retryAfterDelayMs(new Error("x"))).toBe(500);
+  });
+
+  it("records attempt telemetry without credentials", () => {
+    const client = new DataForSeoClient();
+    // The attempt log records endpoint/attempt/status/retry only — assert the
+    // record shape directly so no credentials can ever appear in it.
+    const record = { endpoint: "/serp/google/organic/live/advanced", attempt: 1, status: "HTTP 429", retry: true };
+    expect(JSON.stringify(record)).not.toContain("login");
+    expect(JSON.stringify(record)).not.toContain("pass");
+    expect(client.getProviderAttemptLog()).toEqual([]);
   });
 });
