@@ -124,6 +124,63 @@ export type _SeoRouteParity =
 
 /* ── StructuredContentPackage (model-produced routes) ───────────────────────── */
 
+/**
+ * Reusable generation-prompt contract, kept adjacent to the runtime schema
+ * guard it teaches. The zod schema above/below remains FINAL authority — this
+ * text exists only so the generation prompt teaches the exact shape instead of
+ * letting the model invent `content: "..."` in place of the blocks union.
+ *
+ * Forbidden field aliases (`content`, `body`, `copy`, `html`, `paragraphs`)
+ * are named explicitly: section prose must exist exclusively inside `blocks`.
+ * The strict zod schema rejects every alias anyway; the prompt contract makes
+ * the first generation far more likely to be right, which is what keeps a
+ * route inside its two-call generation budget.
+ */
+export const STRUCTURED_CONTENT_OUTPUT_CONTRACT = [
+  "Produce EXACTLY this JSON object (zod is final authority; this text only teaches it):",
+  "- route_id: string — the exact route_id from the contract.",
+  "- path: string — the exact path from the contract.",
+  '- metadata: { title: string, description: string } — both non-empty.',
+  "- sections: array — exactly one object per contract section_id, same ids, contract order. Each:",
+  "  - section_id: string — the exact contract section_id.",
+  "  - eyebrow: string (optional), heading: string (optional), subheading: string (optional).",
+  "  - blocks: array of ONE kind per entry — the ONLY place section prose lives:",
+  "    - { kind: \"paragraph\", text: string }",
+  "    - { kind: \"bullets\", items: string[] }",
+  "    - { kind: \"steps\", items: string[] }",
+  '    - { kind: "quote", text: string, attribution: string (optional) }',
+  "  - cta (optional): { label: string, action: string }.",
+  '- faqs: array of { question: string, answer: string }.',
+  '- internal_links: array of { target_route_id: string, anchor_text: string } — include every required target.',
+  "- schema_content_inputs: object with optional booleans faq, service, local_business.",
+  "FORBIDDEN field aliases: content, body, copy, html, paragraphs. Section prose exists",
+  "exclusively inside blocks. Respond with ONLY the JSON object — no markdown fences.",
+].join("\n");
+
+/** One observed schema/JSON failure, shaped for the bounded repair prompt. */
+export interface SchemaFailure {
+  path: string;
+  message: string;
+}
+
+/**
+ * Normalize any parse/schema rejection into repair-prompt evidence. Zod errors
+ * yield their per-issue path + message; anything else (JSON parse failures,
+ * section-identity errors from the reconciler) becomes a single `$` failure so
+ * the repair always receives exact, actionable evidence — never raw model
+ * output (error messages here are already sanitized by the parsers).
+ */
+export function schemaFailureDetails(error: unknown): SchemaFailure[] {
+  if (error instanceof z.ZodError) {
+    return error.issues.map((issue) => ({
+      path: issue.path.map(String).join(".") || "$",
+      message: issue.message,
+    }));
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return [{ path: "$", message }];
+}
+
 const contentBlock = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("paragraph"), text: z.string() }).strict(),
   z.object({ kind: z.literal("bullets"), items: strArray }).strict(),
