@@ -39,7 +39,11 @@ import { DataForSeoClient } from "../services/dataforseo.js";
 import { getLlmService, type LlmService } from "../services/llm.js";
 import { PRODUCER } from "./producer.js";
 import { z } from "zod";
-import { seoContentBlueprintRoutesSchema } from "./schema-guards.js";
+import {
+  type GlobalRouteIntentRoute,
+  globalRouteIntentRouteSchema,
+  seoContentBlueprintRoutesSchema,
+} from "./schema-guards.js";
 
 const logger = createModuleLogger("build-intelligence:seo-content-blueprint");
 
@@ -48,24 +52,11 @@ const logger = createModuleLogger("build-intelligence:seo-content-blueprint");
  * chooses batching — the producer splits the requested route set into batches
  * of exactly this size (the final batch may be smaller).
  */
-const SEO_BLUEPRINT_BATCH_SIZE = 4;
+export const SEO_BLUEPRINT_BATCH_SIZE = 4;
 
-/** Compact per-route strategy summary produced in phase A for ALL routes. */
-interface GlobalRouteIntent {
-  route_id: string;
-  primary_query: string;
-  primary_intent: string;
-  journey_stage: "informational" | "commercial" | "transactional";
-}
-
-const globalRouteIntentSchema = z
-  .object({
-    route_id: z.string().min(1),
-    primary_query: z.string().min(1),
-    primary_intent: z.string().min(1),
-    journey_stage: z.enum(["informational", "commercial", "transactional"]),
-  })
-  .strict();
+// The compact per-route strategy summary produced in phase A for ALL routes is
+// `GlobalRouteIntentRoute`; its zod authority lives in `schema-guards.js` with
+// every other runtime guard for model output.
 
 /**
  * A batch failed its single bounded repair. The whole artifact fails — a
@@ -83,7 +74,7 @@ function normalizeQuery(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function chunkRoutes<T>(routes: T[], size: number): T[][] {
+export function chunkRoutes<T>(routes: T[], size: number = SEO_BLUEPRINT_BATCH_SIZE): T[][] {
   const chunks: T[][] = [];
   for (let index = 0; index < routes.length; index += size) {
     chunks.push(routes.slice(index, index + size));
@@ -95,8 +86,8 @@ function chunkRoutes<T>(routes: T[], size: number): T[][] {
 function parseGlobalRouteIntentPlan(
   value: unknown,
   requested: Array<{ route_id: string; path: string; purpose: string }>,
-): GlobalRouteIntent[] {
-  const parsed = z.array(globalRouteIntentSchema).parse(value);
+): GlobalRouteIntentRoute[] {
+  const parsed = z.array(globalRouteIntentRouteSchema).parse(value);
   const requestedIds = new Set(requested.map((route) => route.route_id));
   if (parsed.length !== requested.length) {
     throw new Error(
@@ -201,10 +192,48 @@ interface NormalizedDonorEvidence {
   external_links: number;
 }
 
+/**
+ * Measured evidence about a batched blueprint run, for the integrity receipt.
+ * A sealed artifact always carries a clean validation block, so the block
+ * itself cannot tell you how the route set was split — this can.
+ *
+ * `batch_count` is the split the producer actually performed;
+ * `completed_batches` is COUNTED as batches finish. They are equal on every
+ * sealed artifact (a batch that fails its bounded repair fails the whole
+ * artifact, so a partial run never seals) — the counter exists so that
+ * invariant is observable rather than assumed.
+ *
+ * Deliberately NOT recorded here: LLM call counts. `strategizeJson` owns its
+ * own bounded repair, so the producer cannot see how many calls a batch really
+ * cost, and a counter incremented per batch here would silently understate it.
+ */
+export interface SEOContentBlueprintEvidence {
+  route_count: number;
+  batch_size: number;
+  batch_count: number;
+  completed_batches: number;
+}
+
+export interface SEOContentBlueprintResult {
+  artifact: SEOContentBlueprintArtifact;
+  evidence: SEOContentBlueprintEvidence;
+}
+
+/**
+ * Produce the sealed blueprint. Use `createSEOContentBlueprintWithEvidence`
+ * when the caller also needs measured run evidence (the seam proof does).
+ */
 export async function createSEOContentBlueprint(
   request: SEOContentBlueprintRequest,
   deps: { llm?: LlmService; dataForSeo?: PageContentPort } = {},
 ): Promise<SEOContentBlueprintArtifact> {
+  return (await createSEOContentBlueprintWithEvidence(request, deps)).artifact;
+}
+
+export async function createSEOContentBlueprintWithEvidence(
+  request: SEOContentBlueprintRequest,
+  deps: { llm?: LlmService; dataForSeo?: PageContentPort } = {},
+): Promise<SEOContentBlueprintResult> {
   assertRouteSet(request.routes);
   assertLandscapeUsable(request.competitive_landscape);
 
@@ -232,7 +261,7 @@ export async function createSEOContentBlueprint(
   }));
 
   // ── PHASE A — global route intent plan (one compact call for ALL routes) ────
-  const globalIntentPlan = await llm.strategizeJson<GlobalRouteIntent[]>({
+  const globalIntentPlan = await llm.strategizeJson<GlobalRouteIntentRoute[]>({
     clientId: request.client_id,
     module: "build-intelligence",
     purpose: `seo-content-blueprint:global-intent:${request.build_id}`,
@@ -266,6 +295,7 @@ export async function createSEOContentBlueprint(
   // ── PHASE B — deterministic route batches (the LLM never chooses batching) ──
   const batches = chunkRoutes(request.routes, SEO_BLUEPRINT_BATCH_SIZE);
   const producedById = new Map<string, SEOContentBlueprintRoute>();
+  let completedBatches = 0;
   for (const [batchIndex, batch] of batches.entries()) {
     let batchRoutes: SEOContentBlueprintRoute[];
     try {
@@ -361,6 +391,7 @@ export async function createSEOContentBlueprint(
     for (const route of batchRoutes) {
       producedById.set(route.route_id, route);
     }
+    completedBatches += 1;
   }
 
   // ── Deterministic merge in requested order, then whole-site validation ──────
@@ -404,13 +435,22 @@ export async function createSEOContentBlueprint(
       clientId: request.client_id,
       buildId: request.build_id,
       routes: routes.length,
+      batches: batches.length,
       competitiveLandscapeRef: payload.competitive_landscape_ref.artifact_id,
       artifactId: artifact.artifact_id,
     },
     "SEOContentBlueprint sealed",
   );
 
-  return artifact;
+  return {
+    artifact,
+    evidence: {
+      route_count: request.routes.length,
+      batch_size: SEO_BLUEPRINT_BATCH_SIZE,
+      batch_count: batches.length,
+      completed_batches: completedBatches,
+    },
+  };
 }
 
 /** The requested route set is the identity authority — it must be well formed. */
@@ -543,7 +583,7 @@ function reconcileBatch(
   value: unknown,
   batch: Array<{ route_id: string; path: string; purpose: string }>,
   allRouteIds: Set<string>,
-  intentById: Map<string, GlobalRouteIntent>,
+  intentById: Map<string, GlobalRouteIntentRoute>,
 ): SEOContentBlueprintRoute[] {
   // Slot vocabulary is enforced here: `target_slots` is a zod enum over the
   // shared ContentSlot union, so an invented slot name fails the parse.

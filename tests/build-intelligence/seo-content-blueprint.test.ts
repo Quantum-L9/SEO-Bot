@@ -15,8 +15,11 @@ import {
 } from "@quantum-l9/bot-interop";
 import { describe, expect, it, vi } from "vitest";
 import {
+  chunkRoutes,
   createSEOContentBlueprint,
+  createSEOContentBlueprintWithEvidence,
   type PageContentPort,
+  SEO_BLUEPRINT_BATCH_SIZE,
 } from "../../src/build-intelligence/seo-content-blueprint.js";
 import type { LlmService } from "../../src/services/llm.js";
 
@@ -613,5 +616,106 @@ describe("SEOContentBlueprint — full-site batching (two-phase)", () => {
     await expect(build(routes, model)).rejects.toMatchObject({
       code: "SEO_CONTENT_BLUEPRINT_BATCH_INVALID",
     });
+  });
+});
+
+describe("SEOContentBlueprint — deterministic batch split", () => {
+  it("chunks strictly by request order, final chunk short", () => {
+    expect(chunkRoutes([1, 2, 3, 4, 5, 6, 7, 8, 9], 4)).toEqual([
+      [1, 2, 3, 4],
+      [5, 6, 7, 8],
+      [9],
+    ]);
+  });
+
+  it("defaults to the producer batch size", () => {
+    expect(SEO_BLUEPRINT_BATCH_SIZE).toBe(4);
+    expect(chunkRoutes(Array.from({ length: 29 }, (_, i) => i)).map((c) => c.length)).toEqual([
+      4, 4, 4, 4, 4, 4, 4, 1,
+    ]);
+  });
+
+  it("returns no chunks for an empty route set", () => {
+    expect(chunkRoutes([], 4)).toEqual([]);
+  });
+});
+
+describe("SEOContentBlueprint — measured run evidence", () => {
+  function routesFor(count: number) {
+    return Array.from({ length: count }, (_, index) => ({
+      route_id: `route-${index + 1}`,
+      path: `/route-${index + 1}`,
+      purpose: `purpose ${index + 1}`,
+    }));
+  }
+
+  function modelRoutesFor(count: number): SEOContentBlueprintRoute[] {
+    return routesFor(count).map((route, index) => ({
+      ...blueprintRoute(route.route_id, route.path),
+      targets: {
+        ...blueprintRoute(route.route_id, route.path).targets,
+        primary_query: `query ${index + 1}`,
+      },
+    }));
+  }
+
+  function buildWithEvidence(count: number) {
+    const { llm } = fakeLlm(modelRoutesFor(count));
+    return createSEOContentBlueprintWithEvidence(
+      {
+        client_id: "client-1",
+        build_id: "build-1",
+        competitive_landscape: makeLandscape(),
+        routes: routesFor(count),
+        business_facts: [],
+      },
+      { llm, dataForSeo: fakePages },
+    );
+  }
+
+  it.each([1, 4, 5, 8, 29, 40])("counts the actual run for %i routes", async (count) => {
+    const expectedBatches = Math.ceil(count / SEO_BLUEPRINT_BATCH_SIZE);
+    const { artifact, evidence } = await buildWithEvidence(count);
+    expect(evidence).toEqual({
+      route_count: count,
+      batch_size: SEO_BLUEPRINT_BATCH_SIZE,
+      batch_count: expectedBatches,
+      completed_batches: expectedBatches,
+    });
+    // The evidence describes the artifact that was actually sealed.
+    expect(artifact.payload.routes).toHaveLength(count);
+  });
+
+  it("createSEOContentBlueprint returns exactly the artifact of the evidence sibling", async () => {
+    const { llm } = fakeLlm(modelRoutesFor(5));
+    const plain = await createSEOContentBlueprint(
+      {
+        client_id: "client-1",
+        build_id: "build-1",
+        competitive_landscape: makeLandscape(),
+        routes: routesFor(5),
+        business_facts: [],
+      },
+      { llm, dataForSeo: fakePages },
+    );
+    const { artifact } = await buildWithEvidence(5);
+    expect(plain.payload).toEqual(artifact.payload);
+  });
+
+  it("never reports completed batches for a run that failed to seal", async () => {
+    // Batch 2 comes back without route-5 → the whole artifact fails.
+    const { llm } = fakeLlm(modelRoutesFor(4));
+    await expect(
+      createSEOContentBlueprintWithEvidence(
+        {
+          client_id: "client-1",
+          build_id: "build-1",
+          competitive_landscape: makeLandscape(),
+          routes: routesFor(5),
+          business_facts: [],
+        },
+        { llm, dataForSeo: fakePages },
+      ),
+    ).rejects.toMatchObject({ code: "SEO_CONTENT_BLUEPRINT_BATCH_INVALID" });
   });
 });

@@ -122,6 +122,26 @@ export const seoContentBlueprintRoutesSchema = z
 export type _SeoRouteParity =
   z.infer<typeof seoContentBlueprintRouteSchema> extends SEOContentBlueprintRoute ? true : never;
 
+/* ── SEOContentBlueprint global route strategy (compact internal plan) ───────── */
+
+/**
+ * Compact internal global plan: the global planning call returns ONLY this
+ * per-route intent summary — never full route blueprints. Internal to SEO-Bot;
+ * it is not a cross-repo artifact. The producer parses an ARRAY of these and
+ * validates exact route-set parity (count, ids, unique normalized queries)
+ * deterministically — this schema owns the per-entry shape only.
+ */
+export const globalRouteIntentRouteSchema = z
+  .object({
+    route_id: z.string().min(1),
+    primary_query: z.string().min(1),
+    primary_intent: z.string().min(1),
+    journey_stage: z.enum(["informational", "commercial", "transactional"]),
+  })
+  .strict();
+
+export type GlobalRouteIntentRoute = z.infer<typeof globalRouteIntentRouteSchema>;
+
 /* ── StructuredContentPackage (model-produced routes) ───────────────────────── */
 
 /**
