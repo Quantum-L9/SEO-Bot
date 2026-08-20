@@ -38,13 +38,80 @@ import { createModuleLogger } from "../core/logger.js";
 import { DataForSeoClient } from "../services/dataforseo.js";
 import { getLlmService, type LlmService } from "../services/llm.js";
 import { PRODUCER } from "./producer.js";
+import { z } from "zod";
 import {
   type GlobalRouteIntentRoute,
-  globalRouteIntentSchema,
+  globalRouteIntentRouteSchema,
   seoContentBlueprintRoutesSchema,
 } from "./schema-guards.js";
 
 const logger = createModuleLogger("build-intelligence:seo-content-blueprint");
+
+/**
+ * Deterministic batch size for full-site blueprint production. The LLM never
+ * chooses batching — the producer splits the requested route set into batches
+ * of exactly this size (the final batch may be smaller).
+ */
+export const SEO_BLUEPRINT_BATCH_SIZE = 4;
+
+// The compact per-route strategy summary produced in phase A for ALL routes is
+// `GlobalRouteIntentRoute`; its zod authority lives in `schema-guards.js` with
+// every other runtime guard for model output.
+
+/**
+ * A batch failed its single bounded repair. The whole artifact fails — a
+ * partial route set (24/29) is never sealed as success.
+ */
+export class SeoContentBlueprintBatchInvalidError extends Error {
+  readonly code = "SEO_CONTENT_BLUEPRINT_BATCH_INVALID";
+  constructor(message: string) {
+    super(message);
+    this.name = "SeoContentBlueprintBatchInvalidError";
+  }
+}
+
+function normalizeQuery(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+export function chunkRoutes<T>(routes: T[], size: number = SEO_BLUEPRINT_BATCH_SIZE): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < routes.length; index += size) {
+    chunks.push(routes.slice(index, index + size));
+  }
+  return chunks;
+}
+
+/** Phase A validation: exact route count, exact IDs, no duplicate normalized queries. */
+function parseGlobalRouteIntentPlan(
+  value: unknown,
+  requested: Array<{ route_id: string; path: string; purpose: string }>,
+): GlobalRouteIntentRoute[] {
+  const parsed = z.array(globalRouteIntentRouteSchema).parse(value);
+  const requestedIds = new Set(requested.map((route) => route.route_id));
+  if (parsed.length !== requested.length) {
+    throw new Error(
+      `Global intent plan produced ${parsed.length} entries for ${requested.length} routes`,
+    );
+  }
+  const seenIds = new Set<string>();
+  const seenQueries = new Set<string>();
+  for (const intent of parsed) {
+    if (!requestedIds.has(intent.route_id)) {
+      throw new Error(`Global intent plan has unexpected route_id: ${intent.route_id}`);
+    }
+    if (seenIds.has(intent.route_id)) {
+      throw new Error(`Global intent plan has duplicate route_id: ${intent.route_id}`);
+    }
+    seenIds.add(intent.route_id);
+    const normalized = normalizeQuery(intent.primary_query);
+    if (seenQueries.has(normalized)) {
+      throw new Error(`Global intent plan has duplicate primary_query: "${intent.primary_query}"`);
+    }
+    seenQueries.add(normalized);
+  }
+  return parsed;
+}
 
 /** Bounded, deterministic page-content metrics surface (injectable for tests). */
 export interface PageContentPort {
@@ -113,39 +180,6 @@ const MAX_DONORS_FOR_EVIDENCE = 6;
 const MAX_URLS_PER_DONOR = 1;
 const MAX_TOTAL_URLS = 8;
 
-/**
- * Deterministic batch size for full blueprint generation. Safe Haven's 29
- * routes yield 8 batches: 4 + 4 + 4 + 4 + 4 + 4 + 4 + 1. Batch composition
- * always derives from request.routes order — never from model output.
- */
-export const SEO_BLUEPRINT_BATCH_SIZE = 4;
-
-export function chunkRoutes<T>(routes: T[], size = SEO_BLUEPRINT_BATCH_SIZE): T[][] {
-  const result: T[][] = [];
-  for (let i = 0; i < routes.length; i += size) {
-    result.push(routes.slice(i, i + size));
-  }
-  return result;
-}
-
-/**
- * Measured evidence about a batched blueprint run, sibling to the plain
- * artifact endpoint (mirrors StructuredContent's evidence shape).
- */
-export interface SEOContentBlueprintEvidence {
-  route_count: number;
-  batch_size: number;
-  batch_count: number;
-  completed_batches: number;
-  missing_route_ids: string[];
-  extra_route_ids: string[];
-}
-
-export interface SEOContentBlueprintResult {
-  artifact: SEOContentBlueprintArtifact;
-  evidence: SEOContentBlueprintEvidence;
-}
-
 interface NormalizedDonorEvidence {
   domain: string;
   aggregate_visibility: number;
@@ -158,6 +192,37 @@ interface NormalizedDonorEvidence {
   external_links: number;
 }
 
+/**
+ * Measured evidence about a batched blueprint run, for the integrity receipt.
+ * A sealed artifact always carries a clean validation block, so the block
+ * itself cannot tell you how the route set was split — this can.
+ *
+ * `batch_count` is the split the producer actually performed;
+ * `completed_batches` is COUNTED as batches finish. They are equal on every
+ * sealed artifact (a batch that fails its bounded repair fails the whole
+ * artifact, so a partial run never seals) — the counter exists so that
+ * invariant is observable rather than assumed.
+ *
+ * Deliberately NOT recorded here: LLM call counts. `strategizeJson` owns its
+ * own bounded repair, so the producer cannot see how many calls a batch really
+ * cost, and a counter incremented per batch here would silently understate it.
+ */
+export interface SEOContentBlueprintEvidence {
+  route_count: number;
+  batch_size: number;
+  batch_count: number;
+  completed_batches: number;
+}
+
+export interface SEOContentBlueprintResult {
+  artifact: SEOContentBlueprintArtifact;
+  evidence: SEOContentBlueprintEvidence;
+}
+
+/**
+ * Produce the sealed blueprint. Use `createSEOContentBlueprintWithEvidence`
+ * when the caller also needs measured run evidence (the seam proof does).
+ */
 export async function createSEOContentBlueprint(
   request: SEOContentBlueprintRequest,
   deps: { llm?: LlmService; dataForSeo?: PageContentPort } = {},
@@ -165,14 +230,6 @@ export async function createSEOContentBlueprint(
   return (await createSEOContentBlueprintWithEvidence(request, deps)).artifact;
 }
 
-/**
- * Batched blueprint generation: compact global route strategy → deterministic
- * batches (4 routes, request order) → batch-scoped reconciliation →
- * deterministic whole-site merge → whole-site semantic checks → seal.
- * The single-batch fast path (route count ≤ batch size) skips the global plan
- * call — a separate global strategy adds no cross-batch coordination there —
- * and keeps exactly one strategic call for the whole site.
- */
 export async function createSEOContentBlueprintWithEvidence(
   request: SEOContentBlueprintRequest,
   deps: { llm?: LlmService; dataForSeo?: PageContentPort } = {},
@@ -186,36 +243,168 @@ export async function createSEOContentBlueprintWithEvidence(
 
   const evidence = await gatherDonorEvidence(landscape, dataForSeo);
 
-  // 1. Compact global route strategy — intent-level plan only, exact route-set
-  //    parity (no missing, no extra, no duplicate route ID).
-  const globalPlan = await planGlobalRouteStrategy(llm, request, landscape, evidence);
+  const systemPrompt =
+    "You are a senior SEO content strategist. You produce a STRATEGIC content " +
+    "blueprint from normalized competitive evidence and verified business facts. " +
+    "You decide search intent, supporting queries, topics, entities, questions, " +
+    "competitive content gaps, content requirements, internal-link requirements, " +
+    "AEO/GEO requirements, metadata requirements, forbidden claims, and acceptance " +
+    "tests. You do NOT decide page layout, section order, component classes, visual " +
+    "design, CTA placement, or final prose. Respond with ONLY the requested JSON " +
+    "shape — no markdown fences, no commentary.";
 
-  // 2. Deterministic batches from request.routes order. Every batch receives
-  //    global site awareness: all_routes MAY be referenced for internal links,
-  //    current_batch_routes MUST be returned.
-  const batches = chunkRoutes(request.routes);
   const allRouteIds = new Set(request.routes.map((route) => route.route_id));
-  const batchResults = await Promise.all(
-    batches.map((batch, index) =>
-      generateBatchBlueprint(
-        llm,
-        request,
-        landscape,
-        evidence,
-        globalPlan,
-        batch,
-        allRouteIds,
-        index,
-      ),
+  const allRouteIndex = request.routes.map((route) => ({
+    route_id: route.route_id,
+    path: route.path,
+    purpose: route.purpose,
+  }));
+
+  // ── PHASE A — global route intent plan (one compact call for ALL routes) ────
+  const globalIntentPlan = await llm.strategizeJson<GlobalRouteIntentRoute[]>({
+    clientId: request.client_id,
+    module: "build-intelligence",
+    purpose: `seo-content-blueprint:global-intent:${request.build_id}`,
+    systemPrompt,
+    userPrompt: JSON.stringify(
+      {
+        task: "global_route_intent_plan",
+        market: landscape.market,
+        routes: allRouteIndex,
+        verified_business_facts: request.business_facts,
+        seo_config: request.seo_config ?? {},
+        output_contract: {
+          shape: [
+            {
+              route_id: "string (exact route_id from routes above)",
+              primary_query: "string (the single primary target query)",
+              primary_intent: "string (top-level search intent)",
+              journey_stage: "informational | commercial | transactional",
+            },
+          ],
+          note: "Return exactly one entry per route_id above, in the requested order. No other fields. Every primary_query must be unique after normalization.",
+        },
+      },
+      null,
+      2,
     ),
-  );
+    validate: (value) => parseGlobalRouteIntentPlan(value, request.routes),
+  });
+  const intentById = new Map(globalIntentPlan.map((intent) => [intent.route_id, intent]));
 
-  // 3. Deterministic whole-site merge in requested order — never completion
-  //    order. Duplicate or missing generated routes throw.
-  const routes = mergeBatchResults(batchResults, request.routes, allRouteIds);
+  // ── PHASE B — deterministic route batches (the LLM never chooses batching) ──
+  const batches = chunkRoutes(request.routes, SEO_BLUEPRINT_BATCH_SIZE);
+  const producedById = new Map<string, SEOContentBlueprintRoute>();
+  let completedBatches = 0;
+  for (const [batchIndex, batch] of batches.entries()) {
+    let batchRoutes: SEOContentBlueprintRoute[];
+    try {
+      batchRoutes = await llm.strategizeJson<SEOContentBlueprintRoute[]>({
+        clientId: request.client_id,
+        module: "build-intelligence",
+        purpose: `seo-content-blueprint:batch-${batchIndex + 1}:${request.build_id}`,
+        systemPrompt,
+        userPrompt: JSON.stringify(
+          {
+            task: "seo_content_blueprint_batch",
+            market: landscape.market,
+            query_portfolio: landscape.query_portfolio,
+            selected_donors: landscape.selected_donors,
+            normalized_donor_evidence: evidence,
+            all_route_index: allRouteIndex,
+            global_route_intent_plan: globalIntentPlan,
+            current_batch: batch,
+            verified_business_facts: request.business_facts,
+            seo_config: request.seo_config ?? {},
+            output_contract: {
+              one_entry_per_route_id: batch.map((route) => route.route_id),
+              route_shape: {
+                search_intent: {
+                  primary: "reassert the primary_intent from the global intent plan",
+                  secondary: "string[]",
+                  journey_stage: "reassert the journey_stage from the global intent plan",
+                },
+                targets: {
+                  primary_query: "reassert the primary_query from the global intent plan",
+                  supporting_queries: "string[]",
+                  topics: "string[]",
+                  entities: "string[]",
+                },
+                requirements: {
+                  requirement_id: "string",
+                  target_slots: "content slot names (string[])",
+                  placement: "one of: FIRST_MATCH | ALL_MATCHES",
+                  required_topics: "string[]",
+                  required_entities: "string[]",
+                  questions: "string[]",
+                  proof_needed: "string[]",
+                  required: "boolean",
+                },
+                competitive_gaps: [
+                  {
+                    gap_id: "string",
+                    description: "string",
+                    donor_domains: "string[]",
+                    opportunity: "string",
+                  },
+                ],
+                internal_links: [
+                  {
+                    target_route_id: "string (must be one of the all_route_index ids — other batches are valid targets)",
+                    purpose: "string",
+                  },
+                ],
+                aeo_geo: { answer_targets: "string[]", schema_requirements: "string[]" },
+                metadata: { title_requirements: "string[]", description_requirements: "string[]" },
+                forbidden_claims: "string[]",
+                acceptance_tests: "string[]",
+              },
+              content_slots: [
+                "primary_offer",
+                "service_overview",
+                "differentiation",
+                "trust",
+                "process",
+                "project_proof",
+                "local_relevance",
+                "objection_handling",
+                "faq",
+                "conversion",
+                "metadata",
+              ],
+              note: "Return exactly one route object per route_id in the current_batch, matching route_shape exactly. The global strategy is already decided — do not silently change it in this batch.",
+            },
+          },
+          null,
+          2,
+        ),
+        validate: (value) => reconcileBatch(value, batch, allRouteIds, intentById),
+      });
+    } catch (error) {
+      // A batch that fails its one bounded repair fails the whole artifact.
+      throw new SeoContentBlueprintBatchInvalidError(
+        `Batch ${batchIndex + 1} failed validation after its bounded repair: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    for (const route of batchRoutes) {
+      producedById.set(route.route_id, route);
+    }
+    completedBatches += 1;
+  }
 
-  // 4. Existing whole-site semantic checks run again on the merged site.
-  assertBlueprintSemantics(routes, allRouteIds);
+  // ── Deterministic merge in requested order, then whole-site validation ──────
+  const routes = request.routes.map((route) => {
+    const produced = producedById.get(route.route_id);
+    if (!produced) {
+      throw new SeoContentBlueprintBatchInvalidError(
+        `No produced route for requested route_id: ${route.route_id}`,
+      );
+    }
+    return produced;
+  });
+  assertWholeSiteBlueprint(routes, request.routes, allRouteIds);
 
   const landscapeRef = refForArtifact(request.competitive_landscape);
   const payload: SEOContentBlueprintV1 = {
@@ -259,207 +448,9 @@ export async function createSEOContentBlueprintWithEvidence(
       route_count: request.routes.length,
       batch_size: SEO_BLUEPRINT_BATCH_SIZE,
       batch_count: batches.length,
-      completed_batches: batchResults.length,
-      missing_route_ids: [],
-      extra_route_ids: [],
+      completed_batches: completedBatches,
     },
   };
-}
-
-/**
- * Compact global plan call. It must NOT produce full route blueprints — only
- * the intent-level summary the batch prompts consume as global strategy.
- */
-async function planGlobalRouteStrategy(
-  llm: LlmService,
-  request: SEOContentBlueprintRequest,
-  landscape: CompetitiveLandscapeArtifact["payload"],
-  evidence: NormalizedDonorEvidence[],
-): Promise<GlobalRouteIntentRoute[] | null> {
-  if (request.routes.length <= SEO_BLUEPRINT_BATCH_SIZE) {
-    return null;
-  }
-  const systemPrompt =
-    "You are a senior SEO content strategist. Produce a COMPACT site-level route " +
-    "strategy: for every route, decide only its primary query, primary search " +
-    "intent, and journey stage. You do NOT decide topics, entities, requirements, " +
-    "internal links, metadata, or prose — the per-batch planner does that. " +
-    'Respond with ONLY a JSON object {"routes":[...]} — no markdown fences, no commentary.';
-
-  const userPrompt = JSON.stringify(
-    {
-      market: landscape.market,
-      query_portfolio: landscape.query_portfolio,
-      selected_donors: landscape.selected_donors,
-      normalized_donor_evidence: evidence,
-      routes: request.routes.map(({ route_id, path, purpose }) => ({
-        route_id,
-        path,
-        purpose,
-      })),
-      verified_business_facts: request.business_facts,
-      output_contract: {
-        one_entry_per_route_id: request.routes.map((route) => route.route_id),
-        route_shape: {
-          route_id: "string",
-          primary_query: "string",
-          primary_intent: "string",
-          journey_stage: "one of: informational | commercial | transactional",
-        },
-        note: "Compact intent-level plan only. Do NOT add topics, entities, requirements, internal links, metadata, or any other field.",
-      },
-    },
-    null,
-    2,
-  );
-
-  return llm.strategizeJson<GlobalRouteIntentRoute[]>({
-    clientId: request.client_id,
-    module: "build-intelligence",
-    purpose: `seo-content-blueprint:${request.build_id}:global-route-strategy`,
-    systemPrompt,
-    userPrompt,
-    validate: (value) => reconcileGlobalRouteStrategy(value, request.routes),
-  });
-}
-
-/**
- * The global plan must cover exactly the requested route set — no missing, no
- * extra, no duplicate route ID — and is returned in requested order.
- */
-function reconcileGlobalRouteStrategy(
-  value: unknown,
-  requested: SEOContentBlueprintRequest["routes"],
-): GlobalRouteIntentRoute[] {
-  const parsed = globalRouteIntentSchema.parse(value);
-  const byId = new Map(parsed.routes.map((route) => [route.route_id, route]));
-  if (byId.size !== parsed.routes.length) {
-    throw new SeoContentBlueprintInvalidError("Duplicate route_id in global plan output");
-  }
-  const requestedIds = new Set(requested.map((route) => route.route_id));
-  const unexpected = parsed.routes
-    .map((route) => route.route_id)
-    .filter((id) => !requestedIds.has(id));
-  if (unexpected.length > 0) {
-    throw new SeoContentBlueprintInvalidError(
-      `Unexpected route_id(s) in global plan: ${unexpected.join(", ")}`,
-    );
-  }
-  return requested.map((route) => {
-    const produced = byId.get(route.route_id);
-    if (!produced) {
-      throw new SeoContentBlueprintInvalidError(
-        `Missing global plan for required route_id: ${route.route_id}`,
-      );
-    }
-    return produced;
-  });
-}
-
-/** One batch's full blueprint generation with global site awareness. */
-async function generateBatchBlueprint(
-  llm: LlmService,
-  request: SEOContentBlueprintRequest,
-  landscape: CompetitiveLandscapeArtifact["payload"],
-  evidence: NormalizedDonorEvidence[],
-  globalPlan: GlobalRouteIntentRoute[] | null,
-  batchRoutes: SEOContentBlueprintRequest["routes"],
-  allRouteIds: Set<string>,
-  batchIndex: number,
-): Promise<SEOContentBlueprintRoute[]> {
-  const systemPrompt =
-    "You are a senior SEO content strategist. You produce a STRATEGIC content " +
-    "blueprint from normalized competitive evidence and verified business facts. " +
-    "You decide search intent, supporting queries, topics, entities, questions, " +
-    "competitive content gaps, content requirements, internal-link requirements, " +
-    "AEO/GEO requirements, metadata requirements, forbidden claims, and acceptance " +
-    "tests. You do NOT decide page layout, section order, component classes, visual " +
-    "design, CTA placement, or final prose. Respond with ONLY a JSON object " +
-    '{"routes":[...]} — no markdown fences, no commentary.';
-
-  const userPrompt = JSON.stringify(
-    {
-      market: landscape.market,
-      query_portfolio: landscape.query_portfolio,
-      selected_donors: landscape.selected_donors,
-      normalized_donor_evidence: evidence,
-      all_routes: request.routes.map(({ route_id, path, purpose }) => ({
-        route_id,
-        path,
-        purpose,
-      })),
-      global_route_strategy: globalPlan ?? [],
-      current_batch_routes: batchRoutes,
-      verified_business_facts: request.business_facts,
-      seo_config: request.seo_config ?? {},
-      output_contract: {
-        one_entry_per_route_id: batchRoutes.map((route) => route.route_id),
-        route_shape: {
-          search_intent: {
-            primary: "primary search intent (string)",
-            secondary: "string[]",
-            journey_stage: "one of: informational | commercial | transactional",
-          },
-          targets: {
-            primary_query: "string",
-            supporting_queries: "string[]",
-            topics: "string[]",
-            entities: "string[]",
-          },
-          requirements: {
-            requirement_id: "string",
-            target_slots: "content slot names (string[])",
-            placement: "one of: FIRST_MATCH | ALL_MATCHES",
-            required_topics: "string[]",
-            required_entities: "string[]",
-            questions: "string[]",
-            proof_needed: "string[]",
-            required: "boolean",
-          },
-          competitive_gaps: [
-            {
-              gap_id: "string",
-              description: "string",
-              donor_domains: "string[]",
-              opportunity: "string",
-            },
-          ],
-          internal_links: [
-            { target_route_id: "string (must be one of the route_ids above)", purpose: "string" },
-          ],
-          aeo_geo: { answer_targets: "string[]", schema_requirements: "string[]" },
-          metadata: { title_requirements: "string[]", description_requirements: "string[]" },
-          forbidden_claims: "string[]",
-          acceptance_tests: "string[]",
-        },
-        content_slots: [
-          "primary_offer",
-          "service_overview",
-          "differentiation",
-          "trust",
-          "process",
-          "project_proof",
-          "local_relevance",
-          "objection_handling",
-          "faq",
-          "conversion",
-          "metadata",
-        ],
-        note: "Return exactly one route object per route_id in current_batch_routes, matching route_shape exactly. Internal links may target any route_id in all_routes. Do not add layout, component, or prose fields.",
-      },
-    },
-    null,
-    2,
-  );
-
-  return llm.strategizeJson<SEOContentBlueprintRoute[]>({
-    clientId: request.client_id,
-    module: "build-intelligence",
-    purpose: `seo-content-blueprint:${request.build_id}:batch-${batchIndex + 1}`,
-    systemPrompt,
-    userPrompt,
-    validate: (value) => reconcileBatchRoutes(value, batchRoutes, allRouteIds),
-  });
 }
 
 /** The requested route set is the identity authority — it must be well formed. */
@@ -582,17 +573,17 @@ async function collectDonorMetrics(
 }
 
 /**
- * Validate one batch's model output against the shared route schema and
- * reconcile it with the REQUESTED batch identities. Route identity (route_id +
- * path) is an input, not the model's to invent or change — identities are
- * re-asserted from the request and routes are returned in batch order
- * (deterministic). Routes from OTHER batches are rejected here. Missing or
- * unexpected routes throw, triggering the single bounded repair.
+ * Validate ONE batch's model output against its own route identities, the
+ * all-route ID set (internal-link authority), and the global intent plan
+ * (strategy authority). The split authorities mean a batch can link to any
+ * route on the site, but can never invent routes, and can never silently
+ * change the global strategy.
  */
-function reconcileBatchRoutes(
+function reconcileBatch(
   value: unknown,
-  batchRoutes: Array<{ route_id: string; path: string; purpose: string }>,
+  batch: Array<{ route_id: string; path: string; purpose: string }>,
   allRouteIds: Set<string>,
+  intentById: Map<string, GlobalRouteIntentRoute>,
 ): SEOContentBlueprintRoute[] {
   // Slot vocabulary is enforced here: `target_slots` is a zod enum over the
   // shared ContentSlot union, so an invented slot name fails the parse.
@@ -600,83 +591,59 @@ function reconcileBatchRoutes(
   const byId = new Map(parsed.routes.map((route) => [route.route_id, route]));
 
   if (byId.size !== parsed.routes.length) {
-    throw new SeoContentBlueprintInvalidError("Duplicate route_id in model output");
+    throw new Error("Duplicate route_id in model output");
   }
 
-  const batchIds = new Set(batchRoutes.map((route) => route.route_id));
-  // No route from another batch may appear in this batch's output.
+  const batchIds = new Set(batch.map((route) => route.route_id));
+  // Output route IDs must equal batch route IDs EXACTLY — no missing, no extras,
+  // and no route belonging to another batch.
   const unexpected = parsed.routes
     .map((route) => route.route_id)
     .filter((id) => !batchIds.has(id));
   if (unexpected.length > 0) {
-    throw new SeoContentBlueprintInvalidError(
-      `Unexpected route_id(s) not in the requested set: ${unexpected.join(", ")}`,
-    );
+    throw new Error(`Batch contains route_id(s) outside this batch: ${unexpected.join(", ")}`);
   }
 
-  const routes = batchRoutes.map((route) => {
+  const routes = batch.map((route) => {
     const produced = byId.get(route.route_id);
     if (!produced) {
-      throw new SeoContentBlueprintInvalidError(
-        `Missing blueprint for required route_id: ${route.route_id}`,
-      );
+      throw new Error(`Missing blueprint for required route_id: ${route.route_id}`);
     }
-    // Re-assert identity from the request (authority), keep strategic fields.
-    return { ...produced, route_id: route.route_id, path: route.path };
+    const intent = intentById.get(route.route_id);
+    if (!intent) {
+      throw new Error(`Missing global intent plan entry for route_id: ${route.route_id}`);
+    }
+    // Re-assert identity from the request (authority) and strategy from the
+    // global intent plan (authority); keep the model's strategic detail fields.
+    return {
+      ...produced,
+      route_id: route.route_id,
+      path: route.path,
+      search_intent: {
+        ...produced.search_intent,
+        primary: intent.primary_intent,
+        journey_stage: intent.journey_stage,
+      },
+      targets: { ...produced.targets, primary_query: intent.primary_query },
+    };
   });
 
-  // Internal links validate against the WHOLE site (allRouteIds), not just
-  // this batch: a route in batch 3 may correctly link to a route in batch 8.
-  assertBlueprintSemantics(routes, allRouteIds);
+  assertBatchSemantics(routes, allRouteIds);
   return routes;
 }
 
 /**
- * Deterministic whole-site merge: never concatenate in completion order.
- * Batch outputs are merged by route_id, duplicates throw, and the final order
- * is exactly request.routes order. Missing routes throw.
+ * Deterministic semantic checks the zod shape cannot express, scoped to a
+ * batch: internal links may target ANY route on the site (allRouteIds), and
+ * requirement ids must be unique per route with valid target slots.
  */
-function mergeBatchResults(
-  batchResults: SEOContentBlueprintRoute[][],
-  requested: SEOContentBlueprintRequest["routes"],
-  allRouteIds: Set<string>,
-): SEOContentBlueprintRoute[] {
-  const produced = new Map<string, SEOContentBlueprintRoute>();
-  for (const batch of batchResults) {
-    for (const route of batch) {
-      if (produced.has(route.route_id)) {
-        throw new SeoContentBlueprintInvalidError(
-          `Duplicate generated route: ${route.route_id}`,
-        );
-      }
-      produced.set(route.route_id, route);
-    }
-  }
-  const missing = requested.filter((route) => !produced.has(route.route_id));
-  if (missing.length > 0) {
-    throw new SeoContentBlueprintInvalidError(
-      `Missing generated route: ${missing.map((route) => route.route_id).join(", ")}`,
-    );
-  }
-  const extra = [...produced.keys()].filter((id) => !allRouteIds.has(id));
-  if (extra.length > 0) {
-    throw new SeoContentBlueprintInvalidError(`Extra generated route: ${extra.join(", ")}`);
-  }
-  return requested.map((route) => produced.get(route.route_id)!);
-}
-
-/**
- * Deterministic semantic checks the zod shape cannot express: internal links
- * must target routes that exist, and requirement ids must be unique per route.
- * A violation throws, which triggers the single bounded repair before sealing.
- */
-function assertBlueprintSemantics(
+function assertBatchSemantics(
   routes: SEOContentBlueprintRoute[],
-  requestedIds: Set<string>,
+  allRouteIds: Set<string>,
 ): void {
   for (const route of routes) {
     for (const link of route.internal_links) {
-      if (!requestedIds.has(link.target_route_id)) {
+      if (!allRouteIds.has(link.target_route_id)) {
         throw new Error(
           `Route "${route.route_id}" links to unknown target_route_id "${link.target_route_id}"`,
         );
@@ -700,4 +667,40 @@ function assertBlueprintSemantics(
       }
     }
   }
+}
+
+/**
+ * Whole-site semantic validator run on the deterministic merge before sealing:
+ * same route count, exact requested order and paths, no duplicate route IDs,
+ * no unknown internal-link targets, no self-links, no duplicate requirement
+ * IDs, all target slots valid, and no unintended duplicate primary queries.
+ */
+function assertWholeSiteBlueprint(
+  routes: SEOContentBlueprintRoute[],
+  requested: Array<{ route_id: string; path: string; purpose: string }>,
+  allRouteIds: Set<string>,
+): void {
+  if (routes.length !== requested.length) {
+    throw new SeoContentBlueprintBatchInvalidError(
+      `Whole-site merge produced ${routes.length} routes for ${requested.length} requested`,
+    );
+  }
+  const seenQueries = new Set<string>();
+  for (let index = 0; index < requested.length; index++) {
+    const route = routes[index];
+    const wanted = requested[index];
+    if (route.route_id !== wanted.route_id || route.path !== wanted.path) {
+      throw new SeoContentBlueprintBatchInvalidError(
+        `Whole-site merge order/path mismatch at index ${index}: expected ${wanted.route_id} (${wanted.path}), got ${route.route_id} (${route.path})`,
+      );
+    }
+    const normalized = normalizeQuery(route.targets.primary_query);
+    if (seenQueries.has(normalized)) {
+      throw new SeoContentBlueprintBatchInvalidError(
+        `Whole-site merge has duplicate primary_query: "${route.targets.primary_query}"`,
+      );
+    }
+    seenQueries.add(normalized);
+  }
+  assertBatchSemantics(routes, allRouteIds);
 }

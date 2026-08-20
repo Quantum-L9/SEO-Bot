@@ -37,6 +37,16 @@ function tierToComplexity(tier: LegacyTier): TaskComplexity {
   return tier === "fast" ? TaskComplexity.LOW : TaskComplexity.HIGH;
 }
 
+/**
+ * Shared counter for run evidence: one increment per ACTUAL router call.
+ * Passed by reference so callers that compose policy-JSON operations (e.g.
+ * the structured-content orchestrator) can report honest call counts even
+ * when a callee internally performs its one bounded repair.
+ */
+export interface LlmCallCounter {
+  value: number;
+}
+
 export class LlmService {
   private readonly router: L9LLMRouter;
 
@@ -220,9 +230,14 @@ export class LlmService {
    * schema-conformant JSON. Task cognition (STRATEGIC_REASONING /
    * CONTENT_GENERATION / SCORING) and the hard search flag come entirely from
    * {@link SEO_IMPROVE_LLM_POLICY} — the caller never chooses a task type,
-   * provider, or model. Parse+validate failures trigger EXACTLY ONE bounded
+   * provider, or model. Parse+validate failures trigger AT MOST ONE bounded
    * repair scoped to the same operation; a second failure is terminal (the
    * validator's error propagates). No infinite retry.
+   *
+   * `schemaRepairAttempts: 0` opts OUT of the internal repair: the caller owns
+   * the one total repair for the route (StructuredContentPackage does this so
+   * a route can never consume more than two generation calls). The default of
+   * 1 keeps every pre-existing caller's behavior unchanged.
    */
   async executePolicyJson<T>(
     operation: SeoImproveLlmOperation,
@@ -233,13 +248,27 @@ export class LlmService {
       systemPrompt: string;
       userPrompt: string;
       validate: (value: unknown) => T;
+      /** 0 = no internal JSON/schema repair; 1 = one bounded repair (default). */
+      schemaRepairAttempts?: 0 | 1;
+      /** Incremented once per actual LLM call, when supplied. */
+      callCounter?: LlmCallCounter;
     },
   ): Promise<T> {
+    const repairAttempts = args.schemaRepairAttempts ?? 1;
+    if (repairAttempts !== 0 && repairAttempts !== 1) {
+      throw new Error("schemaRepairAttempts must be 0 or 1");
+    }
     const task = seoImproveTask(operation, args.clientId, `[${args.module}] ${args.purpose}`);
     const first = await this.execute(task, args.systemPrompt, args.userPrompt);
+    if (args.callCounter) args.callCounter.value += 1;
     try {
       return args.validate(parseJsonFromLlm<unknown>(first.content));
     } catch (error) {
+      if (repairAttempts === 0) {
+        // The caller owns the one total repair; propagate the parse/schema
+        // failure with no hidden nested retry.
+        throw error;
+      }
       const reason = error instanceof Error ? error.message : String(error);
       logger.warn(
         { operation, clientId: args.clientId, purpose: args.purpose, reason },
@@ -249,6 +278,7 @@ export class LlmService {
         `${args.userPrompt}\n\n---\nYour previous response was rejected: ${reason}\n` +
         `Respond again with ONLY a single valid JSON value that satisfies the required schema. No prose, no markdown fences.`;
       const second = await this.execute(task, args.systemPrompt, repairPrompt);
+      if (args.callCounter) args.callCounter.value += 1;
       // A second failure throws the validator's terminal error — no further retry.
       return args.validate(parseJsonFromLlm<unknown>(second.content));
     }

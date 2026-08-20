@@ -35,10 +35,15 @@ import {
   WEBSITE_INTELLIGENCE_SCHEMAS,
 } from "@quantum-l9/bot-interop";
 import { createModuleLogger } from "../core/logger.js";
-import { getLlmService, type LlmService } from "../services/llm.js";
+import { getLlmService, type LlmCallCounter, type LlmService } from "../services/llm.js";
 import { type RouteValidationVerdict, validateRoute } from "./content-validator.js";
 import { PRODUCER } from "./producer.js";
-import { structuredContentRouteSchema } from "./schema-guards.js";
+import {
+  type SchemaFailure,
+  schemaFailureDetails,
+  STRUCTURED_CONTENT_OUTPUT_CONTRACT,
+  structuredContentRouteSchema,
+} from "./schema-guards.js";
 
 const logger = createModuleLogger("build-intelligence:structured-content");
 
@@ -91,15 +96,18 @@ export class ArtifactLineageMismatchError extends Error {
 }
 
 /**
- * Measured evidence about the run, for the integrity receipt. `repair_attempts`
- * is COUNTED, never inferred — a sealed package always has a clean validation
- * block, so the block itself cannot tell you whether a repair happened.
+ * Measured evidence about the run, for the integrity receipt. Every counter is
+ * COUNTED from actual LLM calls, never inferred — a sealed package always has a
+ * clean validation block, so the block itself cannot tell you whether a repair
+ * happened or how many calls it took. `repair_attempts` is bounded by
+ * construction: at most `route_count` and at most one per route.
  */
 export interface StructuredContentEvidence {
   route_count: number;
-  generation_calls: number;
-  validation_calls: number;
+  generation_llm_calls: number;
+  semantic_validation_llm_calls: number;
   repair_attempts: number;
+  schema_failure_count: number;
   repaired_route_ids: string[];
 }
 
@@ -133,51 +141,102 @@ export async function createStructuredContentPackageWithEvidence(
     (request.seo_content_blueprint?.payload.routes ?? []).map((route) => [route.route_id, route]),
   );
 
+  // Actual-call counters shared across the whole run. Generation uses
+  // `schemaRepairAttempts: 0` so each generateRoute() is exactly one LLM call;
+  // the semantic-validation path counts through a wrapper that injects its own
+  // counter into content-validator's executePolicyJson call.
+  const generationCalls: LlmCallCounter = { value: 0 };
+  const semanticValidationCalls: LlmCallCounter = { value: 0 };
+  const validationLlm = countingValidationLlm(llm, semanticValidationCalls);
+
   const routes: StructuredContentRoute[] = [];
   const verdicts: RouteValidationVerdict[] = [];
   const repairedRouteIds: string[] = [];
-  let generationCalls = 0;
-  let validationCalls = 0;
+  let schemaFailureCount = 0;
 
   for (const contractRoute of contract.routes) {
     const blueprintRoute = blueprintRoutes.get(contractRoute.route_id);
 
-    // 1. Generate prose for this route only.
-    let generated = await generateRoute(llm, request, contractRoute);
-    generationCalls += 1;
-
-    // 2. Validate (deterministic then semantic).
-    let verdict = await validateRoute(generated, contractRoute, {
-      clientId: request.client_id,
-      buildId: request.build_id,
-      blueprintRoute,
-      llm,
-    });
-    validationCalls += 1;
-
-    // 3. ONE bounded repair, scoped to this route + its failed requirements.
-    if (!routePassed(verdict)) {
-      repairedRouteIds.push(contractRoute.route_id);
+    // 1. Generate prose for this route only — ONE actual call (no internal
+    //    repair: the orchestrator owns the one total repair for the route).
+    let schemaFailures: SchemaFailure[] = [];
+    let generated: StructuredContentRoute | null = null;
+    try {
+      generated = await generateRoute(llm, request, contractRoute, undefined, generationCalls);
+    } catch (error) {
+      schemaFailures = schemaFailureDetails(error);
+      schemaFailureCount += 1;
       logger.warn(
-        {
-          routeId: contractRoute.route_id,
-          failed: verdict.failed_requirements,
-          unsupported: verdict.unsupported_claims,
-        },
-        "Route failed validation; running one bounded repair",
+        { routeId: contractRoute.route_id, failures: schemaFailures },
+        "Route generation failed JSON/schema validation; deferring to the one route repair",
       );
-      generated = await generateRoute(llm, request, contractRoute, {
-        failed_requirements: verdict.failed_requirements,
-        unsupported_claims: verdict.unsupported_claims,
-      });
-      generationCalls += 1;
+    }
+
+    // 2. Validate (deterministic then semantic). A route that never parsed
+    //    cannot be validated — its repair below is fed the schema failures.
+    let verdict: RouteValidationVerdict;
+    if (generated === null) {
+      verdict = {
+        route_id: contractRoute.route_id,
+        contract_passed: false,
+        seo_blueprint_passed: false,
+        unsupported_claims: [],
+        failed_requirements: [],
+      };
+    } else {
       verdict = await validateRoute(generated, contractRoute, {
         clientId: request.client_id,
         buildId: request.build_id,
         blueprintRoute,
-        llm,
+        llm: validationLlm,
       });
-      validationCalls += 1;
+    }
+
+    // 3. ONE bounded repair covers a schema failure OR a semantic failure —
+    //    never both, so a route consumes at most two generation calls. The
+    //    repair prompt carries the exact failure evidence and the output
+    //    contract again.
+    if (generated === null || !routePassed(verdict)) {
+      repairedRouteIds.push(contractRoute.route_id);
+      logger.warn(
+        {
+          routeId: contractRoute.route_id,
+          schemaFailures,
+          failed: verdict.failed_requirements,
+          unsupported: verdict.unsupported_claims,
+        },
+        "Route failed validation; running its one bounded repair",
+      );
+      let repaired: StructuredContentRoute;
+      try {
+        repaired = await generateRoute(
+          llm,
+          request,
+          contractRoute,
+          {
+            schema_failures: schemaFailures,
+            failed_requirements: verdict.failed_requirements,
+            unsupported_claims: verdict.unsupported_claims,
+          },
+          generationCalls,
+        );
+      } catch (error) {
+        schemaFailureCount += 1;
+        const repairFailures = schemaFailureDetails(error);
+        throw new ContentRequirementUnsatisfiedError(
+          `Route "${contractRoute.route_id}" repair produced invalid content: ` +
+            repairFailures.map((failure) => `${failure.path}: ${failure.message}`).join("; "),
+          verdict.failed_requirements,
+          verdict.unsupported_claims,
+        );
+      }
+      generated = repaired;
+      verdict = await validateRoute(repaired, contractRoute, {
+        clientId: request.client_id,
+        buildId: request.build_id,
+        blueprintRoute,
+        llm: validationLlm,
+      });
 
       // 4. Second failure is terminal. There is no second repair.
       if (!routePassed(verdict)) {
@@ -235,10 +294,11 @@ export async function createStructuredContentPackageWithEvidence(
     artifact,
     evidence: {
       route_count: routes.length,
-      generation_calls: generationCalls,
-      validation_calls: validationCalls,
+      generation_llm_calls: generationCalls.value,
+      semantic_validation_llm_calls: semanticValidationCalls.value,
       // Bounded at one per route by construction; a second failure is terminal.
       repair_attempts: repairedRouteIds.length,
+      schema_failure_count: schemaFailureCount,
       repaired_route_ids: repairedRouteIds,
     },
   };
@@ -363,12 +423,22 @@ function assertPackageLineage(
  * Generate a single route's final content from ONLY its contract route. An
  * optional `repair` payload appends the specific failures to fix — scoping the
  * repair to this route without regenerating anything that already passed.
+ *
+ * Always called with `schemaRepairAttempts: 0`: this function performs EXACTLY
+ * ONE actual LLM call, and the orchestrator owns the one total repair per
+ * route (a route can therefore never consume more than two generation calls).
+ * The caller-supplied counter records the call honestly for run evidence.
  */
 async function generateRoute(
   llm: LlmService,
   request: StructuredContentRequest,
   contractRoute: PageContentContractRoute,
-  repair?: { failed_requirements: string[]; unsupported_claims: string[] },
+  repair?: {
+    schema_failures?: SchemaFailure[];
+    failed_requirements?: string[];
+    unsupported_claims?: string[];
+  },
+  generationCalls?: LlmCallCounter,
 ): Promise<StructuredContentRoute> {
   const systemPrompt =
     "You are the sole owner of final website prose for one route. Write ONLY from " +
@@ -378,20 +448,21 @@ async function generateRoute(
     "requirements. Produce a metadata title and description that satisfy their " +
     "requirements. Produce exactly one section object per contract section_id (same " +
     "ids), plus faqs, internal links (including every required internal-link target), " +
-    "and schema_content_inputs. Respond with ONLY a single JSON object for this " +
-    "route — no markdown fences, no commentary.";
+    "and schema_content_inputs.\n\n" +
+    STRUCTURED_CONTENT_OUTPUT_CONTRACT;
 
   const repairBlock = repair
     ? {
         repair_instructions: {
           note: "Your previous output failed validation. Fix ONLY the items below; keep everything else compliant.",
-          failed_requirements: repair.failed_requirements,
-          remove_or_support_unsupported_claims: repair.unsupported_claims,
+          schema_failures: repair.schema_failures ?? [],
+          failed_requirements: repair.failed_requirements ?? [],
+          remove_or_support_unsupported_claims: repair.unsupported_claims ?? [],
         },
       }
     : {};
 
-  const userPrompt = JSON.stringify(
+  let userPrompt = JSON.stringify(
     {
       contract_route: contractRoute,
       required_internal_link_targets: contractRoute.internal_link_requirements.map(
@@ -403,6 +474,11 @@ async function generateRoute(
     null,
     2,
   );
+  if (repair) {
+    // The repair prompt carries the exact output contract again — the model is
+    // never asked to "fix" an output it was never taught the shape of.
+    userPrompt += `\n\n---\nThe exact output contract again:\n${STRUCTURED_CONTENT_OUTPUT_CONTRACT}`;
+  }
 
   return llm.executePolicyJson("STRUCTURED_CONTENT_GENERATION", {
     clientId: request.client_id,
@@ -410,6 +486,8 @@ async function generateRoute(
     purpose: `structured-content:${contractRoute.route_id}`,
     systemPrompt,
     userPrompt,
+    schemaRepairAttempts: 0,
+    callCounter: generationCalls,
     validate: (value) => reconcileStructuredRoute(value, contractRoute),
   });
 }
@@ -442,6 +520,25 @@ function reconcileStructuredRoute(
   });
 
   return { ...parsed, route_id: contractRoute.route_id, path: contractRoute.path, sections };
+}
+
+/**
+ * content-validator.ts owns the semantic-validation call and is not part of
+ * this change surface. This wrapper injects the shared actual-call counter into
+ * its executePolicyJson call so run evidence can count semantic LLM calls
+ * honestly — including any internal bounded repair the validator's own default
+ * `schemaRepairAttempts: 1` may perform.
+ */
+function countingValidationLlm(llm: LlmService, calls: LlmCallCounter): LlmService {
+  const target = llm;
+  return {
+    async executePolicyJson(
+      operation: Parameters<LlmService["executePolicyJson"]>[0],
+      args: Omit<Parameters<LlmService["executePolicyJson"]>[1], "callCounter">,
+    ): Promise<unknown> {
+      return target.executePolicyJson<unknown>(operation, { ...args, callCounter: calls });
+    },
+  } as unknown as LlmService;
 }
 
 function routePassed(verdict: RouteValidationVerdict): boolean {

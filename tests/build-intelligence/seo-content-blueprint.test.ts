@@ -15,8 +15,11 @@ import {
 } from "@quantum-l9/bot-interop";
 import { describe, expect, it, vi } from "vitest";
 import {
+  chunkRoutes,
   createSEOContentBlueprint,
+  createSEOContentBlueprintWithEvidence,
   type PageContentPort,
+  SEO_BLUEPRINT_BATCH_SIZE,
 } from "../../src/build-intelligence/seo-content-blueprint.js";
 import type { LlmService } from "../../src/services/llm.js";
 
@@ -106,13 +109,38 @@ const requestedRoutes = [{ route_id: "home", path: "/", purpose: "primary landin
 
 function fakeLlm(modelRoutes: SEOContentBlueprintRoute[]): {
   llm: LlmService;
-  calls: { strategize: number };
+  calls: { strategize: number; prompts: string[] };
 } {
-  const calls = { strategize: 0 };
+  const calls = { strategize: 0, prompts: [] as string[] };
   const llm = {
-    strategizeJson: async (args: { validate: (v: unknown) => unknown }) => {
+    strategizeJson: async (args: { userPrompt: string; validate: (v: unknown) => unknown }) => {
       calls.strategize += 1;
-      return args.validate({ routes: modelRoutes });
+      calls.prompts.push(args.userPrompt);
+      if (calls.strategize === 1) {
+        // Phase A — the global route intent plan, derived from the REQUESTED
+        // route set (the request is the identity authority), falling back to a
+        // unique query when the model has no route for an id.
+        const prompt = JSON.parse(args.userPrompt) as {
+          routes: Array<{ route_id: string }>;
+        };
+        const byId = new Map(modelRoutes.map((route) => [route.route_id, route]));
+        const intents = prompt.routes.map((route) => {
+          const model = byId.get(route.route_id);
+          return {
+            route_id: route.route_id,
+            primary_query: model?.targets.primary_query ?? `query for ${route.route_id}`,
+            primary_intent: model?.search_intent.primary ?? "commercial",
+            journey_stage: model?.search_intent.journey_stage ?? "commercial",
+          };
+        });
+        return args.validate(intents);
+      }
+      // Phase B — return only the routes of the requested batch.
+      const prompt = JSON.parse(args.userPrompt) as {
+        current_batch: Array<{ route_id: string }>;
+      };
+      const batchIds = new Set(prompt.current_batch.map((route) => route.route_id));
+      return args.validate({ routes: modelRoutes.filter((route) => batchIds.has(route.route_id)) });
     },
   } as unknown as LlmService;
   return { llm, calls };
@@ -155,7 +183,7 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
       },
       { llm, dataForSeo: fakePages },
     );
-    expect(calls.strategize).toBe(1);
+    expect(calls.strategize).toBe(2); // phase A + one deterministic batch
   });
 
   it("seals the shared SEOContentBlueprint schema with exactly the requested routes", async () => {
@@ -175,10 +203,34 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
   });
 
   it("re-asserts route identity from the request (model cannot invent routes/paths)", async () => {
-    // Model returns a route with a tampered path + an extra unexpected route.
+    // A tampered path is corrected by re-assertion from the request…
     const tampered = blueprintRoute("home", "/WRONG");
+    const { llm } = fakeLlm([tampered]);
+    const corrected = await createSEOContentBlueprint(
+      {
+        client_id: "client-1",
+        build_id: "build-1",
+        competitive_landscape: makeLandscape(),
+        routes: requestedRoutes,
+        business_facts: [],
+      },
+      { llm, dataForSeo: fakePages },
+    );
+    expect(corrected.payload.routes[0]!.path).toBe("/");
+
+    // …and an invented route_id in a batch's output fails the batch.
     const extra = blueprintRoute("ghost", "/ghost");
-    const { llm } = fakeLlm([tampered, extra]);
+    const customLlm = {
+      strategizeJson: async (args: { userPrompt: string; validate: (v: unknown) => unknown }) => {
+        const prompt = JSON.parse(args.userPrompt) as { task?: string };
+        if (prompt.task === "global_route_intent_plan") {
+          return args.validate([
+            { route_id: "home", primary_query: "metal roofing", primary_intent: "commercial", journey_stage: "commercial" },
+          ]);
+        }
+        return args.validate({ routes: [extra] });
+      },
+    } as unknown as LlmService;
     await expect(
       createSEOContentBlueprint(
         {
@@ -188,9 +240,9 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
           routes: requestedRoutes,
           business_facts: [],
         },
-        { llm, dataForSeo: fakePages },
+        { llm: customLlm, dataForSeo: fakePages },
       ),
-    ).rejects.toThrow(/Unexpected route_id/);
+    ).rejects.toThrow(/outside this batch/);
   });
 
   it("carries only the CompetitiveLandscape as an input ref (no WebsiteBuildBlueprint dependency)", async () => {
@@ -209,18 +261,8 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
     expect(artifact.input_refs[0]!.artifact_type).toBe("competitive_landscape");
   });
 
-  it("prompts with the nested route_shape the schema enforces (regression: flat journey_stage contract made every live call fail schema validation)", async () => {
-    let capturedUserPrompt: string | null = null;
-    const llm = {
-      strategizeJson: async (args: {
-        systemPrompt: string;
-        userPrompt: string;
-        validate: (v: unknown) => unknown;
-      }) => {
-        capturedUserPrompt = args.userPrompt;
-        return args.validate({ routes: [blueprintRoute("home", "/")] });
-      },
-    } as unknown as LlmService;
+  it("prompts batches with the nested route_shape the schema enforces (regression: flat journey_stage contract made every live call fail schema validation)", async () => {
+    const { llm, calls } = fakeLlm([blueprintRoute("home", "/")]);
     await createSEOContentBlueprint(
       {
         client_id: "client-1",
@@ -231,8 +273,12 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
       },
       { llm, dataForSeo: fakePages },
     );
-    const contract = JSON.parse(capturedUserPrompt!).output_contract;
-    expect(contract.route_shape.search_intent.journey_stage).toContain("informational");
+    const batchPrompt = JSON.parse(calls.prompts[1]!);
+    expect(batchPrompt.task).toBe("seo_content_blueprint_batch");
+    expect(batchPrompt.all_route_index).toHaveLength(1);
+    expect(batchPrompt.global_route_intent_plan).toHaveLength(1);
+    const contract = batchPrompt.output_contract;
+    expect(contract.route_shape.search_intent.journey_stage).toContain("reassert");
     expect(contract.route_shape.targets.primary_query).toBeTruthy();
     expect(contract.journey_stage).toBeUndefined();
   });
@@ -373,7 +419,9 @@ describe("SEOContentBlueprint — deterministic output validation", () => {
     ];
     const home = blueprintRoute("home", "/");
     home.internal_links = [{ target_route_id: "services", purpose: "deepen" }];
-    const artifact = await buildWith([home, blueprintRoute("services", "/services")], requested);
+    const services = blueprintRoute("services", "/services");
+    services.targets = { ...services.targets, primary_query: "metal roof services" };
+    const artifact = await buildWith([home, services], requested);
     expect(artifact.payload.routes[0]!.internal_links[0]!.target_route_id).toBe("services");
   });
 
@@ -407,5 +455,267 @@ describe("SEOContentBlueprint — deterministic output validation", () => {
       "cheapest in town",
       "lifetime free",
     ]);
+  });
+});
+
+describe("SEOContentBlueprint — full-site batching (two-phase)", () => {
+  function routesFor(count: number) {
+    return Array.from({ length: count }, (_, index) => ({
+      route_id: `route-${index + 1}`,
+      path: `/route-${index + 1}`,
+      purpose: `purpose ${index + 1}`,
+    }));
+  }
+
+  function modelRoutesFor(count: number): SEOContentBlueprintRoute[] {
+    return routesFor(count).map((route, index) => ({
+      ...blueprintRoute(route.route_id, route.path),
+      targets: {
+        ...blueprintRoute(route.route_id, route.path).targets,
+        primary_query: `query ${index + 1}`,
+      },
+    }));
+  }
+
+  function build(routes: Array<{ route_id: string; path: string; purpose: string }>, model: SEOContentBlueprintRoute[]) {
+    const { llm, calls } = fakeLlm(model);
+    return createSEOContentBlueprint(
+      {
+        client_id: "client-1",
+        build_id: "build-1",
+        competitive_landscape: makeLandscape(),
+        routes,
+        business_facts: [],
+      },
+      { llm, dataForSeo: fakePages },
+    ).then((artifact) => ({ artifact, calls }));
+  }
+
+  it.each([1, 4, 5, 8, 29, 40])("seals one blueprint for %i routes with exact coverage", async (count) => {
+    const routes = routesFor(count);
+    const { artifact, calls } = await build(routes, modelRoutesFor(count));
+    expect(artifact.payload.routes).toHaveLength(count);
+    expect(artifact.payload.routes.map((route) => route.route_id)).toEqual(
+      routes.map((route) => route.route_id),
+    );
+    const expectedBatches = Math.ceil(count / 4);
+    expect(calls.strategize).toBe(1 + expectedBatches); // phase A + deterministic batches
+    expect(() => assertIntelligenceArtifactIntegrity(artifact)).not.toThrow();
+  });
+
+  it("fails the whole artifact when a batch is missing a route", async () => {
+    const routes = routesFor(5);
+    // Batch 2 (route-5) will come back empty → its validator throws.
+    const model = modelRoutesFor(4); // missing route-5
+    await expect(build(routes, model)).rejects.toMatchObject({
+      code: "SEO_CONTENT_BLUEPRINT_BATCH_INVALID",
+    });
+  });
+
+  it("fails the whole artifact when a batch returns another batch's route", async () => {
+    const routes = routesFor(5);
+    const model = modelRoutesFor(5).map((route) =>
+      route.route_id === "route-5" ? { ...route, route_id: "route-4" } : route,
+    );
+    // Batch 2's output contains route-4 (outside the batch) and misses route-5.
+    const { llm, calls } = fakeLlm(model);
+    await expect(
+      createSEOContentBlueprint(
+        {
+          client_id: "client-1",
+          build_id: "build-1",
+          competitive_landscape: makeLandscape(),
+          routes,
+          business_facts: [],
+        },
+        { llm, dataForSeo: fakePages },
+      ),
+    ).rejects.toMatchObject({ code: "SEO_CONTENT_BLUEPRINT_BATCH_INVALID" });
+    expect(calls.strategize).toBeGreaterThan(1);
+  });
+
+  it("allows cross-batch internal links to any site route and rejects unknown targets", async () => {
+    const routes = routesFor(5);
+    const model = modelRoutesFor(5);
+    // route-1 (batch 1) links to route-5 (batch 2) — valid.
+    model[0]!.internal_links = [{ target_route_id: "route-5", purpose: "cross-batch" }];
+    const { artifact } = await build(routes, model);
+    expect(artifact.payload.routes[0]!.internal_links[0]!.target_route_id).toBe("route-5");
+
+    const badModel = modelRoutesFor(5);
+    badModel[0]!.internal_links = [{ target_route_id: "route-999", purpose: "ghost" }];
+    await expect(build(routes, badModel)).rejects.toMatchObject({
+      code: "SEO_CONTENT_BLUEPRINT_BATCH_INVALID",
+    });
+  });
+
+  it("fails the whole artifact on a duplicate normalized primary_query in the global plan", async () => {
+    const routes = routesFor(5);
+    const model = modelRoutesFor(5).map((route, index) =>
+      index === 1 ? { ...route, targets: { ...route.targets, primary_query: "query 1" } } : route,
+    );
+    const { llm } = fakeLlm(model);
+    await expect(
+      createSEOContentBlueprint(
+        {
+          client_id: "client-1",
+          build_id: "build-1",
+          competitive_landscape: makeLandscape(),
+          routes,
+          business_facts: [],
+        },
+        { llm, dataForSeo: fakePages },
+      ),
+    ).rejects.toThrow(/duplicate primary_query/);
+  });
+
+  it("fails the whole artifact when a batch fails its bounded repair", async () => {
+    const routes = routesFor(5);
+    let batchCalls = 0;
+    const llm = {
+      strategizeJson: async (args: { userPrompt: string; validate: (v: unknown) => unknown }) => {
+        const prompt = JSON.parse(args.userPrompt) as { task?: string };
+        if (prompt.task === "global_route_intent_plan") {
+          return args.validate(
+            routesFor(5).map((route, index) => ({
+              route_id: route.route_id,
+              primary_query: `query ${index + 1}`,
+              primary_intent: "commercial",
+              journey_stage: "commercial",
+            })),
+          );
+        }
+        batchCalls += 1;
+        if (batchCalls === 2) throw new Error("repair exhausted");
+        return args.validate({
+          routes: modelRoutesFor(5).filter((route) =>
+            (JSON.parse(args.userPrompt) as { current_batch: Array<{ route_id: string }> }).current_batch.some((r) => r.route_id === route.route_id),
+          ),
+        });
+      },
+    } as unknown as LlmService;
+    await expect(
+      createSEOContentBlueprint(
+        {
+          client_id: "client-1",
+          build_id: "build-1",
+          competitive_landscape: makeLandscape(),
+          routes,
+          business_facts: [],
+        },
+        { llm, dataForSeo: fakePages },
+      ),
+    ).rejects.toMatchObject({ code: "SEO_CONTENT_BLUEPRINT_BATCH_INVALID" });
+  });
+
+  it("never seals a partial route set", async () => {
+    const routes = routesFor(29);
+    const model = modelRoutesFor(29);
+    // Drop the final batch's routes from the model — coverage 28/29 must fail.
+    model.length = 28;
+    await expect(build(routes, model)).rejects.toMatchObject({
+      code: "SEO_CONTENT_BLUEPRINT_BATCH_INVALID",
+    });
+  });
+});
+
+describe("SEOContentBlueprint — deterministic batch split", () => {
+  it("chunks strictly by request order, final chunk short", () => {
+    expect(chunkRoutes([1, 2, 3, 4, 5, 6, 7, 8, 9], 4)).toEqual([
+      [1, 2, 3, 4],
+      [5, 6, 7, 8],
+      [9],
+    ]);
+  });
+
+  it("defaults to the producer batch size", () => {
+    expect(SEO_BLUEPRINT_BATCH_SIZE).toBe(4);
+    expect(chunkRoutes(Array.from({ length: 29 }, (_, i) => i)).map((c) => c.length)).toEqual([
+      4, 4, 4, 4, 4, 4, 4, 1,
+    ]);
+  });
+
+  it("returns no chunks for an empty route set", () => {
+    expect(chunkRoutes([], 4)).toEqual([]);
+  });
+});
+
+describe("SEOContentBlueprint — measured run evidence", () => {
+  function routesFor(count: number) {
+    return Array.from({ length: count }, (_, index) => ({
+      route_id: `route-${index + 1}`,
+      path: `/route-${index + 1}`,
+      purpose: `purpose ${index + 1}`,
+    }));
+  }
+
+  function modelRoutesFor(count: number): SEOContentBlueprintRoute[] {
+    return routesFor(count).map((route, index) => ({
+      ...blueprintRoute(route.route_id, route.path),
+      targets: {
+        ...blueprintRoute(route.route_id, route.path).targets,
+        primary_query: `query ${index + 1}`,
+      },
+    }));
+  }
+
+  function buildWithEvidence(count: number) {
+    const { llm } = fakeLlm(modelRoutesFor(count));
+    return createSEOContentBlueprintWithEvidence(
+      {
+        client_id: "client-1",
+        build_id: "build-1",
+        competitive_landscape: makeLandscape(),
+        routes: routesFor(count),
+        business_facts: [],
+      },
+      { llm, dataForSeo: fakePages },
+    );
+  }
+
+  it.each([1, 4, 5, 8, 29, 40])("counts the actual run for %i routes", async (count) => {
+    const expectedBatches = Math.ceil(count / SEO_BLUEPRINT_BATCH_SIZE);
+    const { artifact, evidence } = await buildWithEvidence(count);
+    expect(evidence).toEqual({
+      route_count: count,
+      batch_size: SEO_BLUEPRINT_BATCH_SIZE,
+      batch_count: expectedBatches,
+      completed_batches: expectedBatches,
+    });
+    // The evidence describes the artifact that was actually sealed.
+    expect(artifact.payload.routes).toHaveLength(count);
+  });
+
+  it("createSEOContentBlueprint returns exactly the artifact of the evidence sibling", async () => {
+    const { llm } = fakeLlm(modelRoutesFor(5));
+    const plain = await createSEOContentBlueprint(
+      {
+        client_id: "client-1",
+        build_id: "build-1",
+        competitive_landscape: makeLandscape(),
+        routes: routesFor(5),
+        business_facts: [],
+      },
+      { llm, dataForSeo: fakePages },
+    );
+    const { artifact } = await buildWithEvidence(5);
+    expect(plain.payload).toEqual(artifact.payload);
+  });
+
+  it("never reports completed batches for a run that failed to seal", async () => {
+    // Batch 2 comes back without route-5 → the whole artifact fails.
+    const { llm } = fakeLlm(modelRoutesFor(4));
+    await expect(
+      createSEOContentBlueprintWithEvidence(
+        {
+          client_id: "client-1",
+          build_id: "build-1",
+          competitive_landscape: makeLandscape(),
+          routes: routesFor(5),
+          business_facts: [],
+        },
+        { llm, dataForSeo: fakePages },
+      ),
+    ).rejects.toMatchObject({ code: "SEO_CONTENT_BLUEPRINT_BATCH_INVALID" });
   });
 });

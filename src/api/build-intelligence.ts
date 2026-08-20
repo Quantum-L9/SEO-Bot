@@ -57,7 +57,36 @@ import {
   PageContentContractInvalidError,
   StructuredContentRouteMismatchError,
 } from "../build-intelligence/structured-content.js";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createModuleLogger } from "../core/logger.js";
+
+// Static version reads for the preflight readiness metadata. Loaded once at
+// module scope; the preflight itself makes no LLM and no DataForSEO call.
+// Scoped dependency package.jsons are located by walking up node_modules —
+// their exports maps do not expose "./package.json" (and may lack a require
+// condition), so module resolution alone cannot read them. The service
+// version is read relative to this module, which resolves identically from
+// src/ and dist/.
+const moduleDir = dirname(fileURLToPath(import.meta.url));
+const scopedPkgPath = (scope: string, name: string): string => {
+  let dir = moduleDir;
+  for (;;) {
+    const candidate = join(dir, "node_modules", scope, name, "package.json");
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) {
+      throw new Error(`cannot locate ${scope}/${name}/package.json above ${moduleDir}`);
+    }
+    dir = parent;
+  }
+};
+const versionAt = (path: string): string =>
+  (JSON.parse(readFileSync(path, "utf8")) as { version: string }).version;
+const SERVICE_VERSION: string = versionAt(join(dirname(dirname(moduleDir)), "package.json"));
+const BOT_INTEROP_VERSION: string = versionAt(scopedPkgPath("@quantum-l9", "bot-interop"));
+const LLM_ROUTER_VERSION: string = versionAt(scopedPkgPath("@quantum-l9", "llm-router"));
 import {
   DataForSeoTaskError,
   DataForSeoUnavailableError,
@@ -186,6 +215,34 @@ async function persistBestEffort(artifact: WebsiteIntelligenceArtifact): Promise
 /* ── Routes ──────────────────────────────────────────────────────────────────── */
 
 export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Promise<void> {
+  // 0. Preflight — machine-authenticated readiness metadata. No LLM call, no
+  //    DataForSEO paid call; never returns key values. Website-Bot's REDESIGN
+  //    preflight consumes this before the expensive pipeline begins.
+  app.get("/api/build-intelligence/preflight", async () => {
+    const dataforseoConfigured = Boolean(
+      process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD,
+    );
+    const llmConfigured = Boolean(
+      process.env.OPENROUTER_API_KEY && process.env.PERPLEXITY_API_KEY,
+    );
+    return {
+      status: "ready",
+      service: "SEO-Bot",
+      version: SERVICE_VERSION,
+      bot_interop_version: BOT_INTEROP_VERSION,
+      llm_router_version: LLM_ROUTER_VERSION,
+      capabilities: {
+        competitive_landscape: true,
+        seo_content_blueprint: true,
+        structured_content: true,
+      },
+      configuration: {
+        dataforseo_configured: dataforseoConfigured,
+        llm_provider_configured: llmConfigured,
+      },
+    };
+  });
+
   // 1. CompetitiveLandscape — deterministic, zero-LLM SERP ranking truth.
   app.post("/api/build-intelligence/competitive-landscape", async (request, reply) => {
     const parsed = competitiveLandscapeBody.safeParse(request.body);

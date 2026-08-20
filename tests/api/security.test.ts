@@ -125,6 +125,36 @@ describe("operator auth hook", () => {
     expect(res.statusCode).toBe(401);
   });
 
+  it("rejects the operator key on build-intelligence routes (strict split, no dual authority)", async () => {
+    cfg.current = { OPERATOR_API_KEY: "topsecret", SEO_BOT_API_KEY: "machine-secret" };
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/competitive-landscape",
+      headers: { authorization: "Bearer topsecret" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("rejects an invalid machine key on build-intelligence routes (401)", async () => {
+    cfg.current = { OPERATOR_API_KEY: "topsecret", SEO_BOT_API_KEY: "machine-secret" };
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/competitive-landscape",
+      headers: { authorization: "Bearer wrong-machine" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("fails closed (401) on build-intelligence when no machine key is configured", async () => {
+    cfg.current = { OPERATOR_API_KEY: "topsecret" };
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/competitive-landscape",
+      headers: { authorization: "Bearer machine-secret" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
   it("fails closed (401) on build-intelligence when neither key is configured", async () => {
     cfg.current = {};
     const res = await app.inject({
