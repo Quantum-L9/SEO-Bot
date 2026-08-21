@@ -374,6 +374,46 @@ describe("run-evidence store — cross-repository consumer contract", () => {
     expect(() => getRunLlmAuditFor(CLIENT, BUILD)).toThrow(RunLlmAuditInvalidError);
   });
 
+  it("rejects a router policy source it cannot canonicalize, end to end", () => {
+    // The recorder carries an unrecognised value verbatim rather than
+    // normalizing it into something plausible; the schema is what refuses it.
+    // This is the whole reason the recorder's field is not narrowed.
+    const recorder = new LlmRunRecorder(runIdFor(CLIENT, BUILD));
+    recorder.attributeOperationCall({
+      operation: "SEO_CONTENT_BLUEPRINT",
+      purpose: "[bi] bp-g",
+      attempt: "initial",
+      descriptorRequiresSearch: false,
+      decisions: [
+        {
+          taskId: "bp-g",
+          clientId: CLIENT,
+          timestamp: "2026-08-21T00:00:00.000Z",
+          taskType: "strategic_reasoning",
+          complexity: "high",
+          provider: "openrouter",
+          model: "a-model",
+          estimatedCost: 0,
+          reason: "test",
+          searchRequired: false,
+          searchPolicySource: "inferred",
+          visionRequired: false,
+          outcome: "SUCCESS",
+        },
+      ] as never,
+    });
+    expect(recorder.snapshot().operations[0]?.searchPolicySource).toBe("inferred");
+
+    recordSeoContentBlueprintLeg({
+      client_id: CLIENT,
+      build_id: BUILD,
+      evidence: { route_count: 2, batch_size: 4, batch_count: 1, completed_batches: 1 },
+      recorder,
+    });
+    recorder.close();
+    expect(() => getRunLlmAuditFor(CLIENT, BUILD)).toThrow(RunLlmAuditInvalidError);
+  });
+
   it("ignores a blank run_ref rather than binding the run to nothing", () => {
     seedRun("   ");
     const audit = getRunLlmAuditFor(CLIENT, BUILD);

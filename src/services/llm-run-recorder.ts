@@ -83,8 +83,16 @@ export interface OperationExecutionEvidence {
    * requires of them downstream.
    */
   searchRequired: boolean;
-  /** APPLIED policy source, canonicalized from the router's enum. */
-  searchPolicySource: SearchPolicySourceName;
+  /**
+   * APPLIED policy source, canonicalized from the router's enum.
+   *
+   * Deliberately `string` and not the canonical union: this layer MEASURES,
+   * and it cannot promise the router returned a value it recognises. An
+   * unrecognised value is carried verbatim so the audit schema — the layer
+   * that validates — rejects it. Narrowing here would take a cast, and the
+   * cast would be a lie.
+   */
+  searchPolicySource: string;
   /**
    * The `requiresSearch` value the governed operation actually supplied on the
    * TaskDescriptor handed to the router, or `null` when it supplied none.
@@ -112,7 +120,16 @@ const SEARCH_POLICY_SOURCE_NAMES: Readonly<Record<string, SearchPolicySourceName
   TASK_DEFAULT: "TASK_DEFAULT",
 };
 
-export function canonicalSearchPolicySource(value: unknown): SearchPolicySourceName | string {
+/**
+ * Returns the canonical NAME for a recognised source value, or the value
+ * verbatim for anything else.
+ *
+ * The return type is `string` rather than `SearchPolicySourceName | string` —
+ * which would collapse to `string` anyway — because the honest answer is that
+ * this function cannot guarantee canonicality. The audit schema's enum is what
+ * narrows, and it rejects whatever this could not map.
+ */
+export function canonicalSearchPolicySource(value: unknown): string {
   const key = String(value);
   return SEARCH_POLICY_SOURCE_NAMES[key] ?? key;
 }
@@ -240,9 +257,7 @@ export class LlmRunRecorder {
       provider: String(decision.provider),
       model: String(decision.model),
       searchRequired: decision.searchRequired,
-      searchPolicySource: canonicalSearchPolicySource(
-        decision.searchPolicySource,
-      ) as SearchPolicySourceName,
+      searchPolicySource: canonicalSearchPolicySource(decision.searchPolicySource),
       descriptor_requires_search: input.descriptorRequiresSearch,
       outcome: decision.outcome === "FAILED" ? "FAILED" : "SUCCESS",
     });
