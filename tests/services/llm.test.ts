@@ -20,6 +20,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const routerCtor = vi.hoisted(() => ({ calls: [] as any[] }));
 const executeMock = vi.hoisted(() => vi.fn());
 const initClientMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+// The router's own decision log — what run evidence reads back rather than
+// restating SEO-Bot's intent. Tests append to it as `execute` is called.
+const callLog = vi.hoisted(() => ({ entries: [] as any[] }));
 
 vi.mock("@quantum-l9/llm-router", () => {
   class BudgetExhaustedError extends Error {
@@ -54,10 +57,33 @@ vi.mock("@quantum-l9/llm-router", () => {
     }
     initClient = initClientMock;
     getCallLog() {
-      return [];
+      return callLog.entries;
+    }
+    getCallLogByClient(clientId: string) {
+      return callLog.entries.filter((entry: any) => entry.clientId === clientId);
     }
   }
-  return { L9LLMRouter, TaskType, TaskComplexity, BudgetExhaustedError };
+  class UnsupportedCapabilityCombinationError extends Error {
+    code: string;
+    constructor(
+      message: string,
+      _requested?: unknown,
+      code = "UNSUPPORTED_CAPABILITY_COMBINATION",
+    ) {
+      super(message);
+      this.name = "UnsupportedCapabilityCombinationError";
+      this.code = code;
+    }
+  }
+  const SearchPolicySource = { EXPLICIT: "explicit", TASK_DEFAULT: "task_default" } as const;
+  return {
+    L9LLMRouter,
+    TaskType,
+    TaskComplexity,
+    BudgetExhaustedError,
+    SearchPolicySource,
+    UnsupportedCapabilityCombinationError,
+  };
 });
 
 // Config the service reads for budget + daily-cap.
@@ -101,8 +127,14 @@ vi.mock("../../src/services/llm-parse.js", () => ({
   parseScore: vi.fn(() => 50),
 }));
 
-import { BudgetExhaustedError, TaskComplexity, TaskType } from "@quantum-l9/llm-router";
+import {
+  BudgetExhaustedError,
+  TaskComplexity,
+  TaskType,
+  UnsupportedCapabilityCombinationError,
+} from "@quantum-l9/llm-router";
 import { DailyBudgetExhaustedError, LlmService } from "../../src/services/llm.js";
+import { LlmRunRecorder } from "../../src/services/llm-run-recorder.js";
 
 const okResponse = {
   content: "ok",
@@ -121,6 +153,7 @@ beforeEach(() => {
   hydrateMock.mockResolvedValue("\n\n[MEMORY-CONTEXT]");
   dailyTotal.value = 0;
   config.current.DAILY_SPEND_CAP = 0;
+  callLog.entries.length = 0;
 });
 
 describe("LlmService constructor — budget + router wiring (GAP-005)", () => {
@@ -393,5 +426,197 @@ describe("LlmService.executePolicyJson — schemaRepairAttempts + actual-call co
       ),
     ).rejects.toThrow("bad");
     expect(counter.value).toBe(1);
+  });
+});
+
+/**
+ * Run evidence is taken at THIS layer because this is where a provider/model
+ * execution actually happens. Two properties are proved here: each ACTUAL call
+ * yields exactly one recorded execution carrying the router's own applied
+ * search policy, and a capability combination the router refuses is counted
+ * even though it never reaches the router's call log.
+ */
+describe("LlmService — run evidence is measured at the router boundary", () => {
+  const baseArgs = (validate: (v: unknown) => unknown, extra: Record<string, unknown> = {}) => ({
+    clientId: "c1",
+    module: "build-intelligence" as any,
+    purpose: "policy-json-test",
+    systemPrompt: "sys",
+    userPrompt: "user",
+    validate,
+    ...extra,
+  });
+
+  /** Make `execute` append a router decision the way the real router does. */
+  function logDecisionsPerCall(overrides: Record<string, unknown> = {}): void {
+    let index = 0;
+    executeMock.mockImplementation(async () => {
+      index += 1;
+      callLog.entries.push({
+        taskId: `task-${index}`,
+        clientId: "c1",
+        timestamp: "2026-08-21T00:00:00.000Z",
+        taskType: "content_generation",
+        complexity: "high",
+        provider: "openrouter",
+        model: "routed-model",
+        estimatedCost: 0,
+        reason: "test",
+        searchRequired: false,
+        searchPolicySource: "explicit",
+        visionRequired: false,
+        outcome: "SUCCESS",
+        ...overrides,
+      });
+      return { ...okResponse, provider: "openrouter" };
+    });
+  }
+
+  it("records one execution per ACTUAL call, with the policy the ROUTER applied", async () => {
+    logDecisionsPerCall();
+    const svc = new LlmService();
+    const recorder = new LlmRunRecorder("seo-run:test");
+    await svc.executePolicyJson<unknown>(
+      "STRUCTURED_CONTENT_GENERATION",
+      baseArgs((value) => value, { recorder }),
+    );
+    recorder.close();
+
+    const calls = recorder.operationsFor("STRUCTURED_CONTENT_GENERATION");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      attempt: "initial",
+      task_id: "task-1",
+      provider: "openrouter",
+      model: "routed-model",
+      search_required: false,
+      search_policy_source: "explicit",
+      // The governed policy supplies requiresSearch:false, so EXPLICIT is
+      // provable rather than merely reported.
+      descriptor_requires_search: false,
+      outcome: "SUCCESS",
+    });
+    expect(recorder.snapshot().attribution_failures).toEqual([]);
+  });
+
+  it("records the bounded repair as its own execution, not as part of the first", async () => {
+    logDecisionsPerCall();
+    const svc = new LlmService();
+    const recorder = new LlmRunRecorder("seo-run:test");
+    const validate = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error("bad");
+      })
+      .mockImplementationOnce((value: unknown) => value);
+    await svc.executePolicyJson<unknown>("CONTENT_VALIDATION", baseArgs(validate, { recorder }));
+    recorder.close();
+
+    const calls = recorder.operationsFor("CONTENT_VALIDATION");
+    expect(calls.map((call) => call.attempt)).toEqual(["initial", "repair"]);
+    expect(new Set(calls.map((call) => call.task_id)).size).toBe(2);
+  });
+
+  it("records SEO_CONTENT_BLUEPRINT executions made through strategizeJson", async () => {
+    logDecisionsPerCall({ taskType: "strategic_reasoning" });
+    const svc = new LlmService();
+    const recorder = new LlmRunRecorder("seo-run:test");
+    await svc.strategizeJson<unknown>({
+      clientId: "c1",
+      module: "build-intelligence" as any,
+      purpose: "seo-content-blueprint:global-intent",
+      systemPrompt: "sys",
+      userPrompt: "user",
+      validate: (value) => value,
+      recorder,
+    });
+    recorder.close();
+    expect(recorder.operationsFor("SEO_CONTENT_BLUEPRINT")).toHaveLength(1);
+  });
+
+  it("records nothing when no recorder is supplied (evidence is opt-in, not ambient)", async () => {
+    logDecisionsPerCall();
+    const svc = new LlmService();
+    const recorder = new LlmRunRecorder("seo-run:other");
+    await svc.executePolicyJson<unknown>(
+      "STRUCTURED_CONTENT_GENERATION",
+      baseArgs((value) => value),
+    );
+    recorder.close();
+    expect(recorder.snapshot().operations).toEqual([]);
+  });
+
+  it("counts a refused capability combination that never reaches the call log", async () => {
+    executeMock.mockRejectedValue(
+      new UnsupportedCapabilityCombinationError("no provider serves search and vision together"),
+    );
+    const svc = new LlmService();
+    const recorder = new LlmRunRecorder("seo-run:test");
+    await expect(
+      svc.executePolicyJson<unknown>(
+        "STRUCTURED_CONTENT_GENERATION",
+        baseArgs((value) => value, { recorder }),
+      ),
+    ).rejects.toThrow("no provider serves search and vision together");
+    recorder.close();
+
+    const rejections = recorder.snapshot().capability_rejections;
+    expect(rejections).toHaveLength(1);
+    expect(rejections[0]).toMatchObject({
+      code: "UNSUPPORTED_CAPABILITY_COMBINATION",
+      operation: "STRUCTURED_CONTENT_GENERATION",
+    });
+    // The refusal produced no router decision, so nothing is attributed.
+    expect(recorder.snapshot().operations).toEqual([]);
+  });
+
+  it("carries the router's specific conflict code rather than a generic one", async () => {
+    executeMock.mockRejectedValue(
+      new UnsupportedCapabilityCombinationError(
+        "search modifiers require search capability",
+        undefined,
+        "SEARCH_MODIFIER_WITHOUT_SEARCH",
+      ),
+    );
+    const svc = new LlmService();
+    const recorder = new LlmRunRecorder("seo-run:test");
+    await expect(
+      svc.execute(
+        {
+          clientId: "c1",
+          type: TaskType.CONTENT_GENERATION,
+          complexity: TaskComplexity.LOW,
+          description: "[build-intelligence] modifier",
+        },
+        "sys",
+        "user",
+      ),
+    ).rejects.toThrow("search modifiers require search capability");
+    recorder.close();
+    expect(recorder.snapshot().capability_rejections[0]).toMatchObject({
+      code: "SEARCH_MODIFIER_WITHOUT_SEARCH",
+      operation: null,
+    });
+  });
+
+  it("does not count an ordinary provider failure as a capability rejection", async () => {
+    executeMock.mockRejectedValue(
+      new BudgetExhaustedError(
+        "out of budget",
+        { clientId: "c1", type: TaskType.SCORING, complexity: TaskComplexity.LOW },
+        {} as never,
+        {} as never,
+      ),
+    );
+    const svc = new LlmService();
+    const recorder = new LlmRunRecorder("seo-run:test");
+    await expect(
+      svc.executePolicyJson<unknown>(
+        "CONTENT_VALIDATION",
+        baseArgs((value) => value, { recorder }),
+      ),
+    ).rejects.toBeInstanceOf(BudgetExhaustedError);
+    recorder.close();
+    expect(recorder.snapshot().capability_rejections).toEqual([]);
   });
 });

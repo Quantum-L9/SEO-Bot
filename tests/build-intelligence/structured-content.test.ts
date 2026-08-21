@@ -273,8 +273,14 @@ describe("StructuredContentPackage — lineage, identity, bounded repair", () =>
     const llm = {
       async executePolicyJson(
         operation: string,
-        args: { userPrompt: string; validate: (v: unknown) => unknown },
+        args: {
+          userPrompt: string;
+          validate: (v: unknown) => unknown;
+          callCounter?: { value: number };
+        },
       ) {
+        // Mirror the real service: one increment per ACTUAL LLM call.
+        if (args.callCounter) args.callCounter.value += 1;
         if (operation === "STRUCTURED_CONTENT_GENERATION") {
           prompts.push(args.userPrompt);
           return args.validate(genRoute());
@@ -396,7 +402,11 @@ describe("StructuredContentPackage — the exact contract is the only authority"
       payload,
     });
     const llm = {
-      async executePolicyJson(operation: string, args: { validate: (v: unknown) => unknown }) {
+      async executePolicyJson(
+        operation: string,
+        args: { validate: (v: unknown) => unknown; callCounter?: { value: number } },
+      ) {
+        if (args.callCounter) args.callCounter.value += 1;
         if (operation === "STRUCTURED_CONTENT_GENERATION") return args.validate(genRoute());
         return args.validate(pass);
       },
@@ -465,7 +475,11 @@ describe("StructuredContentPackage — the exact contract is the only authority"
   it("catches an unsupported factual claim deterministically, before the semantic pass", async () => {
     let semanticCalls = 0;
     const llm = {
-      async executePolicyJson(operation: string, args: { validate: (v: unknown) => unknown }) {
+      async executePolicyJson(
+        operation: string,
+        args: { validate: (v: unknown) => unknown; callCounter?: { value: number } },
+      ) {
+        if (args.callCounter) args.callCounter.value += 1;
         if (operation === "STRUCTURED_CONTENT_GENERATION") {
           const bad = genRoute();
           bad.sections[0]!.blocks = [
@@ -559,7 +573,15 @@ describe("StructuredContentPackage — blocks-union output contract (schema regr
   it("teaches the blocks union and the forbidden aliases in the generation system prompt", async () => {
     const systemPrompts: string[] = [];
     const llm = {
-      async executePolicyJson(operation: string, args: { systemPrompt: string; validate: (v: unknown) => unknown }) {
+      async executePolicyJson(
+        operation: string,
+        args: {
+          systemPrompt: string;
+          validate: (v: unknown) => unknown;
+          callCounter?: { value: number };
+        },
+      ) {
+        if (args.callCounter) args.callCounter.value += 1;
         if (operation === "STRUCTURED_CONTENT_GENERATION") {
           systemPrompts.push(args.systemPrompt);
           return args.validate(genRoute());
@@ -694,5 +716,103 @@ describe("StructuredContentPackage — one repair budget (schema + semantic)", (
     expect(evidence.repair_attempts).toBeLessThanOrEqual(evidence.route_count);
     expect(evidence.repaired_route_ids).toEqual(["home", "services"]);
     expect(evidence.generation_llm_calls).toBe(4); // exactly two per route
+  });
+});
+
+/**
+ * Per-route generation ownership for `l9.seo-bot-run-llm-audit/v1`. The package
+ * total can no longer stand in for a route's own spend: each route reports the
+ * calls IT made, and the accounting is asserted rather than assumed.
+ */
+describe("StructuredContentPackage — per-route generation ownership", () => {
+  function twoRouteContract(): PageContentContractArtifact {
+    const payload = structuredClone(makeContract().payload);
+    const second = structuredClone(payload.routes[0]!);
+    second.route_id = "services";
+    second.path = "/services";
+    payload.routes = [payload.routes[0]!, second];
+    return sealIntelligenceArtifact({
+      artifact_type: "page_content_contract",
+      client_id: "client-1",
+      build_id: "build-1",
+      producer: { repo: "Website-Bot", version: "1.0.0" },
+      payload,
+    });
+  }
+
+  it("reports one generation call and zero repairs for a route that passed first time", async () => {
+    const { llm } = fakeLlm([pass]);
+    const { evidence } = await createStructuredContentPackageWithEvidence(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+      { llm },
+    );
+    expect(evidence.route_results).toEqual([
+      {
+        route_id: "home",
+        path: "/",
+        generation_calls: 1,
+        repair_attempts: 0,
+        semantic_validation_calls: 1,
+      },
+    ]);
+  });
+
+  it("charges the repair to the route that needed it, not to every route", async () => {
+    // Route "home" fails then passes; route "services" passes first time.
+    const { llm } = fakeLlm([fail, pass, pass]);
+    const { evidence } = await createStructuredContentPackageWithEvidence(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: twoRouteContract() },
+      { llm },
+    );
+    expect(evidence.repaired_route_ids).toEqual(["home"]);
+    expect(evidence.route_results).toEqual([
+      {
+        route_id: "home",
+        path: "/",
+        generation_calls: 2,
+        repair_attempts: 1,
+        semantic_validation_calls: 2,
+      },
+      {
+        route_id: "services",
+        path: "/services",
+        generation_calls: 1,
+        repair_attempts: 0,
+        semantic_validation_calls: 1,
+      },
+    ]);
+    // The package total is the SUM of the per-route counts — never their source.
+    expect(evidence.generation_llm_calls).toBe(3);
+    expect(evidence.route_results.reduce((sum, route) => sum + route.generation_calls, 0)).toBe(
+      evidence.generation_llm_calls,
+    );
+  });
+
+  it("carries the contract path on every route result", async () => {
+    const { llm } = fakeLlm([pass, pass]);
+    const { evidence } = await createStructuredContentPackageWithEvidence(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: twoRouteContract() },
+      { llm },
+    );
+    expect(evidence.route_results.map((route) => route.path)).toEqual(["/", "/services"]);
+    expect(evidence.route_results.map((route) => route.route_id)).toEqual(["home", "services"]);
+  });
+
+  it("refuses to report a route whose measured calls contradict its repair count", async () => {
+    // A double that never records an actual call cannot produce truthful
+    // evidence, so the run fails rather than exporting generation_calls it
+    // never measured.
+    const silent = {
+      async executePolicyJson(operation: string, args: { validate: (v: unknown) => unknown }) {
+        if (operation === "STRUCTURED_CONTENT_GENERATION") return args.validate(genRoute());
+        return args.validate(pass);
+      },
+    } as unknown as LlmService;
+    await expect(
+      createStructuredContentPackageWithEvidence(
+        { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+        { llm: silent },
+      ),
+    ).rejects.toMatchObject({ code: "STRUCTURED_CONTENT_ROUTE_MISMATCH" });
   });
 });

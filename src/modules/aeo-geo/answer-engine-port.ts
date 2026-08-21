@@ -22,6 +22,10 @@
 
 import axios from "axios";
 import { getConfig } from "../../core/config.js";
+import { publishDirectProviderBypass } from "../../services/llm-run-recorder.js";
+
+/** Stable identifier for this bypass site in run evidence. */
+const BYPASS_SITE = "aeo-geo:answer-engine-observation";
 
 /** A single answer-engine response observed for a query. */
 export interface AnswerEngineObservation {
@@ -49,6 +53,18 @@ export class PerplexityAnswerEnginePort implements AnswerEngineObservationPort {
 
   async observe(query: string, signal?: AbortSignal): Promise<AnswerEngineObservation> {
     const config = getConfig();
+    // Run evidence counts BYPASSES THAT HAPPENED. This is the single sanctioned
+    // site where a provider is reached outside @quantum-l9/llm-router, so every
+    // invocation is published before the request leaves — an open run recorder
+    // therefore reports a non-zero count exactly when one occurred, and reports
+    // zero only because none did.
+    publishDirectProviderBypass({
+      site: BYPASS_SITE,
+      engine: this.engine,
+      rationale:
+        "AEO/GEO measures whether this answer engine cites the client; the engine is the " +
+        "measurement subject, so it is observed directly rather than routed.",
+    });
     const response = await axios.post(
       "https://api.perplexity.ai/chat/completions",
       {

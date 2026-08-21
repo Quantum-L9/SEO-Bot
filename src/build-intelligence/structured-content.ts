@@ -36,12 +36,13 @@ import {
 } from "@quantum-l9/bot-interop";
 import { createModuleLogger } from "../core/logger.js";
 import { getLlmService, type LlmCallCounter, type LlmService } from "../services/llm.js";
+import type { LlmRunRecorder } from "../services/llm-run-recorder.js";
 import { type RouteValidationVerdict, validateRoute } from "./content-validator.js";
 import { PRODUCER } from "./producer.js";
 import {
   type SchemaFailure,
-  schemaFailureDetails,
   STRUCTURED_CONTENT_OUTPUT_CONTRACT,
+  schemaFailureDetails,
   structuredContentRouteSchema,
 } from "./schema-guards.js";
 
@@ -109,6 +110,31 @@ export interface StructuredContentEvidence {
   repair_attempts: number;
   schema_failure_count: number;
   repaired_route_ids: string[];
+  /**
+   * Per-route ownership of generation spend. Each route carries its OWN
+   * counters, incremented at the LLM boundary once per actual router call — a
+   * package total is never divided by a route count, and no route's
+   * `generation_calls` is ever assumed to be 1.
+   */
+  route_results: StructuredContentRouteResult[];
+}
+
+/**
+ * One route's measured generation ownership.
+ *
+ * `repair_attempts` is the deterministic image of `repaired_route_ids`: the
+ * orchestrator gives a route exactly one bounded repair and a second failure is
+ * terminal, so a route that appears in `repaired_route_ids` had exactly one
+ * repair and a route that does not had none. `generation_calls` is measured
+ * independently, and `assertRouteAccounting` refuses to report the pair unless
+ * they agree (`generation_calls === repair_attempts + 1`).
+ */
+export interface StructuredContentRouteResult {
+  route_id: string;
+  path: string;
+  generation_calls: number;
+  repair_attempts: number;
+  semantic_validation_calls: number;
 }
 
 export interface StructuredContentResult {
@@ -122,14 +148,14 @@ export interface StructuredContentResult {
  */
 export async function createStructuredContentPackage(
   request: StructuredContentRequest,
-  deps: { llm?: LlmService } = {},
+  deps: { llm?: LlmService; recorder?: LlmRunRecorder } = {},
 ): Promise<StructuredContentPackageArtifact> {
   return (await createStructuredContentPackageWithEvidence(request, deps)).artifact;
 }
 
 export async function createStructuredContentPackageWithEvidence(
   request: StructuredContentRequest,
-  deps: { llm?: LlmService } = {},
+  deps: { llm?: LlmService; recorder?: LlmRunRecorder } = {},
 ): Promise<StructuredContentResult> {
   // ── Lineage first: reject a tampered/invalid/foreign contract BEFORE any
   //    LLM spend. Integrity, identity, and structure are all checked here.
@@ -141,28 +167,42 @@ export async function createStructuredContentPackageWithEvidence(
     (request.seo_content_blueprint?.payload.routes ?? []).map((route) => [route.route_id, route]),
   );
 
-  // Actual-call counters shared across the whole run. Generation uses
-  // `schemaRepairAttempts: 0` so each generateRoute() is exactly one LLM call;
-  // the semantic-validation path counts through a wrapper that injects its own
-  // counter into content-validator's executePolicyJson call.
+  // Package totals, accumulated from the PER-ROUTE counters below — the route
+  // is the unit of ownership, and these are its sum rather than its source.
+  // Generation uses `schemaRepairAttempts: 0`, so each generateRoute() is
+  // exactly one LLM call; the semantic-validation path counts through a wrapper
+  // that injects the route's counter into content-validator's
+  // executePolicyJson call.
   const generationCalls: LlmCallCounter = { value: 0 };
   const semanticValidationCalls: LlmCallCounter = { value: 0 };
-  const validationLlm = countingValidationLlm(llm, semanticValidationCalls);
 
   const routes: StructuredContentRoute[] = [];
   const verdicts: RouteValidationVerdict[] = [];
   const repairedRouteIds: string[] = [];
+  const routeResults: StructuredContentRouteResult[] = [];
   let schemaFailureCount = 0;
 
   for (const contractRoute of contract.routes) {
     const blueprintRoute = blueprintRoutes.get(contractRoute.route_id);
+    // Per-route counters. THIS route's generation spend is owned by THIS route:
+    // the package total is the sum of them, never their source.
+    const routeGenerationCalls: LlmCallCounter = { value: 0 };
+    const routeValidationCalls: LlmCallCounter = { value: 0 };
+    const validationLlm = countingValidationLlm(llm, routeValidationCalls, deps.recorder);
 
     // 1. Generate prose for this route only — ONE actual call (no internal
     //    repair: the orchestrator owns the one total repair for the route).
     let schemaFailures: SchemaFailure[] = [];
     let generated: StructuredContentRoute | null = null;
     try {
-      generated = await generateRoute(llm, request, contractRoute, undefined, generationCalls);
+      generated = await generateRoute(
+        llm,
+        request,
+        contractRoute,
+        undefined,
+        routeGenerationCalls,
+        deps.recorder,
+      );
     } catch (error) {
       schemaFailures = schemaFailureDetails(error);
       schemaFailureCount += 1;
@@ -218,7 +258,8 @@ export async function createStructuredContentPackageWithEvidence(
             failed_requirements: verdict.failed_requirements,
             unsupported_claims: verdict.unsupported_claims,
           },
-          generationCalls,
+          routeGenerationCalls,
+          deps.recorder,
         );
       } catch (error) {
         schemaFailureCount += 1;
@@ -250,6 +291,20 @@ export async function createStructuredContentPackageWithEvidence(
 
     routes.push(generated);
     verdicts.push(verdict);
+    // `repaired_route_ids` is authoritative and the invariant above proves at
+    // most one repair per route, so the mapping is deterministic: a repaired
+    // route spent exactly one repair, an unrepaired route spent none.
+    const routeRepairAttempts = repairedRouteIds.includes(contractRoute.route_id) ? 1 : 0;
+    assertRouteAccounting(contractRoute.route_id, routeGenerationCalls.value, routeRepairAttempts);
+    routeResults.push({
+      route_id: contractRoute.route_id,
+      path: contractRoute.path,
+      generation_calls: routeGenerationCalls.value,
+      repair_attempts: routeRepairAttempts,
+      semantic_validation_calls: routeValidationCalls.value,
+    });
+    generationCalls.value += routeGenerationCalls.value;
+    semanticValidationCalls.value += routeValidationCalls.value;
   }
 
   const validation: StructuredContentPackageV1["validation"] = {
@@ -300,8 +355,32 @@ export async function createStructuredContentPackageWithEvidence(
       repair_attempts: repairedRouteIds.length,
       schema_failure_count: schemaFailureCount,
       repaired_route_ids: repairedRouteIds,
+      route_results: routeResults,
     },
   };
+}
+
+/**
+ * Refuse to report a route's accounting unless the two independent facts agree.
+ *
+ * `generation_calls` is COUNTED at the LLM boundary; `repair_attempts` is the
+ * deterministic image of `repaired_route_ids`. Because generation runs with
+ * `schemaRepairAttempts: 0`, a route makes exactly one call plus at most one
+ * repair call — so the counted total must be `repair_attempts + 1`. Anything
+ * else means the counters no longer describe the run, and the run fails rather
+ * than exporting an untrue number.
+ */
+function assertRouteAccounting(
+  routeId: string,
+  generationCalls: number,
+  repairAttempts: number,
+): void {
+  if (generationCalls !== repairAttempts + 1) {
+    throw new StructuredContentRouteMismatchError(
+      `route "${routeId}" made ${generationCalls} generation call(s) with ${repairAttempts} ` +
+        `bounded repair(s); the one-repair invariant requires exactly ${repairAttempts + 1}`,
+    );
+  }
 }
 
 /**
@@ -439,6 +518,7 @@ async function generateRoute(
     unsupported_claims?: string[];
   },
   generationCalls?: LlmCallCounter,
+  recorder?: LlmRunRecorder,
 ): Promise<StructuredContentRoute> {
   const systemPrompt =
     "You are the sole owner of final website prose for one route. Write ONLY from " +
@@ -488,6 +568,7 @@ async function generateRoute(
     userPrompt,
     schemaRepairAttempts: 0,
     callCounter: generationCalls,
+    recorder,
     validate: (value) => reconcileStructuredRoute(value, contractRoute),
   });
 }
@@ -524,19 +605,27 @@ function reconcileStructuredRoute(
 
 /**
  * content-validator.ts owns the semantic-validation call and is not part of
- * this change surface. This wrapper injects the shared actual-call counter into
- * its executePolicyJson call so run evidence can count semantic LLM calls
- * honestly — including any internal bounded repair the validator's own default
- * `schemaRepairAttempts: 1` may perform.
+ * this change surface. This wrapper injects the PER-ROUTE actual-call counter
+ * and the run recorder into its executePolicyJson call so run evidence can
+ * count semantic LLM calls honestly — including any internal bounded repair the
+ * validator's own default `schemaRepairAttempts: 1` may perform.
  */
-function countingValidationLlm(llm: LlmService, calls: LlmCallCounter): LlmService {
+function countingValidationLlm(
+  llm: LlmService,
+  calls: LlmCallCounter,
+  recorder?: LlmRunRecorder,
+): LlmService {
   const target = llm;
   return {
     async executePolicyJson(
       operation: Parameters<LlmService["executePolicyJson"]>[0],
-      args: Omit<Parameters<LlmService["executePolicyJson"]>[1], "callCounter">,
+      args: Omit<Parameters<LlmService["executePolicyJson"]>[1], "callCounter" | "recorder">,
     ): Promise<unknown> {
-      return target.executePolicyJson<unknown>(operation, { ...args, callCounter: calls });
+      return target.executePolicyJson<unknown>(operation, {
+        ...args,
+        callCounter: calls,
+        recorder,
+      });
     },
   } as unknown as LlmService;
 }

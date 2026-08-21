@@ -16,6 +16,7 @@ import {
   getAnswerEnginePort,
   PerplexityAnswerEnginePort,
 } from "../../src/modules/aeo-geo/answer-engine-port.js";
+import { LlmRunRecorder } from "../../src/services/llm-run-recorder.js";
 
 beforeEach(() => post.mockReset());
 
@@ -43,5 +44,50 @@ describe("AnswerEngineObservationPort (Perplexity)", () => {
   it("returns a singleton port instance", () => {
     expect(getAnswerEnginePort("perplexity")).toBe(getAnswerEnginePort("perplexity"));
     expect(getAnswerEnginePort("perplexity")).toBeInstanceOf(PerplexityAnswerEnginePort);
+  });
+});
+
+/**
+ * `direct_provider_bypass_count` is the number of bypasses that HAPPENED. This
+ * port is SEO-Bot's only sanctioned site where a provider is reached outside
+ * @quantum-l9/llm-router, so a run's count is non-zero exactly when this port
+ * ran during it — and zero because it did not, never because zero is expected.
+ */
+describe("AnswerEngineObservationPort — direct provider bypass is recorded", () => {
+  it("publishes one bypass event per observation to the open run", async () => {
+    post.mockResolvedValue({ data: { choices: [{ message: { content: "a" } }], citations: [] } });
+    const recorder = new LlmRunRecorder("seo-run:test");
+    await getAnswerEnginePort("perplexity").observe("q1");
+    await getAnswerEnginePort("perplexity").observe("q2");
+    recorder.close();
+
+    const bypasses = recorder.snapshot().direct_provider_bypasses;
+    expect(bypasses).toHaveLength(2);
+    expect(bypasses[0]).toMatchObject({
+      site: "aeo-geo:answer-engine-observation",
+      engine: "perplexity",
+    });
+    expect(bypasses[0]!.rationale).toBeTruthy();
+  });
+
+  it("records nothing for a run during which the port never ran", async () => {
+    const recorder = new LlmRunRecorder("seo-run:quiet");
+    recorder.close();
+    expect(recorder.snapshot().direct_provider_bypasses).toEqual([]);
+  });
+
+  it("records the bypass BEFORE the provider request leaves, not on success", async () => {
+    // The bypass is the event, not its outcome. Recording it ahead of the
+    // request means a provider call that later fails is still counted as the
+    // bypass it was.
+    const recorder = new LlmRunRecorder("seo-run:test");
+    let bypassesWhenRequestIssued = -1;
+    post.mockImplementation(async () => {
+      bypassesWhenRequestIssued = recorder.snapshot().direct_provider_bypasses.length;
+      return { data: { choices: [{ message: { content: "a" } }], citations: [] } };
+    });
+    await getAnswerEnginePort("perplexity").observe("q");
+    recorder.close();
+    expect(bypassesWhenRequestIssued).toBe(1);
   });
 });
