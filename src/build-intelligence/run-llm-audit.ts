@@ -78,8 +78,11 @@ const operationExecutionSchema = z
     task_id: z.string().min(1),
     provider: z.string().min(1),
     model: z.string().min(1),
-    search_required: z.boolean(),
-    search_policy_source: z.enum(["explicit", "task_default"]),
+    // Verbatim router evidence keeps the router's camelCase spelling; the enum
+    // NAME is recorded, so an unrecognised source value fails here rather than
+    // being silently normalized into a canonical-looking one.
+    searchRequired: z.boolean(),
+    searchPolicySource: z.enum(["EXPLICIT", "TASK_DEFAULT"]),
     descriptor_requires_search: z.boolean().nullable(),
     outcome: z.enum(["SUCCESS", "FAILED"]),
   })
@@ -124,7 +127,16 @@ const attributionFailureSchema = z
 const runLlmAuditSchema = z
   .object({
     schema: z.literal(RUN_LLM_AUDIT_SCHEMA),
+    /**
+     * The run's identity for a consumer correlating this audit against its own
+     * record of the same run: the consumer-supplied `run_ref` when one was
+     * given, otherwise SEO-Bot's derived id.
+     */
     run_id: z.string().min(1),
+    /** SEO-Bot's own derived id — always the store key, whatever `run_id` is. */
+    seo_run_id: z.string().min(1),
+    /** Which of the two `run_id` is. */
+    run_id_source: z.enum(["consumer_supplied", "derived"]),
     client_id: z.string().min(1),
     build_id: z.string().min(1),
     produced_at: z.string().min(1),
@@ -136,7 +148,13 @@ const runLlmAuditSchema = z
         structured_content: z.boolean(),
       })
       .strict(),
-    ranking_llm_calls: z.number().int().min(0),
+    /** One block per producer leg, so every leg reads the same way. */
+    competitive_landscape: z
+      .object({
+        executed: z.boolean(),
+        ranking_llm_calls: z.number().int().min(0),
+      })
+      .strict(),
     seo_content_blueprint: z
       .object({
         executed: z.boolean(),
@@ -202,8 +220,18 @@ export function runLlmAuditViolations(audit: RunLlmAuditV1): string[] {
   const violations: string[] = [];
 
   // ── Identity is derived, not asserted ──────────────────────────────────────
-  if (audit.run_id !== runIdFor(audit.client_id, audit.build_id)) {
-    violations.push("run_id is not the deterministic id of (client_id, build_id)");
+  // `seo_run_id` is ALWAYS the deterministic id, so SEO-Bot's own addressing
+  // stays checkable even when the exported `run_id` is the consumer's.
+  if (audit.seo_run_id !== runIdFor(audit.client_id, audit.build_id)) {
+    violations.push("seo_run_id is not the deterministic id of (client_id, build_id)");
+  }
+  if (audit.run_id_source === "derived" && audit.run_id !== audit.seo_run_id) {
+    violations.push("run_id_source is derived but run_id is not the derived id");
+  }
+  if (audit.run_id_source === "consumer_supplied" && audit.run_id === audit.seo_run_id) {
+    violations.push(
+      "run_id_source is consumer_supplied but run_id is the derived id; no consumer ref was recorded",
+    );
   }
   if (Number.isNaN(Date.parse(audit.produced_at))) {
     violations.push("produced_at is not an ISO timestamp");
@@ -235,9 +263,14 @@ export function runLlmAuditViolations(audit: RunLlmAuditV1): string[] {
   }
 
   // ── Ranking authority is deterministic: zero LLM calls, measured ───────────
-  if (audit.ranking_llm_calls !== 0) {
+  const ranking = audit.competitive_landscape;
+  if (ranking.executed !== audit.legs.competitive_landscape) {
+    violations.push("competitive_landscape.executed disagrees with legs.competitive_landscape");
+  }
+  if (ranking.ranking_llm_calls !== 0) {
     violations.push(
-      `ranking_llm_calls is ${audit.ranking_llm_calls}, must be 0 (deterministic rank authority)`,
+      `competitive_landscape.ranking_llm_calls is ${ranking.ranking_llm_calls}, ` +
+        `must be 0 (deterministic rank authority)`,
     );
   }
 
@@ -385,15 +418,15 @@ function operationViolations(audit: RunLlmAuditV1): string[] {
       if (execution.outcome !== "SUCCESS") {
         violations.push(`${label} did not complete (outcome ${execution.outcome})`);
       }
-      if (execution.search_policy_source === "explicit") {
+      if (execution.searchPolicySource === "EXPLICIT") {
         if (typeof execution.descriptor_requires_search !== "boolean") {
           violations.push(
             `${label} records searchPolicySource EXPLICIT but the governed operation supplied ` +
               `no requiresSearch policy`,
           );
-        } else if (execution.descriptor_requires_search !== execution.search_required) {
+        } else if (execution.descriptor_requires_search !== execution.searchRequired) {
           violations.push(
-            `${label} applied searchRequired=${execution.search_required} while the governed ` +
+            `${label} applied searchRequired=${execution.searchRequired} while the governed ` +
               `operation supplied requiresSearch=${execution.descriptor_requires_search}`,
           );
         }
@@ -405,7 +438,7 @@ function operationViolations(audit: RunLlmAuditV1): string[] {
       }
       // All three audited operations consume normalized evidence; a search
       // provider on any of them is a policy violation, recorded as such.
-      if (execution.search_required) {
+      if (execution.searchRequired) {
         violations.push(`${label} resolved to a search-backed route`);
       }
     }

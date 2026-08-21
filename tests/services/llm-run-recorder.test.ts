@@ -18,6 +18,7 @@ import {
 } from "../../src/services/improve-llm-policy.js";
 import {
   _openRecorderCount,
+  canonicalSearchPolicySource,
   LlmRunRecorder,
   publishCapabilityRejection,
   publishDirectProviderBypass,
@@ -111,8 +112,10 @@ describe("LlmRunRecorder — governed policy evidence comes from the router", ()
       // The governed policy supplies requiresSearch:false for all three ops, so
       // the router must report EXPLICIT — and the recorder must carry the value
       // that was actually supplied so EXPLICIT can be checked, not trusted.
-      expect(entry.search_required).toBe(false);
-      expect(entry.search_policy_source).toBe(SearchPolicySource.EXPLICIT);
+      expect(entry.searchRequired).toBe(false);
+      // Recorded as the enum NAME the governed-run oracle requires, mapped
+      // from the router's lowercase enum value rather than upper-cased blindly.
+      expect(entry.searchPolicySource).toBe("EXPLICIT");
       expect(entry.descriptor_requires_search).toBe(false);
       expect(entry.outcome).toBe("SUCCESS");
       expect(entry.task_id).toBeTruthy();
@@ -145,7 +148,7 @@ describe("LlmRunRecorder — governed policy evidence comes from the router", ()
     recorder.close();
 
     const entry = recorder.snapshot().operations[0]!;
-    expect(entry.search_policy_source).toBe(SearchPolicySource.TASK_DEFAULT);
+    expect(entry.searchPolicySource).toBe("TASK_DEFAULT");
     expect(entry.descriptor_requires_search).toBeNull();
   });
 
@@ -258,5 +261,31 @@ describe("LlmRunRecorder — run-scoped event subscription", () => {
     recorder.close();
     recorder.close();
     expect(_openRecorderCount()).toBe(before);
+  });
+});
+
+/**
+ * The router reports lowercase enum VALUES; the audit records the enum NAME,
+ * which is the spelling the governed-run oracle requires downstream. Mapping
+ * by name keeps the translation total — an unrecognised value must survive
+ * verbatim so the audit schema rejects it, rather than being upper-cased into
+ * something that merely looks canonical.
+ */
+describe("canonicalSearchPolicySource", () => {
+  it("maps the router's enum values to their names", () => {
+    expect(canonicalSearchPolicySource("explicit")).toBe("EXPLICIT");
+    expect(canonicalSearchPolicySource("task_default")).toBe("TASK_DEFAULT");
+  });
+
+  it("is idempotent on an already-canonical name", () => {
+    expect(canonicalSearchPolicySource("EXPLICIT")).toBe("EXPLICIT");
+    expect(canonicalSearchPolicySource("TASK_DEFAULT")).toBe("TASK_DEFAULT");
+  });
+
+  it("passes an unknown value through instead of inventing a canonical one", () => {
+    // Blind upper-casing would turn this into a plausible-looking "INFERRED";
+    // passing it through lets the audit schema reject it.
+    expect(canonicalSearchPolicySource("inferred")).toBe("inferred");
+    expect(canonicalSearchPolicySource(undefined)).toBe("undefined");
   });
 });

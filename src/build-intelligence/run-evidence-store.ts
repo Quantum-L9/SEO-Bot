@@ -38,6 +38,15 @@ export const RUN_EVIDENCE_CAPACITY = 256;
 
 interface RunRecord {
   run_id: string;
+  /**
+   * The consumer's own id for this run, when it supplied one. Website-Bot
+   * correlates the audit against its own record of the same run by id, and it
+   * mints that id — so SEO-Bot echoes it rather than asking the consumer to
+   * recompute SEO-Bot's derived id.
+   */
+  run_ref: string | null;
+  /** A leg that supplied a DIFFERENT run_ref than an earlier leg. */
+  run_ref_conflicts: string[];
   client_id: string;
   build_id: string;
   first_seen_at: string;
@@ -64,15 +73,18 @@ function emptySnapshot(): RunRecord["recorded"] {
 
 const runs = new Map<string, RunRecord>();
 
-function record(clientId: string, buildId: string, now: string): RunRecord {
+function record(clientId: string, buildId: string, now: string, runRef?: string): RunRecord {
   const runId = runIdFor(clientId, buildId);
   const existing = runs.get(runId);
   if (existing) {
     existing.updated_at = now;
+    applyRunRef(existing, runRef);
     return existing;
   }
   const created: RunRecord = {
     run_id: runId,
+    run_ref: null,
+    run_ref_conflicts: [],
     client_id: clientId,
     build_id: buildId,
     first_seen_at: now,
@@ -85,6 +97,7 @@ function record(clientId: string, buildId: string, now: string): RunRecord {
     ranking_llm_calls: 0,
     recorded: emptySnapshot(),
   };
+  applyRunRef(created, runRef);
   runs.set(runId, created);
   while (runs.size > RUN_EVIDENCE_CAPACITY) {
     const oldest = runs.keys().next();
@@ -92,6 +105,25 @@ function record(clientId: string, buildId: string, now: string): RunRecord {
     runs.delete(oldest.value);
   }
   return created;
+}
+
+/**
+ * Bind the consumer's run reference to the run. The three legs are three HTTP
+ * calls in one run, so they must agree: a second leg naming a different run is
+ * recorded as a conflict and fails the audit rather than overwriting the first.
+ */
+function applyRunRef(target: RunRecord, runRef: string | undefined): void {
+  const trimmed = runRef?.trim();
+  if (!trimmed) return;
+  if (target.run_ref === null) {
+    target.run_ref = trimmed;
+    return;
+  }
+  if (target.run_ref !== trimmed) {
+    target.run_ref_conflicts.push(
+      `leg supplied run_ref "${trimmed}" for a run already bound to "${target.run_ref}"`,
+    );
+  }
 }
 
 /** Merge a recorder's snapshot into a run, de-duplicating by router task id. */
@@ -140,9 +172,16 @@ export function recordCompetitiveLandscapeLeg(input: {
   build_id: string;
   ranking_llm_calls: number;
   recorder?: LlmRunRecorder;
+  /** The consumer's own id for this run, echoed into the exported audit. */
+  run_ref?: string;
   now?: string;
 }): string {
-  const target = record(input.client_id, input.build_id, input.now ?? new Date().toISOString());
+  const target = record(
+    input.client_id,
+    input.build_id,
+    input.now ?? new Date().toISOString(),
+    input.run_ref,
+  );
   target.legs.competitive_landscape = true;
   target.ranking_llm_calls = input.ranking_llm_calls;
   mergeRecorded(target, input.recorder);
@@ -155,9 +194,16 @@ export function recordSeoContentBlueprintLeg(input: {
   build_id: string;
   evidence: SEOContentBlueprintEvidence;
   recorder?: LlmRunRecorder;
+  /** The consumer's own id for this run, echoed into the exported audit. */
+  run_ref?: string;
   now?: string;
 }): string {
-  const target = record(input.client_id, input.build_id, input.now ?? new Date().toISOString());
+  const target = record(
+    input.client_id,
+    input.build_id,
+    input.now ?? new Date().toISOString(),
+    input.run_ref,
+  );
   target.legs.seo_content_blueprint = true;
   target.blueprint = input.evidence;
   mergeRecorded(target, input.recorder);
@@ -170,9 +216,16 @@ export function recordStructuredContentLeg(input: {
   build_id: string;
   evidence: StructuredContentEvidence;
   recorder?: LlmRunRecorder;
+  /** The consumer's own id for this run, echoed into the exported audit. */
+  run_ref?: string;
   now?: string;
 }): string {
-  const target = record(input.client_id, input.build_id, input.now ?? new Date().toISOString());
+  const target = record(
+    input.client_id,
+    input.build_id,
+    input.now ?? new Date().toISOString(),
+    input.run_ref,
+  );
   target.legs.structured_content = true;
   target.content = input.evidence;
   mergeRecorded(target, input.recorder);
@@ -203,13 +256,18 @@ function assembleRunLlmAudit(target: RunRecord): RunLlmAuditV1 {
 
   return assertRunLlmAudit({
     schema: RUN_LLM_AUDIT_SCHEMA,
-    run_id: target.run_id,
+    run_id: target.run_ref ?? target.run_id,
+    seo_run_id: target.run_id,
+    run_id_source: target.run_ref === null ? "derived" : "consumer_supplied",
     client_id: target.client_id,
     build_id: target.build_id,
     produced_at: target.updated_at,
     producer: { repo: PRODUCER.repo, version: PRODUCER.version },
     legs: { ...target.legs },
-    ranking_llm_calls: target.ranking_llm_calls,
+    competitive_landscape: {
+      executed: target.legs.competitive_landscape,
+      ranking_llm_calls: target.ranking_llm_calls,
+    },
     seo_content_blueprint: {
       executed: target.legs.seo_content_blueprint,
       route_count: blueprint?.route_count ?? 0,
@@ -234,7 +292,17 @@ function assembleRunLlmAudit(target: RunRecord): RunLlmAuditV1 {
     unsupported_capability_combinations: target.recorded.capability_rejections.map((entry) => ({
       ...entry,
     })),
-    attribution_failures: target.recorded.attribution_failures.map((entry) => ({ ...entry })),
+    attribution_failures: [
+      ...target.recorded.attribution_failures.map((entry) => ({ ...entry })),
+      // A run whose legs disagree about which run they belong to cannot be
+      // correlated by anyone; it fails validation rather than picking a side.
+      ...target.run_ref_conflicts.map((reason) => ({
+        operation: "RUN_IDENTITY",
+        purpose: "run-evidence-store",
+        attempt: "initial" as const,
+        reason,
+      })),
+    ],
   });
 }
 

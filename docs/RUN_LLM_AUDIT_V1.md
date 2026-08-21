@@ -10,22 +10,31 @@ is an evidence *script* and is **not** required to retrieve production evidence.
 ## Run identity
 
 One build-intelligence run is three HTTP calls (competitive-landscape →
-seo-content-blueprint → structured-content). They share a run id derived from
-the run's own identity, so producer and consumer compute the same value with no
-handshake:
+seo-content-blueprint → structured-content). SEO-Bot derives its own id for that
+run, so producer and consumer can address it with no handshake:
 
 ```
-run_id = "seo-run:" + sha256_hex(client_id + "\n" + build_id)
+seo_run_id = "seo-run:" + sha256_hex(client_id + "\n" + build_id)
 ```
 
-Every producer response also carries the header `x-l9-seo-run-id`.
+A consumer that correlates on its **own** run id may pass it as an optional
+`run_ref` on any of the three producer requests. When supplied, the exported
+`run_id` is that value and `run_id_source` is `consumer_supplied`. `seo_run_id`
+is always the derived id and remains the store key, so retrieval is unaffected.
+Without a `run_ref`, `run_id === seo_run_id` and `run_id_source` is `derived`.
+
+All three legs must agree: a leg naming a different run than an earlier one is a
+recorded conflict that fails the audit rather than overwriting it.
+
+Every producer response also carries the header `x-l9-seo-run-id`, which is the
+derived id — the addressable one.
 
 ## Endpoints
 
 | Method | Path | Notes |
 | --- | --- | --- |
 | `GET` | `/api/build-intelligence/run-evidence?client_id=…&build_id=…` | By run identity |
-| `GET` | `/api/build-intelligence/run-evidence/:run_id` | By run id |
+| `GET` | `/api/build-intelligence/run-evidence/:run_id` | By `seo_run_id` (the store key) |
 
 Auth: the same `SEO_BOT_API_KEY` machine credential as the three producers
 (`Authorization: Bearer …`). No LLM call and no paid provider call is made.
@@ -45,7 +54,9 @@ Auth: the same `SEO_BOT_API_KEY` machine credential as the three producers
 ```jsonc
 {
   "schema": "l9.seo-bot-run-llm-audit/v1",
-  "run_id": "seo-run:…",
+  "run_id": "…",              // the consumer's run_ref, or seo_run_id
+  "seo_run_id": "seo-run:…",  // always SEO-Bot's derived id
+  "run_id_source": "derived", // "consumer_supplied" | "derived"
   "client_id": "…",
   "build_id": "…",
   "produced_at": "2026-08-21T00:00:00.000Z",
@@ -57,7 +68,10 @@ Auth: the same `SEO_BOT_API_KEY` machine credential as the three producers
   },
 
   // Deterministic rank authority: measured, and required to be 0.
-  "ranking_llm_calls": 0,
+  "competitive_landscape": {
+    "executed": true,
+    "ranking_llm_calls": 0
+  },
 
   // The split the producer actually performed (the model never chooses batching).
   "seo_content_blueprint": {
@@ -93,8 +107,10 @@ Auth: the same `SEO_BOT_API_KEY` machine credential as the three producers
         "task_id": "…",                    // router-assigned id of the routed call
         "provider": "openrouter",
         "model": "…",
-        "search_required": false,          // APPLIED by the router
-        "search_policy_source": "explicit",// APPLIED by the router
+        // Verbatim router evidence, so these two keep the router's camelCase
+        // spelling and record the enum NAME.
+        "searchRequired": false,             // APPLIED by the router
+        "searchPolicySource": "EXPLICIT",    // APPLIED by the router
         "descriptor_requires_search": false, // what the governed op supplied
         "outcome": "SUCCESS"
       }
@@ -118,11 +134,11 @@ Auth: the same `SEO_BOT_API_KEY` machine credential as the three producers
 
 | Field | Measured where |
 | --- | --- |
-| `ranking_llm_calls` | `createCompetitiveLandscape`'s own evidence summary (the ranking path imports no LLM service). |
+| `competitive_landscape.ranking_llm_calls` | `createCompetitiveLandscape`'s own evidence summary (the ranking path imports no LLM service). |
 | `seo_content_blueprint.batch_size` / `batch_count` | The producer's deterministic `chunkRoutes` split. `completed_batches` is counted as batches finish. |
 | `structured_content.route_results[].generation_calls` | A **per-route** counter incremented in `LlmService.executePolicyJson` after each actual `L9LLMRouter.execute` returns. |
 | `structured_content.route_results[].repair_attempts` | The deterministic image of the authoritative `repaired_route_ids`: repaired → `1`, unrepaired → `0`. Cross-checked against `generation_calls` before it can be reported. |
-| `operations.*` | The router's own `RoutingDecision` call log, claimed one decision per actual call. |
+| `operations.*` | The router's own `RoutingDecision` call log, claimed one decision per actual call. `searchPolicySource` is the router enum's NAME, mapped by name so an unrecognised value is rejected rather than normalized. |
 | `direct_provider_bypass_count` | Published by the one sanctioned direct-provider site (`aeo-geo:answer-engine-observation`) on every invocation. |
 | `unsupported_capability_combination_count` | Caught where `UnsupportedCapabilityCombinationError` surfaces — the router raises it during route resolution, so it never reaches the router's call log. |
 
@@ -131,17 +147,18 @@ Auth: the same `SEO_BOT_API_KEY` machine credential as the three producers
 `assertRunLlmAudit` re-derives everything it can before an audit may be
 returned. A `200` therefore means all of the following held:
 
-- `run_id` is the deterministic id of `(client_id, build_id)`.
 - Both counters equal the length of their evidence lists.
 - `attribution_failures` is empty.
-- `ranking_llm_calls === 0`.
+- `seo_run_id` is the deterministic id of `(client_id, build_id)`, and `run_id`
+  agrees with `run_id_source`.
+- `competitive_landscape.ranking_llm_calls === 0`.
 - `batch_count === ceil(route_count / batch_size)` and `completed_batches === batch_count`.
 - Every route: `generation_calls === repair_attempts + 1`, `repair_attempts ≤ 1`, unique `route_id` and `path`.
 - `Σ route_results[].generation_calls` equals the number of router decisions
   attributed to `STRUCTURED_CONTENT_GENERATION` — two independent measurements
   of the same quantity must agree.
 - Every recorded call: `outcome === "SUCCESS"`, `search_required === false`, and
-  `search_policy_source === "explicit"` **only** when the governed operation
+  `searchPolicySource === "EXPLICIT"` **only** when the governed operation
   supplied a `requiresSearch` boolean equal to the applied value.
 
 Unknown fields are rejected; the document is strict, not extensible in place.
@@ -152,3 +169,17 @@ Evidence is retained in-process for the most recent `RUN_EVIDENCE_CAPACITY`
 (256) runs and is not persisted. Read it during or shortly after the build.
 An evicted or unknown run answers `404` — it is never reconstructed from
 defaults.
+
+## Consumer parity
+
+The field names and spellings above are a cross-repository contract, not
+cosmetic. `searchRequired` / `searchPolicySource: "EXPLICIT"` are the spelling
+the governed-run oracle requires of the receipt these values end up in, and
+`competitive_landscape.ranking_llm_calls`, `seo_content_blueprint.batch_size` /
+`batch_count`, and `structured_content.route_results[].generation_calls` /
+`repair_attempts` are read at exactly those paths by the consumer — which
+refuses to default any of them.
+
+`tests/build-intelligence/run-evidence-store.test.ts` pins them literally
+rather than through the exported types, because a rename that type-checks would
+still break the consumer.

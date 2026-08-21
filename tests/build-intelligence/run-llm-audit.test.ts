@@ -39,8 +39,8 @@ function operation(
     task_id: "task-1",
     provider: "openrouter",
     model: "some/model",
-    search_required: false,
-    search_policy_source: "explicit",
+    searchRequired: false,
+    searchPolicySource: "EXPLICIT",
     descriptor_requires_search: false,
     outcome: "SUCCESS",
     ...overrides,
@@ -52,6 +52,8 @@ function baseAudit(): RunLlmAuditV1 {
   return {
     schema: RUN_LLM_AUDIT_SCHEMA,
     run_id: runIdFor(CLIENT, BUILD),
+    seo_run_id: runIdFor(CLIENT, BUILD),
+    run_id_source: "derived",
     client_id: CLIENT,
     build_id: BUILD,
     produced_at: "2026-08-21T00:00:00.000Z",
@@ -61,7 +63,7 @@ function baseAudit(): RunLlmAuditV1 {
       seo_content_blueprint: true,
       structured_content: true,
     },
-    ranking_llm_calls: 0,
+    competitive_landscape: { executed: true, ranking_llm_calls: 0 },
     seo_content_blueprint: {
       executed: true,
       route_count: 2,
@@ -124,9 +126,9 @@ describe("l9.seo-bot-run-llm-audit/v1 — a consistent run validates", () => {
   it("derives run identity from (client_id, build_id) rather than trusting it", () => {
     expect(runIdFor(CLIENT, BUILD)).toBe(runIdFor(CLIENT, BUILD));
     expect(runIdFor(CLIENT, BUILD)).not.toBe(runIdFor(CLIENT, "build-2"));
-    expect(violationsOf((audit) => (audit.run_id = "seo-run:invented"))).toEqual([
-      "run_id is not the deterministic id of (client_id, build_id)",
-    ]);
+    expect(violationsOf((audit) => (audit.run_id = "seo-run:invented")).join(" ")).toMatch(
+      /run_id_source is derived but run_id is not the derived id/,
+    );
   });
 });
 
@@ -222,7 +224,7 @@ describe("explicit search-policy recording", () => {
 
   it("rejects TASK_DEFAULT recorded for a call that did supply a policy", () => {
     const violations = violationsOf((audit) => {
-      audit.operations.SEO_CONTENT_BLUEPRINT[0]!.search_policy_source = "task_default";
+      audit.operations.SEO_CONTENT_BLUEPRINT[0]!.searchPolicySource = "TASK_DEFAULT";
     });
     expect(violations.join(" ")).toMatch(/TASK_DEFAULT although the governed operation supplied/);
   });
@@ -230,7 +232,7 @@ describe("explicit search-policy recording", () => {
   it("rejects a governed reasoning call that resolved to a search-backed route", () => {
     const violations = violationsOf((audit) => {
       const call = audit.operations.STRUCTURED_CONTENT_GENERATION[0]!;
-      call.search_required = true;
+      call.searchRequired = true;
       call.descriptor_requires_search = true;
     });
     expect(violations.join(" ")).toMatch(/resolved to a search-backed route/);
@@ -238,9 +240,9 @@ describe("explicit search-policy recording", () => {
 
   it("rejects an unknown policy source outright", () => {
     const audit = baseAudit() as unknown as {
-      operations: { CONTENT_VALIDATION: Array<{ search_policy_source: string }> };
+      operations: { CONTENT_VALIDATION: Array<{ searchPolicySource: string }> };
     };
-    audit.operations.CONTENT_VALIDATION[0]!.search_policy_source = "inferred";
+    audit.operations.CONTENT_VALIDATION[0]!.searchPolicySource = "inferred";
     expect(() => assertRunLlmAudit(audit)).toThrow(RunLlmAuditInvalidError);
   });
 });
@@ -282,10 +284,10 @@ describe("batch evidence", () => {
 describe("ranking LLM count", () => {
   it("rejects any LLM call on the deterministic ranking path", () => {
     const violations = violationsOf((audit) => {
-      audit.ranking_llm_calls = 1;
+      audit.competitive_landscape.ranking_llm_calls = 1;
     });
-    expect(violations).toContain(
-      "ranking_llm_calls is 1, must be 0 (deterministic rank authority)",
+    expect(violations.join(" ")).toMatch(
+      /competitive_landscape\.ranking_llm_calls is 1, must be 0/,
     );
   });
 });
@@ -367,7 +369,8 @@ describe("malformed / missing evidence rejection", () => {
   it("rejects an audit missing a required section", () => {
     for (const key of [
       "run_id",
-      "ranking_llm_calls",
+      "seo_run_id",
+      "competitive_landscape",
       "seo_content_blueprint",
       "structured_content",
       "operations",
@@ -407,7 +410,7 @@ describe("malformed / missing evidence rejection", () => {
 
   it("reports every violation at once instead of stopping at the first", () => {
     const audit = baseAudit();
-    audit.ranking_llm_calls = 2;
+    audit.competitive_landscape.ranking_llm_calls = 2;
     audit.direct_provider_bypass_count = 5;
     try {
       assertRunLlmAudit(audit);
