@@ -21,6 +21,11 @@ import { createModuleLogger } from "../core/logger.js";
 import type { ModuleName } from "../types/index.js";
 import { type SeoImproveLlmOperation, seoImproveTask } from "./improve-llm-policy.js";
 import { parseJsonFromLlm, parseScore } from "./llm-parse.js";
+import {
+  type LlmRunRecorder,
+  type OperationAttempt,
+  publishCapabilityRejection,
+} from "./llm-run-recorder.js";
 import { hydrateSeoContext } from "./memory.js";
 
 const logger = createModuleLogger("llm");
@@ -45,6 +50,27 @@ function tierToComplexity(tier: LegacyTier): TaskComplexity {
  */
 export interface LlmCallCounter {
   value: number;
+}
+
+/**
+ * How far back the router call log is read when attributing ONE governed call.
+ * Only decisions this recorder has not already claimed are considered, so the
+ * window merely has to be larger than the number of calls a single operation
+ * can make (two, with its bounded repair).
+ */
+const ROUTER_ATTRIBUTION_WINDOW = 50;
+
+/**
+ * A capability combination the router refuses is raised from route resolution,
+ * BEFORE the decision is appended to the call log — so it is invisible to log
+ * attribution and must be recognised where it surfaces.
+ */
+function capabilityConflictCode(error: unknown): string | null {
+  if (!(error instanceof Error) || error.name !== "UnsupportedCapabilityCombinationError") {
+    return null;
+  }
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && code.length > 0 ? code : "UNSUPPORTED_CAPABILITY_COMBINATION";
 }
 
 export class LlmService {
@@ -75,11 +101,20 @@ export class LlmService {
     return Promise.resolve(0);
   }
 
+  /**
+   * The ONE layer that knows a provider/model execution actually happened: every
+   * SEO-Bot LLM call funnels through here into `L9LLMRouter.execute`.
+   *
+   * `audit` carries only the governed-operation label so a refused capability
+   * combination can be attributed to the operation that asked for it. It never
+   * influences routing.
+   */
   async execute(
     task: TaskDescriptor,
     systemPrompt: string,
     userPrompt: string,
     options?: { images?: string[]; assistantContext?: string; consensus?: boolean },
+    audit?: { operation: string },
   ): Promise<LLMResponse> {
     if (!task.clientId) throw new Error("LLM task clientId is required");
     // Idempotent: registered clients keep their persisted budget state; build-time
@@ -114,6 +149,18 @@ export class LlmService {
         );
       } else {
         logger.error({ error: error.message, task: task.description }, "LLM execution failed");
+      }
+      // A refused capability combination never reaches the router's call log
+      // (it is raised during route resolution), so this catch is the only place
+      // it can be counted. Observation only — the error still propagates.
+      const conflictCode = capabilityConflictCode(error);
+      if (conflictCode) {
+        publishCapabilityRejection({
+          code: conflictCode,
+          task_type: String(task.type),
+          operation: audit?.operation ?? null,
+          message: error instanceof Error ? error.message : String(error),
+        });
       }
       throw error;
     }
@@ -252,6 +299,8 @@ export class LlmService {
       schemaRepairAttempts?: 0 | 1;
       /** Incremented once per actual LLM call, when supplied. */
       callCounter?: LlmCallCounter;
+      /** Records the router's own decision for each actual call, when supplied. */
+      recorder?: LlmRunRecorder;
     },
   ): Promise<T> {
     const repairAttempts = args.schemaRepairAttempts ?? 1;
@@ -259,7 +308,8 @@ export class LlmService {
       throw new Error("schemaRepairAttempts must be 0 or 1");
     }
     const task = seoImproveTask(operation, args.clientId, `[${args.module}] ${args.purpose}`);
-    const first = await this.execute(task, args.systemPrompt, args.userPrompt);
+    const purpose = `[${args.module}] ${args.purpose}`;
+    const first = await this.executeGoverned(operation, task, args, purpose, "initial");
     if (args.callCounter) args.callCounter.value += 1;
     try {
       return args.validate(parseJsonFromLlm<unknown>(first.content));
@@ -277,11 +327,52 @@ export class LlmService {
       const repairPrompt =
         `${args.userPrompt}\n\n---\nYour previous response was rejected: ${reason}\n` +
         `Respond again with ONLY a single valid JSON value that satisfies the required schema. No prose, no markdown fences.`;
-      const second = await this.execute(task, args.systemPrompt, repairPrompt);
+      const second = await this.executeGoverned(
+        operation,
+        task,
+        { ...args, userPrompt: repairPrompt },
+        purpose,
+        "repair",
+      );
       if (args.callCounter) args.callCounter.value += 1;
       // A second failure throws the validator's terminal error — no further retry.
       return args.validate(parseJsonFromLlm<unknown>(second.content));
     }
+  }
+
+  /**
+   * Dispatch ONE actual governed call and record the router's own decision for
+   * it.
+   *
+   * Nothing about the routing is restated from SEO-Bot's intent: the applied
+   * `searchRequired` / `searchPolicySource` are read back off the router call
+   * log, and the descriptor's `requiresSearch` is recorded beside them so
+   * `EXPLICIT` can be checked against what the governed operation actually
+   * supplied rather than trusted.
+   */
+  private async executeGoverned(
+    operation: SeoImproveLlmOperation,
+    task: TaskDescriptor,
+    args: { systemPrompt: string; userPrompt: string; recorder?: LlmRunRecorder },
+    purpose: string,
+    attempt: OperationAttempt,
+  ): Promise<LLMResponse> {
+    const response = await this.execute(task, args.systemPrompt, args.userPrompt, undefined, {
+      operation,
+    });
+    args.recorder?.attributeOperationCall({
+      operation,
+      purpose,
+      attempt,
+      descriptorRequiresSearch:
+        typeof task.requiresSearch === "boolean" ? task.requiresSearch : null,
+      decisions: this.router.getCallLogByClient(
+        task.clientId ?? "default",
+        ROUTER_ATTRIBUTION_WINDOW,
+      ),
+      response: { provider: String(response.provider) },
+    });
+    return response;
   }
 
   /**
@@ -297,6 +388,8 @@ export class LlmService {
     systemPrompt: string;
     userPrompt: string;
     validate: (value: unknown) => T;
+    /** Records the router's own decision for each actual call, when supplied. */
+    recorder?: LlmRunRecorder;
   }): Promise<T> {
     return this.executePolicyJson("SEO_CONTENT_BLUEPRINT", args);
   }

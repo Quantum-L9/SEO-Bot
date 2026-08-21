@@ -34,11 +34,12 @@ import {
   type VerifiedBusinessFact,
   WEBSITE_INTELLIGENCE_SCHEMAS,
 } from "@quantum-l9/bot-interop";
+import { z } from "zod";
 import { createModuleLogger } from "../core/logger.js";
 import { DataForSeoClient } from "../services/dataforseo.js";
 import { getLlmService, type LlmService } from "../services/llm.js";
+import type { LlmRunRecorder } from "../services/llm-run-recorder.js";
 import { PRODUCER } from "./producer.js";
-import { z } from "zod";
 import {
   type GlobalRouteIntentRoute,
   globalRouteIntentRouteSchema,
@@ -206,6 +207,8 @@ interface NormalizedDonorEvidence {
  * Deliberately NOT recorded here: LLM call counts. `strategizeJson` owns its
  * own bounded repair, so the producer cannot see how many calls a batch really
  * cost, and a counter incremented per batch here would silently understate it.
+ * The run recorder (`deps.recorder`) captures them instead, at the LLM boundary
+ * where each actual router call is visible — including a bounded repair.
  */
 export interface SEOContentBlueprintEvidence {
   route_count: number;
@@ -225,14 +228,14 @@ export interface SEOContentBlueprintResult {
  */
 export async function createSEOContentBlueprint(
   request: SEOContentBlueprintRequest,
-  deps: { llm?: LlmService; dataForSeo?: PageContentPort } = {},
+  deps: { llm?: LlmService; dataForSeo?: PageContentPort; recorder?: LlmRunRecorder } = {},
 ): Promise<SEOContentBlueprintArtifact> {
   return (await createSEOContentBlueprintWithEvidence(request, deps)).artifact;
 }
 
 export async function createSEOContentBlueprintWithEvidence(
   request: SEOContentBlueprintRequest,
-  deps: { llm?: LlmService; dataForSeo?: PageContentPort } = {},
+  deps: { llm?: LlmService; dataForSeo?: PageContentPort; recorder?: LlmRunRecorder } = {},
 ): Promise<SEOContentBlueprintResult> {
   assertRouteSet(request.routes);
   assertLandscapeUsable(request.competitive_landscape);
@@ -289,6 +292,7 @@ export async function createSEOContentBlueprintWithEvidence(
       2,
     ),
     validate: (value) => parseGlobalRouteIntentPlan(value, request.routes),
+    recorder: deps.recorder,
   });
   const intentById = new Map(globalIntentPlan.map((intent) => [intent.route_id, intent]));
 
@@ -350,7 +354,8 @@ export async function createSEOContentBlueprintWithEvidence(
                 ],
                 internal_links: [
                   {
-                    target_route_id: "string (must be one of the all_route_index ids — other batches are valid targets)",
+                    target_route_id:
+                      "string (must be one of the all_route_index ids — other batches are valid targets)",
                     purpose: "string",
                   },
                 ],
@@ -379,6 +384,7 @@ export async function createSEOContentBlueprintWithEvidence(
           2,
         ),
         validate: (value) => reconcileBatch(value, batch, allRouteIds, intentById),
+        recorder: deps.recorder,
       });
     } catch (error) {
       // A batch that fails its one bounded repair fails the whole artifact.
@@ -597,9 +603,7 @@ function reconcileBatch(
   const batchIds = new Set(batch.map((route) => route.route_id));
   // Output route IDs must equal batch route IDs EXACTLY — no missing, no extras,
   // and no route belonging to another batch.
-  const unexpected = parsed.routes
-    .map((route) => route.route_id)
-    .filter((id) => !batchIds.has(id));
+  const unexpected = parsed.routes.map((route) => route.route_id).filter((id) => !batchIds.has(id));
   if (unexpected.length > 0) {
     throw new Error(`Batch contains route_id(s) outside this batch: ${unexpected.join(", ")}`);
   }
@@ -637,10 +641,7 @@ function reconcileBatch(
  * batch: internal links may target ANY route on the site (allRouteIds), and
  * requirement ids must be unique per route with valid target slots.
  */
-function assertBatchSemantics(
-  routes: SEOContentBlueprintRoute[],
-  allRouteIds: Set<string>,
-): void {
+function assertBatchSemantics(routes: SEOContentBlueprintRoute[], allRouteIds: Set<string>): void {
   for (const route of routes) {
     for (const link of route.internal_links) {
       if (!allRouteIds.has(link.target_route_id)) {

@@ -85,7 +85,7 @@ vi.mock("../../src/build-intelligence/competitive-landscape.js", async () => {
   };
 });
 vi.mock("../../src/build-intelligence/seo-content-blueprint.js", () => ({
-  createSEOContentBlueprint: vi.fn(),
+  createSEOContentBlueprintWithEvidence: vi.fn(),
   CompetitiveLandscapeInputInvalidError: class extends Error {
     code = "COMPETITIVE_LANDSCAPE_INVALID";
   },
@@ -100,7 +100,7 @@ vi.mock("../../src/build-intelligence/seo-content-blueprint.js", () => ({
   },
 }));
 vi.mock("../../src/build-intelligence/structured-content.js", () => ({
-  createStructuredContentPackage: vi.fn(),
+  createStructuredContentPackageWithEvidence: vi.fn(),
   ContentRequirementUnsatisfiedError: class extends Error {
     code = "CONTENT_REQUIREMENT_UNSATISFIED";
   },
