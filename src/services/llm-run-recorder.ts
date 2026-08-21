@@ -74,17 +74,47 @@ export interface OperationExecutionEvidence {
   task_id: string;
   provider: string;
   model: string;
-  /** APPLIED search requirement, as resolved by the router. */
-  search_required: boolean;
-  /** APPLIED policy source, as resolved by the router ("explicit"|"task_default"). */
-  search_policy_source: string;
+  /**
+   * APPLIED search requirement, as resolved by the router.
+   *
+   * `searchRequired` / `searchPolicySource` keep the router's own camelCase
+   * spelling because they are verbatim `RoutingDecision` evidence, not
+   * SEO-Bot vocabulary — which is also the spelling the governed-run oracle
+   * requires of them downstream.
+   */
+  searchRequired: boolean;
+  /** APPLIED policy source, canonicalized from the router's enum. */
+  searchPolicySource: SearchPolicySourceName;
   /**
    * The `requiresSearch` value the governed operation actually supplied on the
    * TaskDescriptor handed to the router, or `null` when it supplied none.
-   * `search_policy_source: "explicit"` is only truthful when this is a boolean.
+   * `searchPolicySource: "EXPLICIT"` is only truthful when this is a boolean.
    */
   descriptor_requires_search: boolean | null;
   outcome: "SUCCESS" | "FAILED";
+}
+
+/**
+ * Canonical spelling of the router's `SearchPolicySource` enum.
+ *
+ * The router reports lowercase enum VALUES (`explicit`, `task_default`); the
+ * audit records the enum NAME. Mapping by name rather than upper-casing an
+ * arbitrary string keeps the translation total: an unrecognised value passes
+ * through verbatim and is rejected by the audit schema instead of being
+ * upper-cased into something that merely looks canonical.
+ */
+export type SearchPolicySourceName = "EXPLICIT" | "TASK_DEFAULT";
+
+const SEARCH_POLICY_SOURCE_NAMES: Readonly<Record<string, SearchPolicySourceName>> = {
+  explicit: "EXPLICIT",
+  task_default: "TASK_DEFAULT",
+  EXPLICIT: "EXPLICIT",
+  TASK_DEFAULT: "TASK_DEFAULT",
+};
+
+export function canonicalSearchPolicySource(value: unknown): SearchPolicySourceName | string {
+  const key = String(value);
+  return SEARCH_POLICY_SOURCE_NAMES[key] ?? key;
 }
 
 /** A capability combination the router refused before any provider dispatch. */
@@ -209,8 +239,10 @@ export class LlmRunRecorder {
       task_id: decision.taskId,
       provider: String(decision.provider),
       model: String(decision.model),
-      search_required: decision.searchRequired,
-      search_policy_source: String(decision.searchPolicySource),
+      searchRequired: decision.searchRequired,
+      searchPolicySource: canonicalSearchPolicySource(
+        decision.searchPolicySource,
+      ) as SearchPolicySourceName,
       descriptor_requires_search: input.descriptorRequiresSearch,
       outcome: decision.outcome === "FAILED" ? "FAILED" : "SUCCESS",
     });

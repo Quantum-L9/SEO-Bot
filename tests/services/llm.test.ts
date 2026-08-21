@@ -489,8 +489,8 @@ describe("LlmService — run evidence is measured at the router boundary", () =>
       task_id: "task-1",
       provider: "openrouter",
       model: "routed-model",
-      search_required: false,
-      search_policy_source: "explicit",
+      searchRequired: false,
+      searchPolicySource: "EXPLICIT",
       // The governed policy supplies requiresSearch:false, so EXPLICIT is
       // provable rather than merely reported.
       descriptor_requires_search: false,

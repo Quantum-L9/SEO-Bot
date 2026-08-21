@@ -151,7 +151,7 @@ describe("run-evidence store — one run across three endpoints", () => {
     expect(audit).not.toBeNull();
     expect(audit?.schema).toBe(RUN_LLM_AUDIT_SCHEMA);
     expect(audit?.run_id).toBe(runId);
-    expect(audit?.ranking_llm_calls).toBe(0);
+    expect(audit?.competitive_landscape.ranking_llm_calls).toBe(0);
     expect(audit?.seo_content_blueprint.batch_size).toBe(4);
     expect(audit?.seo_content_blueprint.batch_count).toBe(1);
     expect(audit?.structured_content.route_results.map((route) => route.path)).toEqual([
@@ -255,5 +255,128 @@ describe("run-evidence store — one run across three endpoints", () => {
       ]),
     });
     expect(() => getRunLlmAuditFor(CLIENT, BUILD)).toThrow(RunLlmAuditInvalidError);
+  });
+});
+
+/**
+ * The consumer contract, pinned.
+ *
+ * Website-Bot correlates this audit against its own record of the same run and
+ * reads three SEO-Bot-owned facts out of it. Those field names and spellings
+ * are a cross-repository contract that no test in Website-Bot can protect from
+ * this side, so they are asserted here literally rather than through the
+ * exported types — a rename that type-checks would still break the consumer.
+ */
+describe("run-evidence store — cross-repository consumer contract", () => {
+  function seedRun(runRef?: string) {
+    const recorder = recorderWith([
+      { operation: "SEO_CONTENT_BLUEPRINT", taskId: "bp-g" },
+      { operation: "SEO_CONTENT_BLUEPRINT", taskId: "bp-1" },
+      { operation: "STRUCTURED_CONTENT_GENERATION", taskId: "gen-home" },
+      { operation: "CONTENT_VALIDATION", taskId: "val-home" },
+    ]);
+    recordCompetitiveLandscapeLeg({
+      client_id: CLIENT,
+      build_id: BUILD,
+      ranking_llm_calls: 0,
+      run_ref: runRef,
+    });
+    recordSeoContentBlueprintLeg({
+      client_id: CLIENT,
+      build_id: BUILD,
+      run_ref: runRef,
+      evidence: { route_count: 2, batch_size: 4, batch_count: 1, completed_batches: 1 },
+      recorder,
+    });
+    recordStructuredContentLeg({
+      client_id: CLIENT,
+      build_id: BUILD,
+      run_ref: runRef,
+      evidence: contentEvidence([
+        {
+          route_id: "home",
+          path: "/",
+          generation_calls: 1,
+          repair_attempts: 0,
+          semantic_validation_calls: 1,
+        },
+      ]),
+      recorder,
+    });
+    recorder.close();
+  }
+
+  it("exports the three SEO-Bot-owned facts under the exact paths the consumer reads", () => {
+    seedRun();
+    const audit = getRunLlmAuditFor(CLIENT, BUILD) as unknown as Record<string, any>;
+    // Website-Bot reads these three, and refuses to default any of them.
+    expect(audit.competitive_landscape.ranking_llm_calls).toBe(0);
+    expect(audit.seo_content_blueprint.batch_size).toBe(4);
+    expect(audit.seo_content_blueprint.batch_count).toBe(1);
+    expect(audit.structured_content.route_results[0]).toMatchObject({
+      route_id: "home",
+      path: "/",
+      generation_calls: 1,
+      repair_attempts: 0,
+    });
+  });
+
+  it("spells the governed policy fields the way the sealed oracle requires", () => {
+    seedRun();
+    const audit = getRunLlmAuditFor(CLIENT, BUILD) as unknown as Record<string, any>;
+    for (const operation of [
+      "SEO_CONTENT_BLUEPRINT",
+      "STRUCTURED_CONTENT_GENERATION",
+      "CONTENT_VALIDATION",
+    ]) {
+      expect(audit.operations[operation].length).toBeGreaterThan(0);
+      for (const call of audit.operations[operation]) {
+        // camelCase key, uppercase enum NAME — not the router's lowercase value.
+        expect(call).toHaveProperty("searchRequired", false);
+        expect(call).toHaveProperty("searchPolicySource", "EXPLICIT");
+        expect(call).not.toHaveProperty("search_required");
+        expect(call).not.toHaveProperty("search_policy_source");
+      }
+    }
+  });
+
+  it("echoes the consumer's run id while keeping its own derived id", () => {
+    seedRun("wb-run-123");
+    const audit = getRunLlmAuditFor(CLIENT, BUILD);
+    expect(audit?.run_id).toBe("wb-run-123");
+    expect(audit?.seo_run_id).toBe(runIdFor(CLIENT, BUILD));
+    expect(audit?.run_id_source).toBe("consumer_supplied");
+  });
+
+  it("falls back to the derived id when no consumer ref is supplied", () => {
+    seedRun();
+    const audit = getRunLlmAuditFor(CLIENT, BUILD);
+    expect(audit?.run_id).toBe(runIdFor(CLIENT, BUILD));
+    expect(audit?.seo_run_id).toBe(audit?.run_id);
+    expect(audit?.run_id_source).toBe("derived");
+  });
+
+  it("fails closed when two legs claim different runs", () => {
+    recordCompetitiveLandscapeLeg({
+      client_id: CLIENT,
+      build_id: BUILD,
+      ranking_llm_calls: 0,
+      run_ref: "wb-run-123",
+    });
+    recordSeoContentBlueprintLeg({
+      client_id: CLIENT,
+      build_id: BUILD,
+      run_ref: "wb-run-999",
+      evidence: { route_count: 2, batch_size: 4, batch_count: 1, completed_batches: 1 },
+    });
+    // A run whose legs disagree about which run they are cannot be correlated
+    // by anyone, so it is never exported with one side silently picked.
+    expect(() => getRunLlmAuditFor(CLIENT, BUILD)).toThrow(RunLlmAuditInvalidError);
+  });
+
+  it("ignores a blank run_ref rather than binding the run to nothing", () => {
+    seedRun("   ");
+    const audit = getRunLlmAuditFor(CLIENT, BUILD);
+    expect(audit?.run_id_source).toBe("derived");
   });
 });

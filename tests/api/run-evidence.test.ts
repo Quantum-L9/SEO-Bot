@@ -156,7 +156,7 @@ describe("GET /api/build-intelligence/run-evidence", () => {
     expect(body.run_id).toBe(runId);
     expect(res.headers[RUN_ID_HEADER]).toBe(runId);
     // Every field Website-Bot consumes is present and measured.
-    expect(body.ranking_llm_calls).toBe(0);
+    expect(body.competitive_landscape.ranking_llm_calls).toBe(0);
     expect(body.seo_content_blueprint.batch_size).toBe(4);
     expect(body.seo_content_blueprint.batch_count).toBe(1);
     expect(body.structured_content.route_results).toEqual([
@@ -201,8 +201,8 @@ describe("GET /api/build-intelligence/run-evidence", () => {
     ] as const) {
       expect(body.operations[operation].length).toBeGreaterThan(0);
       for (const call of body.operations[operation]) {
-        expect(call.search_required).toBe(false);
-        expect(call.search_policy_source).toBe("explicit");
+        expect(call.searchRequired).toBe(false);
+        expect(call.searchPolicySource).toBe("EXPLICIT");
         expect(call.descriptor_requires_search).toBe(false);
       }
     }
@@ -277,6 +277,25 @@ describe("GET /api/build-intelligence/run-evidence", () => {
     expect(res.statusCode).toBe(422);
     expect(res.json().error).toBe("RUN_LLM_AUDIT_INVALID");
     expect(res.json().violations.length).toBeGreaterThan(0);
+  });
+
+  it("still rejects provider/model leakage now that run_ref is accepted", async () => {
+    for (const leak of [{ provider: "perplexity" }, { model: "gpt-4o" }, { temperature: 0.9 }]) {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/build-intelligence/competitive-landscape",
+        headers: AUTH,
+        payload: {
+          client_id: CLIENT,
+          build_id: BUILD,
+          run_ref: "wb-run-abc",
+          market: { niche: "roofing", country: "United States", language: "English" },
+          seed_queries: [{ query: "metal roofing", intent: "commercial" }],
+          ...leak,
+        },
+      });
+      expect(res.statusCode, `leak ${JSON.stringify(leak)} must be rejected`).toBe(400);
+    }
   });
 
   it("advertises the audit schema in preflight so the consumer can discover it", async () => {

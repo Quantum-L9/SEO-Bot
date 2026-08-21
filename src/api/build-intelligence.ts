@@ -122,6 +122,14 @@ const logger = createModuleLogger("api:build-intelligence");
  */
 export const RUN_ID_HEADER = "x-l9-seo-run-id";
 
+/**
+ * The consumer's own id for this run, optional and never routing-relevant.
+ * Website-Bot mints the run id it correlates on, so it may hand that id to
+ * SEO-Bot rather than recomputing SEO-Bot's derived one; the exported audit
+ * echoes it as `run_id` and keeps the derived id as `seo_run_id`.
+ */
+const runRefSchema = z.string().min(1).max(256).optional();
+
 const runEvidenceQuery = z
   .object({ client_id: z.string().min(1), build_id: z.string().min(1) })
   .strict();
@@ -150,6 +158,7 @@ const competitiveLandscapeBody = z
   .object({
     client_id: z.string().min(1),
     build_id: z.string().min(1),
+    run_ref: runRefSchema,
     market: marketSchema,
     seed_queries: z.array(seedQuerySchema).min(1),
     desired_donor_count: z.number().int().positive().optional(),
@@ -183,6 +192,7 @@ const seoContentBlueprintBody = z
   .object({
     client_id: z.string().min(1),
     build_id: z.string().min(1),
+    run_ref: runRefSchema,
     competitive_landscape: artifactEnvelope,
     routes: z.array(routeIdentitySchema).min(1),
     business_facts: z.array(z.object({}).passthrough()),
@@ -194,6 +204,7 @@ const structuredContentBody = z
   .object({
     client_id: z.string().min(1),
     build_id: z.string().min(1),
+    run_ref: runRefSchema,
     page_content_contract: artifactEnvelope,
     seo_content_blueprint: artifactEnvelope.optional(),
   })
@@ -303,6 +314,7 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
       const runId = recordCompetitiveLandscapeLeg({
         client_id: parsed.data.client_id,
         build_id: parsed.data.build_id,
+        run_ref: parsed.data.run_ref,
         ranking_llm_calls: evidence.ranking_llm_calls,
         recorder,
       });
@@ -367,6 +379,7 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
       const runId = recordSeoContentBlueprintLeg({
         client_id: parsed.data.client_id,
         build_id: parsed.data.build_id,
+        run_ref: parsed.data.run_ref,
         evidence,
         recorder,
       });
@@ -422,6 +435,7 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
       const runId = recordStructuredContentLeg({
         client_id: parsed.data.client_id,
         build_id: parsed.data.build_id,
+        run_ref: parsed.data.run_ref,
         evidence,
         recorder,
       });
