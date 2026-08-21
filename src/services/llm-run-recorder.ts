@@ -44,12 +44,18 @@
 import type { RoutingDecision } from "@quantum-l9/llm-router";
 import type { SeoImproveLlmOperation } from "./improve-llm-policy.js";
 
-/** Governed operations whose execution policy the audit must prove. */
+/**
+ * Governed operations whose execution policy the audit must prove.
+ *
+ * `satisfies` binds this list to the policy union so it cannot drift: renaming
+ * an operation in `improve-llm-policy.ts` is a compile error here rather than
+ * an audit that silently stops matching the operation it is named after.
+ */
 export const AUDITED_OPERATIONS = [
   "SEO_CONTENT_BLUEPRINT",
   "STRUCTURED_CONTENT_GENERATION",
   "CONTENT_VALIDATION",
-] as const;
+] as const satisfies readonly SeoImproveLlmOperation[];
 
 export type AuditedOperation = (typeof AUDITED_OPERATIONS)[number];
 
