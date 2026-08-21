@@ -183,128 +183,32 @@ export async function createStructuredContentPackageWithEvidence(
   let schemaFailureCount = 0;
 
   for (const contractRoute of contract.routes) {
-    const blueprintRoute = blueprintRoutes.get(contractRoute.route_id);
-    // Per-route counters. THIS route's generation spend is owned by THIS route:
-    // the package total is the sum of them, never their source.
-    const routeGenerationCalls: LlmCallCounter = { value: 0 };
-    const routeValidationCalls: LlmCallCounter = { value: 0 };
-    const validationLlm = countingValidationLlm(llm, routeValidationCalls, deps.recorder);
+    const produced = await produceRoute({
+      llm,
+      request,
+      contractRoute,
+      blueprintRoute: blueprintRoutes.get(contractRoute.route_id),
+      recorder: deps.recorder,
+    });
 
-    // 1. Generate prose for this route only — ONE actual call (no internal
-    //    repair: the orchestrator owns the one total repair for the route).
-    let schemaFailures: SchemaFailure[] = [];
-    let generated: StructuredContentRoute | null = null;
-    try {
-      generated = await generateRoute(
-        llm,
-        request,
-        contractRoute,
-        undefined,
-        routeGenerationCalls,
-        deps.recorder,
-      );
-    } catch (error) {
-      schemaFailures = schemaFailureDetails(error);
-      schemaFailureCount += 1;
-      logger.warn(
-        { routeId: contractRoute.route_id, failures: schemaFailures },
-        "Route generation failed JSON/schema validation; deferring to the one route repair",
-      );
-    }
-
-    // 2. Validate (deterministic then semantic). A route that never parsed
-    //    cannot be validated — its repair below is fed the schema failures.
-    let verdict: RouteValidationVerdict;
-    if (generated === null) {
-      verdict = {
-        route_id: contractRoute.route_id,
-        contract_passed: false,
-        seo_blueprint_passed: false,
-        unsupported_claims: [],
-        failed_requirements: [],
-      };
-    } else {
-      verdict = await validateRoute(generated, contractRoute, {
-        clientId: request.client_id,
-        buildId: request.build_id,
-        blueprintRoute,
-        llm: validationLlm,
-      });
-    }
-
-    // 3. ONE bounded repair covers a schema failure OR a semantic failure —
-    //    never both, so a route consumes at most two generation calls. The
-    //    repair prompt carries the exact failure evidence and the output
-    //    contract again.
-    if (generated === null || !routePassed(verdict)) {
-      repairedRouteIds.push(contractRoute.route_id);
-      logger.warn(
-        {
-          routeId: contractRoute.route_id,
-          schemaFailures,
-          failed: verdict.failed_requirements,
-          unsupported: verdict.unsupported_claims,
-        },
-        "Route failed validation; running its one bounded repair",
-      );
-      let repaired: StructuredContentRoute;
-      try {
-        repaired = await generateRoute(
-          llm,
-          request,
-          contractRoute,
-          {
-            schema_failures: schemaFailures,
-            failed_requirements: verdict.failed_requirements,
-            unsupported_claims: verdict.unsupported_claims,
-          },
-          routeGenerationCalls,
-          deps.recorder,
-        );
-      } catch (error) {
-        schemaFailureCount += 1;
-        const repairFailures = schemaFailureDetails(error);
-        throw new ContentRequirementUnsatisfiedError(
-          `Route "${contractRoute.route_id}" repair produced invalid content: ` +
-            repairFailures.map((failure) => `${failure.path}: ${failure.message}`).join("; "),
-          verdict.failed_requirements,
-          verdict.unsupported_claims,
-        );
-      }
-      generated = repaired;
-      verdict = await validateRoute(repaired, contractRoute, {
-        clientId: request.client_id,
-        buildId: request.build_id,
-        blueprintRoute,
-        llm: validationLlm,
-      });
-
-      // 4. Second failure is terminal. There is no second repair.
-      if (!routePassed(verdict)) {
-        throw new ContentRequirementUnsatisfiedError(
-          `Route "${contractRoute.route_id}" still fails validation after one bounded repair`,
-          verdict.failed_requirements,
-          verdict.unsupported_claims,
-        );
-      }
-    }
-
-    routes.push(generated);
-    verdicts.push(verdict);
-    // `repaired_route_ids` is authoritative and the invariant above proves at
-    // most one repair per route, so the mapping is deterministic: a repaired
-    // route spent exactly one repair, an unrepaired route spent none.
-    const routeRepairAttempts = repairedRouteIds.includes(contractRoute.route_id) ? 1 : 0;
-    assertRouteAccounting(contractRoute.route_id, routeGenerationCalls.value, routeRepairAttempts);
+    routes.push(produced.route);
+    verdicts.push(produced.verdict);
+    if (produced.repaired) repairedRouteIds.push(contractRoute.route_id);
+    schemaFailureCount += produced.schema_failure_count;
+    // `repaired` is authoritative and the invariant above proves at most one
+    // repair per route, so the mapping is deterministic: a repaired route
+    // spent exactly one repair, an unrepaired route spent none.
+    const routeRepairAttempts = produced.repaired ? 1 : 0;
+    assertRouteAccounting(contractRoute.route_id, produced.generation_calls, routeRepairAttempts);
     routeResults.push({
       route_id: contractRoute.route_id,
       path: contractRoute.path,
-      generation_calls: routeGenerationCalls.value,
+      generation_calls: produced.generation_calls,
       repair_attempts: routeRepairAttempts,
-      semantic_validation_calls: routeValidationCalls.value,
+      semantic_validation_calls: produced.semantic_validation_calls,
     });
-    generationCalls.value += routeGenerationCalls.value;
-    semanticValidationCalls.value += routeValidationCalls.value;
+    generationCalls.value += produced.generation_calls;
+    semanticValidationCalls.value += produced.semantic_validation_calls;
   }
 
   const validation: StructuredContentPackageV1["validation"] = {
@@ -357,6 +261,147 @@ export async function createStructuredContentPackageWithEvidence(
       repaired_route_ids: repairedRouteIds,
       route_results: routeResults,
     },
+  };
+}
+
+/** One route's measured outcome, owned entirely by that route. */
+interface ProducedRoute {
+  route: StructuredContentRoute;
+  verdict: RouteValidationVerdict;
+  repaired: boolean;
+  generation_calls: number;
+  semantic_validation_calls: number;
+  schema_failure_count: number;
+}
+
+/**
+ * Generate → validate → ONE bounded repair → re-validate, for a single route.
+ *
+ * The route is the unit of ownership, so the whole lifecycle for one route —
+ * including its own call counters — lives here, and the orchestrator only
+ * accumulates. A second failure after the repair is terminal: there is no
+ * second repair, and the counters returned describe exactly what was spent.
+ */
+async function produceRoute(args: {
+  llm: LlmService;
+  request: StructuredContentRequest;
+  contractRoute: PageContentContractRoute;
+  blueprintRoute?: SEOContentBlueprintRoute;
+  recorder?: LlmRunRecorder;
+}): Promise<ProducedRoute> {
+  const { llm, request, contractRoute, blueprintRoute, recorder } = args;
+  // Per-route counters. THIS route's generation spend is owned by THIS route:
+  // the package total is the sum of them, never their source.
+  const generationCalls: LlmCallCounter = { value: 0 };
+  const validationCalls: LlmCallCounter = { value: 0 };
+  const validationLlm = countingValidationLlm(llm, validationCalls, recorder);
+  const validationArgs = {
+    clientId: request.client_id,
+    buildId: request.build_id,
+    blueprintRoute,
+    llm: validationLlm,
+  };
+  let schemaFailureCount = 0;
+
+  // 1. Generate prose for this route only — ONE actual call (no internal
+  //    repair: this function owns the one total repair for the route).
+  let schemaFailures: SchemaFailure[] = [];
+  let generated: StructuredContentRoute | null = null;
+  try {
+    generated = await generateRoute(
+      llm,
+      request,
+      contractRoute,
+      undefined,
+      generationCalls,
+      recorder,
+    );
+  } catch (error) {
+    schemaFailures = schemaFailureDetails(error);
+    schemaFailureCount += 1;
+    logger.warn(
+      { routeId: contractRoute.route_id, failures: schemaFailures },
+      "Route generation failed JSON/schema validation; deferring to the one route repair",
+    );
+  }
+
+  // 2. Validate (deterministic then semantic). A route that never parsed
+  //    cannot be validated — its repair below is fed the schema failures.
+  let verdict: RouteValidationVerdict =
+    generated === null
+      ? {
+          route_id: contractRoute.route_id,
+          contract_passed: false,
+          seo_blueprint_passed: false,
+          unsupported_claims: [],
+          failed_requirements: [],
+        }
+      : await validateRoute(generated, contractRoute, validationArgs);
+
+  if (generated !== null && routePassed(verdict)) {
+    return {
+      route: generated,
+      verdict,
+      repaired: false,
+      generation_calls: generationCalls.value,
+      semantic_validation_calls: validationCalls.value,
+      schema_failure_count: schemaFailureCount,
+    };
+  }
+
+  // 3. ONE bounded repair covers a schema failure OR a semantic failure —
+  //    never both, so a route consumes at most two generation calls. The
+  //    repair prompt carries the exact failure evidence and the output
+  //    contract again.
+  logger.warn(
+    {
+      routeId: contractRoute.route_id,
+      schemaFailures,
+      failed: verdict.failed_requirements,
+      unsupported: verdict.unsupported_claims,
+    },
+    "Route failed validation; running its one bounded repair",
+  );
+  let repaired: StructuredContentRoute;
+  try {
+    repaired = await generateRoute(
+      llm,
+      request,
+      contractRoute,
+      {
+        schema_failures: schemaFailures,
+        failed_requirements: verdict.failed_requirements,
+        unsupported_claims: verdict.unsupported_claims,
+      },
+      generationCalls,
+      recorder,
+    );
+  } catch (error) {
+    const repairFailures = schemaFailureDetails(error);
+    throw new ContentRequirementUnsatisfiedError(
+      `Route "${contractRoute.route_id}" repair produced invalid content: ` +
+        repairFailures.map((failure) => `${failure.path}: ${failure.message}`).join("; "),
+      verdict.failed_requirements,
+      verdict.unsupported_claims,
+    );
+  }
+  verdict = await validateRoute(repaired, contractRoute, validationArgs);
+
+  // 4. Second failure is terminal. There is no second repair.
+  if (!routePassed(verdict)) {
+    throw new ContentRequirementUnsatisfiedError(
+      `Route "${contractRoute.route_id}" still fails validation after one bounded repair`,
+      verdict.failed_requirements,
+      verdict.unsupported_claims,
+    );
+  }
+  return {
+    route: repaired,
+    verdict,
+    repaired: true,
+    generation_calls: generationCalls.value,
+    semantic_validation_calls: validationCalls.value,
+    schema_failure_count: schemaFailureCount,
   };
 }
 

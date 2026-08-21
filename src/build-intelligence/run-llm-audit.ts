@@ -274,9 +274,11 @@ export function runLlmAuditViolations(audit: RunLlmAuditV1): string[] {
     );
   }
 
-  violations.push(...blueprintViolations(audit));
-  violations.push(...routeResultViolations(audit));
-  violations.push(...operationViolations(audit));
+  violations.push(
+    ...blueprintViolations(audit),
+    ...routeResultViolations(audit),
+    ...operationViolations(audit),
+  );
   return violations;
 }
 
@@ -361,30 +363,9 @@ function routeResultViolations(audit: RunLlmAuditV1): string[] {
     violations.push("structured_content.route_results is empty on an executed leg");
   }
 
-  const seenRouteIds = new Set<string>();
-  const seenPaths = new Set<string>();
+  violations.push(...routeIdentityViolations(content.route_results));
   for (const route of content.route_results) {
-    if (seenRouteIds.has(route.route_id)) {
-      violations.push(`duplicate route_id in route_results: ${route.route_id}`);
-    }
-    seenRouteIds.add(route.route_id);
-    if (seenPaths.has(route.path)) {
-      violations.push(`duplicate path in route_results: ${route.path}`);
-    }
-    seenPaths.add(route.path);
-    if (route.generation_calls !== route.repair_attempts + 1) {
-      violations.push(
-        `route "${route.route_id}" reports ${route.generation_calls} generation call(s) with ` +
-          `${route.repair_attempts} repair attempt(s); one initial call plus at most one repair ` +
-          `means generation_calls must equal repair_attempts + 1`,
-      );
-    }
-    if (route.semantic_validation_calls > route.generation_calls) {
-      violations.push(
-        `route "${route.route_id}" reports ${route.semantic_validation_calls} semantic validation ` +
-          `call(s) for ${route.generation_calls} generation call(s)`,
-      );
-    }
+    violations.push(...routeAccountingViolations(route));
   }
 
   // Two independent measurements of the same thing must agree: the per-route
@@ -401,6 +382,43 @@ function routeResultViolations(audit: RunLlmAuditV1): string[] {
   return violations;
 }
 
+/** Route identity must be unique on both keys a consumer can join on. */
+function routeIdentityViolations(routes: readonly RunLlmAuditRouteResult[]): string[] {
+  const violations: string[] = [];
+  const seenRouteIds = new Set<string>();
+  const seenPaths = new Set<string>();
+  for (const route of routes) {
+    if (seenRouteIds.has(route.route_id)) {
+      violations.push(`duplicate route_id in route_results: ${route.route_id}`);
+    }
+    seenRouteIds.add(route.route_id);
+    if (seenPaths.has(route.path)) {
+      violations.push(`duplicate path in route_results: ${route.path}`);
+    }
+    seenPaths.add(route.path);
+  }
+  return violations;
+}
+
+/** One route's counters, re-checked against the one-repair invariant. */
+function routeAccountingViolations(route: RunLlmAuditRouteResult): string[] {
+  const violations: string[] = [];
+  if (route.generation_calls !== route.repair_attempts + 1) {
+    violations.push(
+      `route "${route.route_id}" reports ${route.generation_calls} generation call(s) with ` +
+        `${route.repair_attempts} repair attempt(s); one initial call plus at most one repair ` +
+        `means generation_calls must equal repair_attempts + 1`,
+    );
+  }
+  if (route.semantic_validation_calls > route.generation_calls) {
+    violations.push(
+      `route "${route.route_id}" reports ${route.semantic_validation_calls} semantic validation ` +
+        `call(s) for ${route.generation_calls} generation call(s)`,
+    );
+  }
+  return violations;
+}
+
 /**
  * Governed LLM policy evidence. The router reports which search policy it
  * APPLIED and where it came from; `EXPLICIT` is only truthful when the governed
@@ -411,39 +429,60 @@ function operationViolations(audit: RunLlmAuditV1): string[] {
   const violations: string[] = [];
   for (const operation of AUDITED_OPERATIONS) {
     for (const execution of audit.operations[operation]) {
-      const label = `${operation} ${execution.attempt} call ${execution.task_id}`;
-      if (execution.operation !== operation) {
-        violations.push(`${label} is filed under the wrong operation`);
-      }
-      if (execution.outcome !== "SUCCESS") {
-        violations.push(`${label} did not complete (outcome ${execution.outcome})`);
-      }
-      if (execution.searchPolicySource === "EXPLICIT") {
-        if (typeof execution.descriptor_requires_search !== "boolean") {
-          violations.push(
-            `${label} records searchPolicySource EXPLICIT but the governed operation supplied ` +
-              `no requiresSearch policy`,
-          );
-        } else if (execution.descriptor_requires_search !== execution.searchRequired) {
-          violations.push(
-            `${label} applied searchRequired=${execution.searchRequired} while the governed ` +
-              `operation supplied requiresSearch=${execution.descriptor_requires_search}`,
-          );
-        }
-      } else if (execution.descriptor_requires_search !== null) {
-        violations.push(
-          `${label} records searchPolicySource TASK_DEFAULT although the governed operation ` +
-            `supplied requiresSearch=${execution.descriptor_requires_search}`,
-        );
-      }
-      // All three audited operations consume normalized evidence; a search
-      // provider on any of them is a policy violation, recorded as such.
-      if (execution.searchRequired) {
-        violations.push(`${label} resolved to a search-backed route`);
-      }
+      violations.push(...executionViolations(operation, execution));
     }
   }
   return violations;
+}
+
+/** One governed call: filing, completion, and the search policy it applied. */
+function executionViolations(
+  operation: AuditedOperation,
+  execution: RunLlmAuditOperationExecution,
+): string[] {
+  const violations: string[] = [];
+  const label = `${operation} ${execution.attempt} call ${execution.task_id}`;
+  if (execution.operation !== operation) {
+    violations.push(`${label} is filed under the wrong operation`);
+  }
+  if (execution.outcome !== "SUCCESS") {
+    violations.push(`${label} did not complete (outcome ${execution.outcome})`);
+  }
+  violations.push(...searchPolicyViolations(label, execution));
+  // All three audited operations consume normalized evidence; a search
+  // provider on any of them is a policy violation, recorded as such.
+  if (execution.searchRequired) {
+    violations.push(`${label} resolved to a search-backed route`);
+  }
+  return violations;
+}
+
+/**
+ * `EXPLICIT` is only truthful when the governed operation actually supplied a
+ * `requiresSearch` boolean, and the applied value must be the value supplied.
+ */
+function searchPolicyViolations(label: string, execution: RunLlmAuditOperationExecution): string[] {
+  if (execution.searchPolicySource !== "EXPLICIT") {
+    return execution.descriptor_requires_search === null
+      ? []
+      : [
+          `${label} records searchPolicySource TASK_DEFAULT although the governed operation ` +
+            `supplied requiresSearch=${execution.descriptor_requires_search}`,
+        ];
+  }
+  if (typeof execution.descriptor_requires_search !== "boolean") {
+    return [
+      `${label} records searchPolicySource EXPLICIT but the governed operation supplied ` +
+        `no requiresSearch policy`,
+    ];
+  }
+  if (execution.descriptor_requires_search !== execution.searchRequired) {
+    return [
+      `${label} applied searchRequired=${execution.searchRequired} while the governed ` +
+        `operation supplied requiresSearch=${execution.descriptor_requires_search}`,
+    ];
+  }
+  return [];
 }
 
 /** Convenience view for a consumer that only needs the operation inventory. */
