@@ -1,0 +1,18 @@
+# Managed by Quantum-L9/.github — do not edit here.
+# Edit templates/CODEOWNERS.repo in the .github repo; changes are re-seeded by PR.
+# CODEOWNERS is not inheritable, so this file is physically copied per repo.
+#
+# Team slugs verified against the live org (gh api orgs/Quantum-L9/teams):
+# only `platform` exists. The pack's placeholder slugs (maintainers, governance,
+# infra, ci-cd, security) were replaced — an unresolvable owner makes the whole
+# rule silently inert. If new teams are created later, add rules here and re-seed.
+
+* @Quantum-L9/platform
+
+# Blast-radius paths require cryptoxdog as additional reviewer.
+/.github/                 @Quantum-L9/platform @cryptoxdog
+/.github/workflows/       @Quantum-L9/platform @cryptoxdog
+/infra/                   @Quantum-L9/platform @cryptoxdog
+/terraform/               @Quantum-L9/platform @cryptoxdog
+SECURITY.md               @Quantum-L9/platform @cryptoxdog
+CODEOWNERS                @Quantum-L9/platform @cryptoxdog
