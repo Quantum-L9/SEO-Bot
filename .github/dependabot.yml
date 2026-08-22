@@ -1,0 +1,35 @@
+# Managed by Quantum-L9/.github. dependabot.yml is NOT inheritable — it is seeded
+# per repo and must live at .github/dependabot.yml on the default branch.
+#
+# ADVISORY POSTURE: this opens PRs only. No auto-merge, no forced schedules.
+# It exists because our PR gate requires SHA-pinned actions, and a pin without an
+# update mechanism is a frozen, silently ageing dependency.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: ["type:task", "deps"]
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      actions-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: ["type:task", "deps"]
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      python-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
