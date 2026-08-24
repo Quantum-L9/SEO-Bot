@@ -39,7 +39,16 @@ const logger = createModuleLogger("api");
 export async function buildApiServer(): Promise<FastifyInstance> {
   // trustProxy so request.ip (and the per-IP rate limiter) use X-Forwarded-For
   // when deployed behind a reverse proxy / tunnel. Explicit + configurable.
-  const app = Fastify({ logger: false, trustProxy: getConfig().TRUST_PROXY });
+  const app = Fastify({
+    logger: false,
+    trustProxy: getConfig().TRUST_PROXY,
+    // Build-intelligence endpoints generate a whole contract in one request
+    // (8-batch blueprint, 29-route structured content). Node's default
+    // requestTimeout destroys the socket at 300s mid-generation ("fetch
+    // failed" on the client, golden run #8). 0 disables the server-side
+    // kill; the client's own per-endpoint timeouts remain the real bounds.
+    requestTimeout: 0,
+  });
 
   await app.register(helmet);
   await app.register(formBody);
