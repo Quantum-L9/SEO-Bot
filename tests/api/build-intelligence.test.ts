@@ -112,6 +112,9 @@ vi.mock("../../src/build-intelligence/structured-content.js", () => ({
   ArtifactLineageMismatchError: class extends Error {
     code = "ARTIFACT_LINEAGE_MISMATCH";
   },
+  StructuredContentShapeError: class extends Error {
+    code = "STRUCTURED_CONTENT_SHAPE_INVALID";
+  },
 }));
 vi.mock("../../src/build-intelligence/store.js", () => ({
   persistIntelligenceArtifact: vi.fn(async () => ({ persisted: true, idempotent: false })),

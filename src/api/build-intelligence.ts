@@ -32,7 +32,13 @@ import {
   type WebsiteIntelligenceArtifact,
 } from "@quantum-l9/bot-interop";
 import type { FastifyInstance, FastifyReply } from "fastify";
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { z } from "zod";
+import { getConfig } from "../core/config.js";
+import { projectLlmAudit } from "../build-intelligence/llm-audit.js";
+import { runPreflight } from "../build-intelligence/preflight.js";
+import { constantTimeEqual, parseAuthSecret } from "./security.js";
 import {
   CompetitiveDonorQualificationError,
   CompetitiveEvidenceIncompleteError,
@@ -56,6 +62,7 @@ import {
   createStructuredContentPackage,
   PageContentContractInvalidError,
   StructuredContentRouteMismatchError,
+  StructuredContentShapeError,
 } from "../build-intelligence/structured-content.js";
 import { createModuleLogger } from "../core/logger.js";
 import {
@@ -63,6 +70,7 @@ import {
   DataForSeoUnavailableError,
   SerpEvidenceInvalidError,
 } from "../services/dataforseo.js";
+import { getLlmService } from "../services/llm.js";
 
 const logger = createModuleLogger("api:build-intelligence");
 
@@ -291,9 +299,56 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
     }
   });
 
+  // 4. Preflight — nine REAL runtime checks (machine-authed by prefix).
+  app.get("/api/build-intelligence/preflight", async (request, reply) => {
+    const presented = parseAuthSecret(request.headers.authorization);
+    const machineKey = getConfig().SEO_BOT_API_KEY;
+    const machineAuthed = Boolean(
+      machineKey && presented && constantTimeEqual(presented, machineKey),
+    );
+    const report = runPreflight(machineAuthed);
+    persistAuditEvidence("preflight", report);
+    return reply.status(200).send(report);
+  });
+
+  // 5. LLM router audit — per-call records for the three governed operations,
+  //    projected from the router's own call log (machine-authed by prefix).
+  app.get("/api/build-intelligence/llm-audit", async (request, reply) => {
+    const query = request.query as { client_id?: string };
+    const projection = projectLlmAudit(getLlmService(), {
+      clientId: query.client_id && query.client_id.trim() !== "" ? query.client_id : undefined,
+    });
+    persistAuditEvidence("llm-audit", projection);
+    return reply.status(200).send(projection);
+  });
+
   logger.info(
-    "Build-intelligence routes registered (competitive-landscape, seo-content-blueprint, structured-content)",
+    "Build-intelligence routes registered (competitive-landscape, seo-content-blueprint, structured-content, preflight, llm-audit)",
   );
+}
+
+/**
+ * Persist audit/preflight evidence under `.l9/build-intelligence/` (gitignored)
+ * so the golden oracle can attach disk evidence without changing the sealed
+ * artifact envelope that Website-Bot consumes. Best-effort: a persistence
+ * failure never fails the response.
+ */
+function persistAuditEvidence(kind: "preflight" | "llm-audit", value: unknown): void {
+  try {
+    const dir = path.join(process.cwd(), ".l9", "build-intelligence");
+    mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    writeFileSync(
+      path.join(dir, `${kind}-${stamp}.json`),
+      `${JSON.stringify(value, null, 2)}\n`,
+      "utf8",
+    );
+  } catch (error) {
+    logger.warn(
+      { kind, error: error instanceof Error ? error.message : String(error) },
+      "Failed to persist audit evidence to disk (best-effort)",
+    );
+  }
 }
 
 /**
@@ -342,6 +397,9 @@ function handleProducerError(reply: FastifyReply, error: unknown): FastifyReply 
       failed_requirements: error.failedRequirements,
       unsupported_claims: error.unsupportedClaims,
     });
+  }
+  if (error instanceof StructuredContentShapeError) {
+    return reply.status(422).send({ error: error.code, message: error.message });
   }
   if (error instanceof ArtifactDigestConflictError) {
     return reply.status(409).send({ error: error.code, message: error.message });
