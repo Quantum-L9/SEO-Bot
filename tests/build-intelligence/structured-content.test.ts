@@ -19,6 +19,7 @@ import {
   ContentRequirementUnsatisfiedError,
   createStructuredContentPackage,
   createStructuredContentPackageWithEvidence,
+  StructuredContentShapeError,
 } from "../../src/build-intelligence/structured-content.js";
 import type { LlmService } from "../../src/services/llm.js";
 
@@ -159,6 +160,53 @@ function fakeLlm(verdicts: ContentValidationVerdict[]): {
       if (operation === "STRUCTURED_CONTENT_GENERATION") {
         counts.gen += 1;
         return args.validate(genRoute());
+      }
+      if (operation === "CONTENT_VALIDATION") {
+        const v = verdicts[Math.min(counts.val, verdicts.length - 1)];
+        counts.val += 1;
+        return args.validate(v);
+      }
+      throw new Error(`unexpected op ${operation}`);
+    },
+  } as unknown as LlmService;
+  return { llm, counts };
+}
+
+/**
+ * The NC-11 failure shape: a section with an alias `content` field and NO
+ * `blocks` array. The strict zod schema rejects this exactly the way the
+ * live NC-11 defect did (sections[0].blocks -> Required; Unrecognized key(s)).
+ */
+function contentShapedRoute(): unknown {
+  return {
+    route_id: "home",
+    path: "/",
+    metadata: { title: "Metal Roofing in Austin, Texas", description: "Durable metal roof systems." },
+    sections: [
+      {
+        section_id: "hero",
+        heading: "Metal Roofing",
+        content: "A metal roof is the most durable covering for an Austin home.",
+      },
+    ],
+    faqs: [],
+    internal_links: [],
+    schema_content_inputs: {},
+  };
+}
+
+/** Fake that yields per-call generation outputs (shape-aware repair testing). */
+function shapeFakeLlm(
+  generationOutputs: unknown[],
+  verdicts: ContentValidationVerdict[],
+): { llm: LlmService; counts: { gen: number; val: number } } {
+  const counts = { gen: 0, val: 0 };
+  const llm = {
+    async executePolicyJson(operation: string, args: { validate: (v: unknown) => unknown }) {
+      if (operation === "STRUCTURED_CONTENT_GENERATION") {
+        const output = generationOutputs[Math.min(counts.gen, generationOutputs.length - 1)];
+        counts.gen += 1;
+        return args.validate(output);
       }
       if (operation === "CONTENT_VALIDATION") {
         const v = verdicts[Math.min(counts.val, verdicts.length - 1)];
@@ -405,6 +453,8 @@ describe("StructuredContentPackage — the exact contract is the only authority"
           ...dummyRef,
           artifact_type: "competitive_landscape" as const,
         },
+        batch_size: 4,
+        batch_count: 0,
         routes: [],
       },
     });
@@ -474,5 +524,83 @@ describe("StructuredContentPackage — the exact contract is the only authority"
     ).rejects.toMatchObject({ code: "CONTENT_REQUIREMENT_UNSATISFIED" });
     // Deterministic failure short-circuits the semantic pass entirely.
     expect(semanticCalls).toBe(0);
+  });
+});
+
+describe("StructuredContentPackage — NC-11 shape discipline (content-alias → bounded shape repair)", () => {
+  it("treats a content-alias route (no blocks) as a repairable generation failure and seals with route evidence", async () => {
+    const { llm, counts } = shapeFakeLlm([contentShapedRoute(), genRoute()], [pass]);
+    const pkg = await createStructuredContentPackage(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+      { llm },
+    );
+    // Initial + exactly ONE bounded shape repair — never silently normalized.
+    expect(counts.gen).toBe(2);
+    // Validation only runs once the shape is valid.
+    expect(counts.val).toBe(1);
+    expect(pkg.payload.routes[0]!.sections[0]!.blocks).toBeDefined();
+    expect(pkg.payload.route_evidence).toEqual([
+      {
+        route_id: "home",
+        repair_attempts: 1,
+        generation_calls: 2,
+        validation_calls: 1,
+        schema_errors: 1,
+      },
+    ]);
+  });
+
+  it("is terminal (STRUCTURED_CONTENT_SHAPE_INVALID) when the shape is still wrong after the bounded repair", async () => {
+    const { llm, counts } = shapeFakeLlm([contentShapedRoute(), contentShapedRoute()], [pass]);
+    let caught: unknown;
+    try {
+      await createStructuredContentPackage(
+        { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+        { llm },
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(StructuredContentShapeError);
+    expect((caught as StructuredContentShapeError).code).toBe("STRUCTURED_CONTENT_SHAPE_INVALID");
+    // No unbounded retry: the budget is exactly two generation calls.
+    expect(counts.gen).toBe(2);
+  });
+
+  it("pins the blocks contract in the system prompt and names the shape failure in the repair note", async () => {
+    let systemPrompt = "";
+    const userPrompts: string[] = [];
+    const llm = {
+      async executePolicyJson(
+        operation: string,
+        args: {
+          systemPrompt: string;
+          userPrompt: string;
+          validate: (v: unknown) => unknown;
+        },
+      ) {
+        if (operation === "STRUCTURED_CONTENT_GENERATION") {
+          systemPrompt = args.systemPrompt;
+          userPrompts.push(args.userPrompt);
+          return args.validate(userPrompts.length === 1 ? contentShapedRoute() : genRoute());
+        }
+        return args.validate(pass);
+      },
+    } as unknown as LlmService;
+
+    const pkg = await createStructuredContentPackage(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+      { llm },
+    );
+    expect(pkg.payload.routes[0]!.sections[0]!.blocks).toBeDefined();
+    // The system prompt forbids the alias field and demands blocks.
+    expect(systemPrompt).toContain('"blocks"');
+    expect(systemPrompt).toContain("FORBIDDEN alias fields");
+    // The repair note names the shape defect explicitly; the first attempt has no note.
+    expect(userPrompts).toHaveLength(2);
+    expect(userPrompts[0]).not.toContain("invalid SHAPE");
+    expect(userPrompts[1]).toContain(
+      "Your previous output had an invalid SHAPE: missing blocks / present content",
+    );
   });
 });

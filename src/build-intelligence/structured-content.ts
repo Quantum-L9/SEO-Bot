@@ -30,6 +30,7 @@ import {
   type StructuredContentPackageArtifact,
   type StructuredContentPackageV1,
   type StructuredContentRoute,
+  type StructuredContentRouteEvidence,
   sameArtifactRef,
   sealIntelligenceArtifact,
   WEBSITE_INTELLIGENCE_SCHEMAS,
@@ -91,9 +92,42 @@ export class ArtifactLineageMismatchError extends Error {
 }
 
 /**
+ * A route still violates the strict output SHAPE after the one bounded repair
+ * (missing `blocks`, alias fields like `content`/`body`/`copy`/`paragraphs`,
+ * unknown keys, or any other zod-strict failure). Malformed LLM JSON is a
+ * generation failure — bounded and repaired — never a fatal parse error; a
+ * second shape failure is terminal with THIS typed error (→ 422).
+ */
+export class StructuredContentShapeError extends Error {
+  readonly code = "STRUCTURED_CONTENT_SHAPE_INVALID";
+  constructor(message: string) {
+    super(message);
+    this.name = "StructuredContentShapeError";
+  }
+}
+
+/**
+ * Internal marker for a single shape failure (malformed JSON OR a strict-schema
+ * violation). Distinct from {@link StructuredContentShapeError} — this one is
+ * repairable; the loop consumes it inside the one-bounded-repair budget.
+ */
+class StructuredRouteShapeFailure extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StructuredRouteShapeFailure";
+  }
+}
+
+function isShapeFailure(error: unknown): error is StructuredRouteShapeFailure {
+  return error instanceof StructuredRouteShapeFailure;
+}
+
+/**
  * Measured evidence about the run, for the integrity receipt. `repair_attempts`
  * is COUNTED, never inferred — a sealed package always has a clean validation
  * block, so the block itself cannot tell you whether a repair happened.
+ * `route_evidence` carries the per-route counters in contract route order and
+ * is also sealed into the package payload for consumer-side proof.
  */
 export interface StructuredContentEvidence {
   route_count: number;
@@ -101,6 +135,8 @@ export interface StructuredContentEvidence {
   validation_calls: number;
   repair_attempts: number;
   repaired_route_ids: string[];
+  /** Per-route measured runtime evidence, in contract route order. */
+  route_evidence: StructuredContentRouteEvidence[];
 }
 
 export interface StructuredContentResult {
@@ -136,28 +172,74 @@ export async function createStructuredContentPackageWithEvidence(
   const routes: StructuredContentRoute[] = [];
   const verdicts: RouteValidationVerdict[] = [];
   const repairedRouteIds: string[] = [];
-  let generationCalls = 0;
-  let validationCalls = 0;
+  const routeEvidenceList: StructuredContentRouteEvidence[] = [];
 
   for (const contractRoute of contract.routes) {
     const blueprintRoute = blueprintRoutes.get(contractRoute.route_id);
+    const routeEvidence: StructuredContentRouteEvidence = {
+      route_id: contractRoute.route_id,
+      repair_attempts: 0,
+      generation_calls: 0,
+      validation_calls: 0,
+      schema_errors: 0,
+    };
 
-    // 1. Generate prose for this route only.
-    let generated = await generateRoute(llm, request, contractRoute);
-    generationCalls += 1;
+    // The per-route budget is ONE repair of ANY kind (shape OR semantics) and
+    // at most TWO generation calls. Shape failures and semantic failures share
+    // that budget, so a route can never exceed it by stacking repairs.
+    let route: StructuredContentRoute | undefined;
+    let verdict: RouteValidationVerdict | undefined;
+    let repairNote: GenerationRepairNote | undefined;
+    let terminal: "shape" | "semantic" | undefined;
 
-    // 2. Validate (deterministic then semantic).
-    let verdict = await validateRoute(generated, contractRoute, {
-      clientId: request.client_id,
-      buildId: request.build_id,
-      blueprintRoute,
-      llm,
-    });
-    validationCalls += 1;
+    for (let attempt = 1; attempt <= 2 && !terminal; attempt++) {
+      // 1. Generate prose for this route only (shape is NOT yet enforced).
+      let raw: unknown;
+      try {
+        raw = await generateRouteRaw(llm, request, contractRoute, repairNote);
+        routeEvidence.generation_calls += 1;
+      } catch (error) {
+        // Malformed LLM JSON is a generation failure, not a fatal parse error.
+        if (!isShapeFailure(error)) throw error;
+        routeEvidence.schema_errors += 1;
+        if (attempt === 2) {
+          terminal = "shape";
+          break;
+        }
+        repairNote = { kind: "shape", detail: shapeFailureDetail(error) };
+        continue;
+      }
 
-    // 3. ONE bounded repair, scoped to this route + its failed requirements.
-    if (!routePassed(verdict)) {
-      repairedRouteIds.push(contractRoute.route_id);
+      // 2. Reconcile: strict zod shape + identity re-assertion (authority).
+      try {
+        route = reconcileStructuredRoute(raw, contractRoute);
+      } catch (error) {
+        // Strict-schema violation (missing blocks, alias fields, unknown keys).
+        routeEvidence.schema_errors += 1;
+        if (attempt === 2) {
+          terminal = "shape";
+          break;
+        }
+        repairNote = { kind: "shape", detail: shapeFailureDetail(error) };
+        continue;
+      }
+
+      // 3. Validate (deterministic then semantic).
+      verdict = await validateRoute(route, contractRoute, {
+        clientId: request.client_id,
+        buildId: request.build_id,
+        blueprintRoute,
+        llm,
+      });
+      routeEvidence.validation_calls += 1;
+
+      if (routePassed(verdict)) break;
+
+      // 4. ONE bounded repair — the budget is already consumed after this.
+      if (attempt === 2) {
+        terminal = "semantic";
+        break;
+      }
       logger.warn(
         {
           routeId: contractRoute.route_id,
@@ -166,31 +248,39 @@ export async function createStructuredContentPackageWithEvidence(
         },
         "Route failed validation; running one bounded repair",
       );
-      generated = await generateRoute(llm, request, contractRoute, {
+      repairNote = {
+        kind: "semantic",
         failed_requirements: verdict.failed_requirements,
         unsupported_claims: verdict.unsupported_claims,
-      });
-      generationCalls += 1;
-      verdict = await validateRoute(generated, contractRoute, {
-        clientId: request.client_id,
-        buildId: request.build_id,
-        blueprintRoute,
-        llm,
-      });
-      validationCalls += 1;
-
-      // 4. Second failure is terminal. There is no second repair.
-      if (!routePassed(verdict)) {
-        throw new ContentRequirementUnsatisfiedError(
-          `Route "${contractRoute.route_id}" still fails validation after one bounded repair`,
-          verdict.failed_requirements,
-          verdict.unsupported_claims,
-        );
-      }
+      };
     }
 
-    routes.push(generated);
+    // A repair that ran is measured, whether it succeeded or not.
+    if (repairNote) {
+      routeEvidence.repair_attempts = 1;
+      repairedRouteIds.push(contractRoute.route_id);
+    }
+
+    // 5. Second failure is terminal — typed, never a raw 500.
+    if (terminal === "shape") {
+      throw new StructuredContentShapeError(
+        `Route "${contractRoute.route_id}" still violates the structured-content SHAPE after one bounded repair`,
+      );
+    }
+    if (terminal === "semantic" && verdict) {
+      throw new ContentRequirementUnsatisfiedError(
+        `Route "${contractRoute.route_id}" still fails validation after one bounded repair`,
+        verdict.failed_requirements,
+        verdict.unsupported_claims,
+      );
+    }
+    if (!route || !verdict) {
+      throw new Error(`Route "${contractRoute.route_id}" produced no route verdict`);
+    }
+
+    routes.push(route);
     verdicts.push(verdict);
+    routeEvidenceList.push(routeEvidence);
   }
 
   const validation: StructuredContentPackageV1["validation"] = {
@@ -206,6 +296,10 @@ export async function createStructuredContentPackageWithEvidence(
     page_content_contract_ref: contractRef,
     routes,
     validation,
+    // Measured per-route runtime evidence (in contract route order), sealed so
+    // the consumer can prove the one-bounded-repair budget + zero schema errors
+    // without trusting the clean validation block.
+    route_evidence: routeEvidenceList,
   };
 
   assertPackageLineage(payload, contract.routes, contractRef);
@@ -235,11 +329,12 @@ export async function createStructuredContentPackageWithEvidence(
     artifact,
     evidence: {
       route_count: routes.length,
-      generation_calls: generationCalls,
-      validation_calls: validationCalls,
+      generation_calls: routeEvidenceList.reduce((sum, r) => sum + r.generation_calls, 0),
+      validation_calls: routeEvidenceList.reduce((sum, r) => sum + r.validation_calls, 0),
       // Bounded at one per route by construction; a second failure is terminal.
       repair_attempts: repairedRouteIds.length,
       repaired_route_ids: repairedRouteIds,
+      route_evidence: routeEvidenceList,
     },
   };
 }
@@ -359,17 +454,43 @@ function assertPackageLineage(
   }
 }
 
+/** Repair scoping for a re-generation call: shape violations OR semantic failures. */
+type GenerationRepairNote =
+  | { kind: "shape"; detail: string }
+  | { kind: "semantic"; failed_requirements: string[]; unsupported_claims: string[] };
+
+function shapeFailureDetail(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** The fixed shape contract that the system prompt pins (NC-11 fix, first half). */
+const SHAPE_SPEC =
+  "REQUIRED OUTPUT SHAPE (strict — the validation schema rejects anything else):\n" +
+  "- Top-level keys: route_id, path, metadata, sections, faqs, internal_links, schema_content_inputs. No other keys.\n" +
+  "- metadata must have a non-empty title and description.\n" +
+  "- Every section MUST include a non-empty \"blocks\" array; a section with prose and no blocks is invalid.\n" +
+  "- Each block is one of: {\"kind\":\"paragraph\",\"text\"} | {\"kind\":\"bullets\",\"items\"} | " +
+  "{\"kind\":\"steps\",\"items\"} | {\"kind\":\"quote\",\"text\",\"attribution\"?}.\n" +
+  "- FORBIDDEN alias fields on a section: \"content\", \"body\", \"copy\", \"paragraphs\" — all prose lives in \"blocks\".\n" +
+  "- faqs: array of {\"question\",\"answer\"}; internal_links: array of {\"target_route_id\",\"anchor_text\"}; " +
+  "schema_content_inputs: object with optional faq/service/local_business booleans.";
+
 /**
  * Generate a single route's final content from ONLY its contract route. An
- * optional `repair` payload appends the specific failures to fix — scoping the
+ * optional `repairNote` appends the specific failures to fix — scoping the
  * repair to this route without regenerating anything that already passed.
+ *
+ * This runs with `noInternalRepair` and an identity validator: the caller's
+ * loop owns the ENTIRE per-route repair budget, so malformed JSON and strict
+ * shape violations are repaired exactly once at the loop boundary (never
+ * twice, never zero), and the generation/schema-error counts are measured.
  */
-async function generateRoute(
+async function generateRouteRaw(
   llm: LlmService,
   request: StructuredContentRequest,
   contractRoute: PageContentContractRoute,
-  repair?: { failed_requirements: string[]; unsupported_claims: string[] },
-): Promise<StructuredContentRoute> {
+  repairNote?: GenerationRepairNote,
+): Promise<unknown> {
   const systemPrompt =
     "You are the sole owner of final website prose for one route. Write ONLY from " +
     "the supplied contract and allowed facts. Never invent facts or claims; every " +
@@ -379,17 +500,10 @@ async function generateRoute(
     "requirements. Produce exactly one section object per contract section_id (same " +
     "ids), plus faqs, internal links (including every required internal-link target), " +
     "and schema_content_inputs. Respond with ONLY a single JSON object for this " +
-    "route — no markdown fences, no commentary.";
+    "route — no markdown fences, no commentary.\n\n" +
+    SHAPE_SPEC;
 
-  const repairBlock = repair
-    ? {
-        repair_instructions: {
-          note: "Your previous output failed validation. Fix ONLY the items below; keep everything else compliant.",
-          failed_requirements: repair.failed_requirements,
-          remove_or_support_unsupported_claims: repair.unsupported_claims,
-        },
-      }
-    : {};
+  const repairBlock = repairNote ? buildRepairBlock(repairNote) : {};
 
   const userPrompt = JSON.stringify(
     {
@@ -404,14 +518,55 @@ async function generateRoute(
     2,
   );
 
-  return llm.executePolicyJson("STRUCTURED_CONTENT_GENERATION", {
-    clientId: request.client_id,
-    module: "build-intelligence",
-    purpose: `structured-content:${contractRoute.route_id}`,
-    systemPrompt,
-    userPrompt,
-    validate: (value) => reconcileStructuredRoute(value, contractRoute),
-  });
+  try {
+    return await llm.executePolicyJson("STRUCTURED_CONTENT_GENERATION", {
+      clientId: request.client_id,
+      module: "build-intelligence",
+      purpose: `structured-content:${contractRoute.route_id}`,
+      systemPrompt,
+      userPrompt,
+      // Identity validator: shape is enforced by the loop, not here.
+      validate: (value) => value,
+    }, { noInternalRepair: true });
+  } catch (error) {
+    // The ONLY failure this call can produce with an identity validator is a
+    // malformed-JSON parse error from llm-parse.ts (stable message prefix).
+    // Everything else (budget, router, provider) propagates untouched.
+    if (
+      error instanceof Error &&
+      error.message.startsWith("LLM did not return valid JSON")
+    ) {
+      throw new StructuredRouteShapeFailure(error.message);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Shape-specific repair instructions. The note names the failure explicitly so
+ * the model fixes the SHAPE (missing blocks / alias fields), never silent
+ * normalization of `content` → `blocks` by the application.
+ */
+function buildRepairBlock(repairNote: GenerationRepairNote): object {
+  if (repairNote.kind === "shape") {
+    return {
+      repair_instructions: {
+        note:
+          "Your previous output had an invalid SHAPE: missing blocks / present content " +
+          "(or another strict-schema violation). Fix ONLY the shape violations below; " +
+          "keep everything else compliant. Re-read the REQUIRED OUTPUT SHAPE in the " +
+          "system prompt and produce exactly that shape.",
+        shape_violation: repairNote.detail,
+      },
+    };
+  }
+  return {
+    repair_instructions: {
+      note: "Your previous output failed validation. Fix ONLY the items below; keep everything else compliant.",
+      failed_requirements: repairNote.failed_requirements,
+      remove_or_support_unsupported_claims: repairNote.unsupported_claims,
+    },
+  };
 }
 
 /**

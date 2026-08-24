@@ -39,6 +39,12 @@ function tierToComplexity(tier: LegacyTier): TaskComplexity {
 
 export class LlmService {
   private readonly router: L9LLMRouter;
+  /**
+   * Measured executePolicyJson invocations per operation — the audit's
+   * "expected calls" side of the router-bypass comparison. Incremented before
+   * every policy call, regardless of outcome.
+   */
+  private readonly policyCallCounts = new Map<SeoImproveLlmOperation, number>();
 
   constructor() {
     const config = getConfig();
@@ -60,6 +66,10 @@ export class LlmService {
 
   getRouter(): L9LLMRouter {
     return this.router;
+  }
+  /** Measured executePolicyJson invocations per operation (audit input). */
+  getPolicyCallCounts(): Readonly<Record<string, number>> {
+    return Object.fromEntries(this.policyCallCounts);
   }
   recoverExpiredBudgetReservations(): Promise<number> {
     return Promise.resolve(0);
@@ -223,6 +233,12 @@ export class LlmService {
    * provider, or model. Parse+validate failures trigger EXACTLY ONE bounded
    * repair scoped to the same operation; a second failure is terminal (the
    * validator's error propagates). No infinite retry.
+   *
+   * With `noInternalRepair: true` the bounded repair is skipped: the first
+   * parse/validate failure propagates immediately. Callers that need to own
+   * the WHOLE repair budget themselves (measured generation/repair/schema-error
+   * evidence, e.g. the structured-content producer) use this and repair at
+   * their own loop boundary — never stack an internal repair on top of theirs.
    */
   async executePolicyJson<T>(
     operation: SeoImproveLlmOperation,
@@ -234,12 +250,17 @@ export class LlmService {
       userPrompt: string;
       validate: (value: unknown) => T;
     },
+    options?: { noInternalRepair?: boolean },
   ): Promise<T> {
+    this.policyCallCounts.set(operation, (this.policyCallCounts.get(operation) ?? 0) + 1);
     const task = seoImproveTask(operation, args.clientId, `[${args.module}] ${args.purpose}`);
     const first = await this.execute(task, args.systemPrompt, args.userPrompt);
     try {
       return args.validate(parseJsonFromLlm<unknown>(first.content));
     } catch (error) {
+      if (options?.noInternalRepair) {
+        throw error;
+      }
       const reason = error instanceof Error ? error.message : String(error);
       logger.warn(
         { operation, clientId: args.clientId, purpose: args.purpose, reason },
