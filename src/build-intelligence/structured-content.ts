@@ -40,6 +40,7 @@ import { getLlmService, type LlmService } from "../services/llm.js";
 import { type RouteValidationVerdict, validateRoute } from "./content-validator.js";
 import { PRODUCER } from "./producer.js";
 import { structuredContentRouteSchema } from "./schema-guards.js";
+import { CREDENTIAL_CLAIM_TOKENS } from "./claim-grounding.js";
 
 const logger = createModuleLogger("build-intelligence:structured-content");
 
@@ -500,7 +501,12 @@ async function generateRouteRaw(
     "question must be covered with its EXACT terminology — the validation is " +
     "deterministic and looks for the literal terms, so a required topic phrased " +
     "as \"24/7 availability\" requires the words \"24/7\" AND \"availability\" to " +
-    "appear in your prose (a paraphrase is scored as missing). Produce a metadata title and description that satisfy their " +
+    "appear in your prose (a paraphrase is scored as missing). " +
+    "BANNED PHRASES: never write any of these credential/guarantee phrases " +
+    "unless the phrase appears verbatim in the contract's verified facts: " +
+    CREDENTIAL_CLAIM_TOKENS.join(", ") +
+    ". If a content requirement seems to demand one, express the underlying " +
+    "fact without the banned phrase. Produce a metadata title and description that satisfy their " +
     "requirements. Produce exactly one section object per contract section_id (same " +
     "ids), plus faqs, internal links (including every required internal-link target), " +
     "and schema_content_inputs. Respond with ONLY a single JSON object for this " +

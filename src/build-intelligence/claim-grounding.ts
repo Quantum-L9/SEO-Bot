@@ -124,7 +124,7 @@ const MAGNITUDE_PHRASES: readonly string[] = [
  * the verified facts containing the same token — these are precisely the
  * categories a model will otherwise invent.
  */
-const CREDENTIAL_CLAIM_TOKENS: readonly string[] = [
+export const CREDENTIAL_CLAIM_TOKENS: readonly string[] = [
   "licensed",
   "bonded",
   "insured",
