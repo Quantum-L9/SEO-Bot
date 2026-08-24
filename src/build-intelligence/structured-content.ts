@@ -532,6 +532,13 @@ function applyDeterministicRemediation(
     if (typeof section.eyebrow === "string") section.eyebrow = scrub(section.eyebrow);
     if (typeof section.heading === "string") section.heading = scrub(section.heading);
     if (typeof section.subheading === "string") section.subheading = scrub(section.subheading);
+    if (section.cta) {
+      if (typeof section.cta.label === "string") section.cta.label = scrub(section.cta.label);
+      if (typeof section.cta.action === "string") section.cta.action = scrub(section.cta.action);
+    }
+  }
+  for (const link of route.internal_links ?? []) {
+    if (typeof link.anchor_text === "string") link.anchor_text = scrub(link.anchor_text);
   }
   for (const faq of route.faqs ?? []) {
     if (typeof faq.answer === "string") faq.answer = scrub(faq.answer);
