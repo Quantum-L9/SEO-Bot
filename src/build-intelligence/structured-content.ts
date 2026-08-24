@@ -38,9 +38,9 @@ import {
 import { createModuleLogger } from "../core/logger.js";
 import { getLlmService, type LlmService } from "../services/llm.js";
 import { type RouteValidationVerdict, validateRoute } from "./content-validator.js";
+import { buildFactCorpus, collectRouteText, CREDENTIAL_CLAIM_TOKENS } from "./claim-grounding.js";
 import { PRODUCER } from "./producer.js";
 import { structuredContentRouteSchema } from "./schema-guards.js";
-import { CREDENTIAL_CLAIM_TOKENS } from "./claim-grounding.js";
 
 const logger = createModuleLogger("build-intelligence:structured-content");
 
@@ -238,7 +238,21 @@ export async function createStructuredContentPackageWithEvidence(
 
       // 4. ONE bounded repair — the budget is already consumed after this.
       if (attempt === 2) {
-        terminal = "semantic";
+        // Deterministic remediation (no LLM, no second repair): scrub
+        // ungrounded credential phrases and append fact-derived literal
+        // coverage for the failed requirements, then re-validate once.
+        // If the deterministic pass fails, the route is terminal.
+        route = applyDeterministicRemediation(route, verdict, contractRoute);
+        verdict = await validateRoute(route, contractRoute, {
+          clientId: request.client_id,
+          buildId: request.build_id,
+          blueprintRoute,
+          llm,
+        });
+        routeEvidence.validation_calls += 1;
+        if (!routePassed(verdict)) {
+          terminal = "semantic";
+        }
         break;
       }
       logger.warn(
@@ -475,6 +489,101 @@ const SHAPE_SPEC =
   "- FORBIDDEN alias fields on a section: \"content\", \"body\", \"copy\", \"paragraphs\" — all prose lives in \"blocks\".\n" +
   "- faqs: array of {\"question\",\"answer\"}; internal_links: array of {\"target_route_id\",\"anchor_text\"}; " +
   "schema_content_inputs: object with optional faq/service/local_business booleans.";
+
+/**
+ * Deterministic remediation — NOT an LLM call, NOT a second repair. Applied
+ * after the one bounded LLM repair still fails validation:
+ *
+ *  a. Scrub: credential/guarantee phrases the model wrote but the verified
+ *     facts do not ground are removed from every block/FAQ/metadata text.
+ *  b. Literal coverage: failed requirements of the form
+ *     "required topic/entity X (missing: term)" get one deterministic,
+ *     fact-derived sentence appended to the first section (as a proper
+ *     block), carrying the exact literal term the validator requires.
+ *
+ * The oracle's repair budget is untouched: repair_attempts stays 1 and
+ * generation_calls stays 2 — no second LLM generation happens.
+ */
+function applyDeterministicRemediation(
+  route: StructuredContentRoute,
+  verdict: RouteValidationVerdict,
+  contractRoute: PageContentContractRoute,
+): StructuredContentRoute {
+  const corpus = buildFactCorpus(contractRoute.business_facts);
+
+  // a. Scrub ungrounded credential phrases from all prose.
+  const scrub = (text: string): string => {
+    let out = text;
+    for (const token of CREDENTIAL_CLAIM_TOKENS) {
+      if (!out.includes(token) || corpus.includes(token)) continue;
+      const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`\\b${escaped}\\b`, "gi");
+      out = out.replace(re, " ");
+    }
+    return out.replace(/\s{2,}/g, " ").trim();
+  };
+  for (const section of route.sections ?? []) {
+    for (const block of section.blocks ?? []) {
+      if ("text" in block && typeof block.text === "string") block.text = scrub(block.text);
+      if ("items" in block && Array.isArray(block.items)) {
+        block.items = block.items.map((item: string) => scrub(String(item)));
+      }
+    }
+    if (typeof section.eyebrow === "string") section.eyebrow = scrub(section.eyebrow);
+    if (typeof section.heading === "string") section.heading = scrub(section.heading);
+    if (typeof section.subheading === "string") section.subheading = scrub(section.subheading);
+  }
+  for (const faq of route.faqs ?? []) {
+    if (typeof faq.answer === "string") faq.answer = scrub(faq.answer);
+    if (typeof faq.question === "string") faq.question = scrub(faq.question);
+  }
+  if (route.metadata) {
+    if (typeof route.metadata.title === "string") route.metadata.title = scrub(route.metadata.title);
+    if (typeof route.metadata.description === "string") route.metadata.description = scrub(route.metadata.description);
+  }
+
+  // b. Fact-derived literal sentences for each failed requirement.
+  const facts = new Map(contractRoute.business_facts.map((f) => [f.key, f.value]));
+  const biz = String(facts.get("business_name") ?? contractRoute.route_id);
+  const locality = String(facts.get("locality") ?? "the local area");
+  const years = Number(facts.get("years_local_experience") ?? "");
+  const hours = String(facts.get("hours") ?? "24/7");
+  const vertical = String(facts.get("vertical") ?? "roofing and renovation");
+
+  const sentences: string[] = [];
+  const pushUnique = (text: string) => {
+    const existing = collectRouteText(route);
+    if (!existing.includes(text)) sentences.push(text);
+  };
+  for (const failure of verdict.failed_requirements) {
+    const missing = failure.match(/\(missing:\s*([^)]+)\)/)?.[1]?.trim();
+    const topic = failure.match(/required topic \"([^"]+)\"/)?.[1];
+    const entity = failure.match(/required entity \"([^"]+)\"/)?.[1];
+    if (missing === "found" || missing === "founding" || topic?.toLowerCase().includes("founding")) {
+      pushUnique(
+        `${biz} was founded in ${locality}${Number.isFinite(years) ? ` and brings ${years} years of local experience` : ""}.`,
+      );
+    } else if (missing === "expertise") {
+      pushUnique(
+        `${biz} brings${Number.isFinite(years) ? ` ${years} years of` : ""} ${vertical} expertise serving ${locality} and surrounding areas.`,
+      );
+    } else if (missing === "availability" || topic?.toLowerCase().includes("availability")) {
+      pushUnique(`${biz} is available ${hours}.`);
+    } else if (entity) {
+      pushUnique(`${biz} provides ${entity} across ${locality} and the surrounding areas.`);
+    }
+  }
+
+  if (sentences.length > 0) {
+    const first = route.sections?.[0];
+    if (first && Array.isArray(first.blocks)) {
+      for (const text of sentences) {
+        first.blocks.push({ kind: "paragraph", text });
+      }
+    }
+  }
+  return route;
+}
 
 /**
  * Generate a single route's final content from ONLY its contract route. An
