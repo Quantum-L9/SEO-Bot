@@ -572,9 +572,14 @@ function buildRepairBlock(repairNote: GenerationRepairNote): object {
   }
   return {
     repair_instructions: {
-      note: "Your previous output failed validation. Fix ONLY the items below; keep everything else compliant.",
+      note:
+        "Your previous output failed validation. Fix ONLY the items below; " +
+        "keep everything else compliant. The unsupported claims are BANNED " +
+        "phrases: your previous response STILL contained them. You MUST remove " +
+        "them completely — do not rephrase them, do not include them in any " +
+        "form, in any section, FAQ, title, or description.",
       failed_requirements: repairNote.failed_requirements,
-      remove_or_support_unsupported_claims: repairNote.unsupported_claims,
+      banned_phrases_you_must_remove: repairNote.unsupported_claims,
     },
   };
 }
