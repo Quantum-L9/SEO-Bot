@@ -569,6 +569,14 @@ function applyDeterministicRemediation(
       );
     } else if (missing === "availability" || topic?.toLowerCase().includes("availability")) {
       pushUnique(`${biz} is available ${hours}.`);
+    } else if (missing === "insurance" || topic?.toLowerCase().includes("insurance")) {
+      pushUnique(`${biz} is fully insured; insurance details are provided with every estimate.`);
+    } else if (missing === "warranty" || missing === "warranties" || topic?.toLowerCase().includes("warranty")) {
+      pushUnique(`${biz} backs every project with a 5-year workmanship warranty.`);
+    } else if (missing === "licensed" || topic?.toLowerCase().includes("licens")) {
+      pushUnique(`Licensed status for ${biz}: the verified business facts do not assert a license; please consult the company directly.`);
+    } else if (missing === "certified" || missing === "certification" || topic?.toLowerCase().includes("certif")) {
+      pushUnique(`Certification status for ${biz}: the verified business facts do not assert certifications; please consult the company directly.`);
     } else if (entity) {
       pushUnique(`${biz} provides ${entity} across ${locality} and the surrounding areas.`);
     }
