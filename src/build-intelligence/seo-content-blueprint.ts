@@ -392,16 +392,18 @@ function buildBatchPrompt(
             topics: "string[]",
             entities: "string[]",
           },
-          requirements: {
-            requirement_id: "string",
-            target_slots: "content slot names (string[])",
-            placement: "one of: FIRST_MATCH | ALL_MATCHES",
-            required_topics: "string[]",
-            required_entities: "string[]",
-            questions: "string[]",
-            proof_needed: "string[]",
-            required: "boolean",
-          },
+          requirements: [
+            {
+              requirement_id: "string",
+              target_slots: "content slot names (string[])",
+              placement: "one of: FIRST_MATCH | ALL_MATCHES",
+              required_topics: "string[]",
+              required_entities: "string[]",
+              questions: "string[]",
+              proof_needed: "string[]",
+              required: "boolean",
+            },
+          ],
           competitive_gaps: [
             {
               gap_id: "string",
