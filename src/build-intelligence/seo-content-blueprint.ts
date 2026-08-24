@@ -381,6 +381,8 @@ function buildBatchPrompt(
       output_contract: {
         one_entry_per_route_id: batch.map((route) => route.route_id),
         route_shape: {
+          route_id: "the route id exactly as given (string)",
+          path: "the route path exactly as given (string)",
           search_intent: {
             primary: "primary search intent (string)",
             secondary: "string[]",
