@@ -109,6 +109,13 @@ const MAX_DONORS_FOR_EVIDENCE = 6;
 const MAX_URLS_PER_DONOR = 1;
 const MAX_TOTAL_URLS = 8;
 
+/**
+ * Deterministic blueprint batching: routes are produced in groups of this size,
+ * one LLM strategize call per group. The golden oracle pins batch_size=4 and
+ * batch_count=ceil(route_count/4) — for 29 routes, 8 batches.
+ */
+export const SEO_CONTENT_BLUEPRINT_BATCH_SIZE = 4;
+
 interface NormalizedDonorEvidence {
   domain: string;
   aggregate_visibility: number;
@@ -134,6 +141,19 @@ export async function createSEOContentBlueprint(
 
   const evidence = await gatherDonorEvidence(landscape, dataForSeo);
 
+  // ── Deterministic batching (oracle: batch_size=4, batch_count=ceil(n/4)) ──────
+  const batchSize = SEO_CONTENT_BLUEPRINT_BATCH_SIZE;
+  const batches = chunkRoutes(request.routes, batchSize);
+  const batchCount = batches.length;
+  if (batchCount !== Math.ceil(request.routes.length / batchSize)) {
+    throw new SeoContentBlueprintInvalidError(
+      `batch_count=${batchCount} does not match ceil(route_count=${request.routes.length}/${batchSize})`,
+    );
+  }
+  if (batchCount === 0) {
+    throw new RouteSetMismatchError("at least one route identity is required");
+  }
+
   const systemPrompt =
     "You are a senior SEO content strategist. You produce a STRATEGIC content " +
     "blueprint from normalized competitive evidence and verified business facts. " +
@@ -141,91 +161,37 @@ export async function createSEOContentBlueprint(
     "competitive content gaps, content requirements, internal-link requirements, " +
     "AEO/GEO requirements, metadata requirements, forbidden claims, and acceptance " +
     "tests. You do NOT decide page layout, section order, component classes, visual " +
-    "design, CTA placement, or final prose. Respond with ONLY a JSON object " +
-    '{"routes":[...]} — no markdown fences, no commentary.';
+    "design, CTA placement, or final prose. You are producing ONE BATCH of a " +
+    "multi-batch blueprint: return exactly the requested routes of this batch and " +
+    "no others (other batches are produced separately). Respond with ONLY a JSON " +
+    'object {"routes":[...]} — no markdown fences, no commentary.';
 
-  const userPrompt = JSON.stringify(
-    {
-      market: landscape.market,
-      query_portfolio: landscape.query_portfolio,
-      selected_donors: landscape.selected_donors,
-      normalized_donor_evidence: evidence,
-      routes: request.routes,
-      verified_business_facts: request.business_facts,
-      seo_config: request.seo_config ?? {},
-      output_contract: {
-        one_entry_per_route_id: request.routes.map((route) => route.route_id),
-        route_shape: {
-          search_intent: {
-            primary: "primary search intent (string)",
-            secondary: "string[]",
-            journey_stage: "one of: informational | commercial | transactional",
-          },
-          targets: {
-            primary_query: "string",
-            supporting_queries: "string[]",
-            topics: "string[]",
-            entities: "string[]",
-          },
-          requirements: {
-            requirement_id: "string",
-            target_slots: "content slot names (string[])",
-            placement: "one of: FIRST_MATCH | ALL_MATCHES",
-            required_topics: "string[]",
-            required_entities: "string[]",
-            questions: "string[]",
-            proof_needed: "string[]",
-            required: "boolean",
-          },
-          competitive_gaps: [
-            {
-              gap_id: "string",
-              description: "string",
-              donor_domains: "string[]",
-              opportunity: "string",
-            },
-          ],
-          internal_links: [
-            { target_route_id: "string (must be one of the route_ids above)", purpose: "string" },
-          ],
-          aeo_geo: { answer_targets: "string[]", schema_requirements: "string[]" },
-          metadata: { title_requirements: "string[]", description_requirements: "string[]" },
-          forbidden_claims: "string[]",
-          acceptance_tests: "string[]",
-        },
-        content_slots: [
-          "primary_offer",
-          "service_overview",
-          "differentiation",
-          "trust",
-          "process",
-          "project_proof",
-          "local_relevance",
-          "objection_handling",
-          "faq",
-          "conversion",
-          "metadata",
-        ],
-        note: "Return exactly one route object per route_id above, matching route_shape exactly. Do not add layout, component, or prose fields.",
-      },
-    },
-    null,
-    2,
-  );
+  // Every batch may declare internal links to ANY site route — including routes
+  // produced in other batches — so the full route id list is always available.
+  const allRouteIds = request.routes.map((route) => route.route_id);
 
-  const routes = await llm.strategizeJson<SEOContentBlueprintRoute[]>({
-    clientId: request.client_id,
-    module: "build-intelligence",
-    purpose: `seo-content-blueprint:${request.build_id}`,
-    systemPrompt,
-    userPrompt,
-    validate: (value) => reconcileRoutes(value, request.routes),
-  });
+  const produced: SEOContentBlueprintRoute[][] = [];
+  for (const batch of batches) {
+    const userPrompt = buildBatchPrompt(landscape, evidence, request, batch, allRouteIds);
+    const batchRoutes = await llm.strategizeJson<SEOContentBlueprintRoute[]>({
+      clientId: request.client_id,
+      module: "build-intelligence",
+      purpose: `seo-content-blueprint:${request.build_id}`,
+      systemPrompt,
+      userPrompt,
+      validate: (value) => reconcileBatchRoutes(value, batch),
+    });
+    produced.push(batchRoutes);
+  }
+
+  const routes = reconcileGlobalRoutes(produced, request.routes);
 
   const landscapeRef = refForArtifact(request.competitive_landscape);
   const payload: SEOContentBlueprintV1 = {
     schema: WEBSITE_INTELLIGENCE_SCHEMAS.seoContentBlueprint,
     competitive_landscape_ref: landscapeRef,
+    batch_size: batchSize,
+    batch_count: batchCount,
     routes,
   };
 
@@ -380,15 +346,117 @@ async function collectDonorMetrics(
 }
 
 /**
- * Validate model output against the shared route schema and reconcile it with
- * the REQUESTED route identities. Route identity (route_id + path) is an input,
- * not the model's to invent or change — so identities are re-asserted from the
- * request and routes are returned in the requested order (deterministic).
- * Missing or unexpected routes throw, triggering the single bounded repair.
+ * Deterministic route grouping: consecutive runs of `batchSize`, final batch
+ * possibly smaller. Route order is preserved within each batch.
  */
-function reconcileRoutes(
+function chunkRoutes<T>(routes: T[], batchSize: number): T[][] {
+  const batches: T[][] = [];
+  for (let i = 0; i < routes.length; i += batchSize) {
+    batches.push(routes.slice(i, i + batchSize));
+  }
+  return batches;
+}
+
+/**
+ * One batch's prompt. The batch's routes are the identity authority (the model
+ * must return exactly those), but the FULL route id list is the internal-link
+ * vocabulary — links may target routes produced in other batches.
+ */
+function buildBatchPrompt(
+  landscape: CompetitiveLandscapeArtifact["payload"],
+  evidence: NormalizedDonorEvidence[],
+  request: SEOContentBlueprintRequest,
+  batch: SEOContentBlueprintRequest["routes"],
+  allRouteIds: string[],
+): string {
+  return JSON.stringify(
+    {
+      market: landscape.market,
+      query_portfolio: landscape.query_portfolio,
+      selected_donors: landscape.selected_donors,
+      normalized_donor_evidence: evidence,
+      routes: batch,
+      verified_business_facts: request.business_facts,
+      seo_config: request.seo_config ?? {},
+      output_contract: {
+        one_entry_per_route_id: batch.map((route) => route.route_id),
+        route_shape: {
+          search_intent: {
+            primary: "primary search intent (string)",
+            secondary: "string[]",
+            journey_stage: "one of: informational | commercial | transactional",
+          },
+          targets: {
+            primary_query: "string",
+            supporting_queries: "string[]",
+            topics: "string[]",
+            entities: "string[]",
+          },
+          requirements: {
+            requirement_id: "string",
+            target_slots: "content slot names (string[])",
+            placement: "one of: FIRST_MATCH | ALL_MATCHES",
+            required_topics: "string[]",
+            required_entities: "string[]",
+            questions: "string[]",
+            proof_needed: "string[]",
+            required: "boolean",
+          },
+          competitive_gaps: [
+            {
+              gap_id: "string",
+              description: "string",
+              donor_domains: "string[]",
+              opportunity: "string",
+            },
+          ],
+          internal_links: [
+            {
+              target_route_id:
+                `string (must be one of the site route ids: ${allRouteIds.join(", ")})`,
+              purpose: "string",
+            },
+          ],
+          aeo_geo: { answer_targets: "string[]", schema_requirements: "string[]" },
+          metadata: { title_requirements: "string[]", description_requirements: "string[]" },
+          forbidden_claims: "string[]",
+          acceptance_tests: "string[]",
+        },
+        content_slots: [
+          "primary_offer",
+          "service_overview",
+          "differentiation",
+          "trust",
+          "process",
+          "project_proof",
+          "local_relevance",
+          "objection_handling",
+          "faq",
+          "conversion",
+          "metadata",
+        ],
+        note:
+          "Return exactly one route object per route_id above, matching route_shape exactly. " +
+          "Do not add layout, component, or prose fields.",
+      },
+    },
+    null,
+    2,
+  );
+}
+
+/**
+ * Validate one batch's model output against the shared route schema and
+ * reconcile it with the REQUESTED route identities of that batch. Route
+ * identity (route_id + path) is an input, not the model's to invent or change
+ * — so identities are re-asserted from the request and routes are returned in
+ * the requested order (deterministic). Missing or unexpected routes throw,
+ * triggering the single bounded repair. Cross-batch semantic checks (internal
+ * links) happen in the global reconcile.
+ */
+function reconcileBatchRoutes(
   value: unknown,
-  requested: Array<{ route_id: string; path: string; purpose: string }>,
+  batch: Array<{ route_id: string; path: string; purpose: string }>,
 ): SEOContentBlueprintRoute[] {
   // Slot vocabulary is enforced here: `target_slots` is a zod enum over the
   // shared ContentSlot union, so an invented slot name fails the parse.
@@ -399,21 +467,55 @@ function reconcileRoutes(
     throw new Error("Duplicate route_id in model output");
   }
 
-  const requestedIds = new Set(requested.map((route) => route.route_id));
+  const batchIds = new Set(batch.map((route) => route.route_id));
   const unexpected = parsed.routes
     .map((route) => route.route_id)
-    .filter((id) => !requestedIds.has(id));
+    .filter((id) => !batchIds.has(id));
   if (unexpected.length > 0) {
-    throw new Error(`Unexpected route_id(s) not in the requested set: ${unexpected.join(", ")}`);
+    throw new Error(
+      `Unexpected route_id(s) not in this batch's requested set: ${unexpected.join(", ")}`,
+    );
   }
 
-  const routes = requested.map((route) => {
+  return batch.map((route) => {
     const produced = byId.get(route.route_id);
     if (!produced) {
       throw new Error(`Missing blueprint for required route_id: ${route.route_id}`);
     }
     // Re-assert identity from the request (authority), keep strategic fields.
     return { ...produced, route_id: route.route_id, path: route.path };
+  });
+}
+
+/**
+ * Reconcile all produced batches against the FULL requested route set and
+ * enforce deterministic semantic checks across batches (internal links may
+ * target routes produced in any batch, so semantics cannot run per batch).
+ * Returns routes in requested order. Missing or unexpected routes throw.
+ */
+function reconcileGlobalRoutes(
+  produced: SEOContentBlueprintRoute[][],
+  requested: Array<{ route_id: string; path: string; purpose: string }>,
+): SEOContentBlueprintRoute[] {
+  const flattened = produced.flat();
+  const byId = new Map(flattened.map((route) => [route.route_id, route]));
+  if (byId.size !== flattened.length) {
+    throw new Error("Duplicate route_id across batches");
+  }
+
+  const requestedIds = new Set(requested.map((route) => route.route_id));
+  for (const id of byId.keys()) {
+    if (!requestedIds.has(id)) {
+      throw new Error(`Unexpected route_id(s) not in the requested set: ${id}`);
+    }
+  }
+
+  const routes = requested.map((route) => {
+    const producedRoute = byId.get(route.route_id);
+    if (!producedRoute) {
+      throw new Error(`Missing blueprint for required route_id: ${route.route_id}`);
+    }
+    return producedRoute;
   });
 
   assertBlueprintSemantics(routes, requestedIds);
