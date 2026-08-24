@@ -42,13 +42,16 @@ export async function buildApiServer(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: false,
     trustProxy: getConfig().TRUST_PROXY,
-    // Build-intelligence endpoints generate a whole contract in one request
-    // (8-batch blueprint, 29-route structured content). Node's default
-    // requestTimeout destroys the socket at 300s mid-generation ("fetch
-    // failed" on the client, golden run #8). 0 disables the server-side
-    // kill; the client's own per-endpoint timeouts remain the real bounds.
-    requestTimeout: 0,
   });
+  // Build-intelligence endpoints generate a whole contract in one request
+  // (8-batch blueprint, 29-route structured content). Node's default
+  // requestTimeout destroys the socket at 300s mid-generation ("fetch
+  // failed" on the client, golden runs #8/#10). The Fastify factory
+  // requestTimeout option is not honored by the installed fastify 4.x, so
+  // set it on the underlying Node http.Server directly. 0 disables the
+  // server-side kill; the client's per-endpoint timeouts remain the real
+  // bounds.
+  app.server.requestTimeout = 0;
 
   await app.register(helmet);
   await app.register(formBody);
