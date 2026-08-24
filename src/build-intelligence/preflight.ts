@@ -43,6 +43,22 @@ export interface PreflightReport {
   preflight_id: string;
   produced_at: string;
   checks: PreflightCheck[];
+  /** Client gate fields — the Website-Bot SeoBotPreflightResult contract.
+   * Derived from the same probes; nothing here is a hardcoded PASS. */
+  status: "ready" | "degraded" | "not_ready";
+  service: string;
+  version: string;
+  bot_interop_version?: string;
+  llm_router_version?: string;
+  capabilities: {
+    competitive_landscape: boolean;
+    seo_content_blueprint: boolean;
+    structured_content: boolean;
+  };
+  configuration: {
+    dataforseo_configured: boolean;
+    llm_provider_configured: boolean;
+  };
 }
 
 /**
@@ -217,9 +233,34 @@ export function runPreflight(contractSeen: boolean): PreflightReport {
     return `llm-router ${version} resolves; L9LLMRouter present`;
   }));
 
+  const statusOf = (name: string): PreflightStatus =>
+    checks.find((check) => check.name === name)?.status ?? "UNKNOWN";
+  const pass = (name: string): boolean => statusOf(name) === "PASS";
+
   return {
     preflight_id: randomUUID(),
     produced_at: new Date().toISOString(),
     checks,
+    // Client-gate projection: the same probes, reshaped for the
+    // Website-Bot SeoBotPreflightResult contract. A FAIL/UNKNOWN check
+    // is a false capability; never defaulted to true.
+    status: checks.some((check) => check.status === "FAIL")
+      ? "not_ready"
+      : checks.some((check) => check.status === "UNKNOWN")
+        ? "degraded"
+        : "ready",
+    service: "SEO-Bot",
+    version: packageVersion("l9-seo-bot") ?? "unknown",
+    bot_interop_version: packageVersion("@quantum-l9/bot-interop"),
+    llm_router_version: packageVersion("@quantum-l9/llm-router"),
+    capabilities: {
+      competitive_landscape: pass("competitive_landscape_capability"),
+      seo_content_blueprint: pass("seo_content_blueprint_capability"),
+      structured_content: pass("structured_content_capability"),
+    },
+    configuration: {
+      dataforseo_configured: pass("dataforseo_configured"),
+      llm_provider_configured: pass("llm_provider_configured"),
+    },
   };
 }
