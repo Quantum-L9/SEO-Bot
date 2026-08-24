@@ -541,6 +541,12 @@ function applyDeterministicRemediation(
     if (typeof link.anchor_text === "string") link.anchor_text = scrub(link.anchor_text);
   }
 
+  const facts = new Map(contractRoute.business_facts.map((f) => [f.key, f.value]));
+  const biz = String(facts.get("business_name") ?? contractRoute.route_id);
+  const locality = String(facts.get("locality") ?? "the local area");
+  const years = Number(facts.get("years_local_experience") ?? "");
+  const hours = String(facts.get("hours") ?? "24/7");
+  const vertical = String(facts.get("vertical") ?? "roofing and renovation");
   // c. Substantive-content floor: scrubbing (or a lazy model) can leave a
   //    section under the 10-word threshold. Fill thin sections with a
   //    fact-derived paragraph so the deterministic check passes honestly.
@@ -576,12 +582,6 @@ function applyDeterministicRemediation(
   }
 
   // b. Fact-derived literal sentences for each failed requirement.
-  const facts = new Map(contractRoute.business_facts.map((f) => [f.key, f.value]));
-  const biz = String(facts.get("business_name") ?? contractRoute.route_id);
-  const locality = String(facts.get("locality") ?? "the local area");
-  const years = Number(facts.get("years_local_experience") ?? "");
-  const hours = String(facts.get("hours") ?? "24/7");
-  const vertical = String(facts.get("vertical") ?? "roofing and renovation");
 
   const sentences: string[] = [];
   const pushUnique = (text: string) => {
