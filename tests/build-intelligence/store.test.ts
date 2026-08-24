@@ -51,6 +51,7 @@ function landscape(niche: string) {
     selected_donors: [],
     exclusions: [],
     evidence_complete: true,
+    ranking_llm_calls: 0,
   };
   return sealIntelligenceArtifact({
     artifact_type: "competitive_landscape",
