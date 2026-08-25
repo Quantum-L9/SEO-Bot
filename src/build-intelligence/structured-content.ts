@@ -672,7 +672,10 @@ const QUANTIFIED_UNIT_WORDS =
  *     a phrase split across a line break or an NBSP is still one phrase
  *     there — and must be one phrase here).
  *  2. Remove credential/magnitude tokens the verified facts do not ground,
- *     matching token-internal spaces against ANY whitespace run.
+ *     matching token-internal spaces against ANY whitespace run and removing
+ *     the maximal word containing the token (substring authority — derived
+ *     forms like "certifications" cannot dodge the scrub the grounding check
+ *     flags).
  *  3. Remove unverifiable quantified years (factNumbers authority).
  *  4. Cross-surface pass: a token whose words straddle two adjacent fields
  *     (golden run #40: CTA label "Get Your Free" + action "Estimate") is
@@ -708,7 +711,12 @@ function scrubTextSurfaces(
       // check must match it, or capitalized claims escape the scrub.
       if (!haystack.includes(token) || corpus.includes(token)) continue;
       const flexible = escapeRegex(token).replace(/ /g, "\\s+");
-      out = out.replace(new RegExp(`\\b${flexible}\\b`, "gi"), " ");
+      // Substring authority: the grounding check flags the token wherever it
+      // appears as a substring, so the scrub must remove the maximal word
+      // containing it — a word-bounded `\btoken\b` lets derived forms like
+      // "certifications" or "recertification" survive and 422 the route
+      // (golden run #41).
+      out = out.replace(new RegExp(`\\b[a-z0-9]*${flexible}[a-z0-9]*\\b`, "gi"), " ");
     }
     // Quantified "N years" assertions: a number the verified facts do not
     // contain can never be corroborated (factNumbers authority). Drop the

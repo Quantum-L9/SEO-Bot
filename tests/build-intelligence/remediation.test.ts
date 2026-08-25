@@ -102,4 +102,21 @@ describe("deterministic remediation scrub surface", () => {
     const joined = JSON.stringify(route).toLowerCase().replace(/\s+/g, " ");
     expect(joined).not.toContain("free estimate");
   });
+
+  it("removes derived forms of a banned token (substring authority, golden run #41)", () => {
+    const split = {
+      ...verdict,
+      unsupported_claims: ['/: unsupported credential/guarantee claim "certification" — no verified fact asserts it'],
+    };
+    const route = applyDeterministicRemediation(
+      makeRoute(
+        {},
+        [{ kind: "paragraph", text: "Our recertification program and GAF certifications matter — substantive content here" }],
+      ),
+      split,
+      contract,
+    );
+    const joined = JSON.stringify(route).toLowerCase().replace(/\s+/g, " ");
+    expect(joined).not.toContain("certification");
+  });
 });
