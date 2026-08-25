@@ -525,8 +525,10 @@ describe("StructuredContentPackage — the exact contract is the only authority"
     // re-validation (now deterministically clean) reaches the semantic pass.
     expect(semanticCalls).toBe(1);
     const text = JSON.stringify(artifact.payload).toLowerCase();
+    // The ungrounded magnitude claim is scrubbed; the "25 year warranty"
+    // phrase is GROUNDED by the fixture's warranty fact and must survive.
     expect(text).not.toContain("decades of experience");
-    expect(text).not.toContain("25 year");
+    expect(text).toContain("25 year manufacturer warranty");
   });
 });
 
