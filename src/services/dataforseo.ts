@@ -110,7 +110,10 @@ export class DataForSeoClient {
           Authorization: `Basic ${this.auth}`,
           "Content-Type": "application/json",
         },
-        timeout: 30000,
+        // The live SERP endpoint (google/organic/live/advanced) routinely
+        // needs longer than 30s under load — golden runs #35/#36 timed out
+        // consecutively at exactly 30s. Env-tunable with a 90s default.
+        timeout: Number(process.env.DATAFORSEO_TIMEOUT_MS ?? 90_000),
       });
     } catch (error) {
       // Transport, timeout, auth, and non-2xx responses are all "no evidence".
