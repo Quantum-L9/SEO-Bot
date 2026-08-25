@@ -516,14 +516,17 @@ describe("StructuredContentPackage — the exact contract is the only authority"
       },
     } as unknown as LlmService;
 
-    await expect(
-      createStructuredContentPackage(
-        { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
-        { llm },
-      ),
-    ).rejects.toMatchObject({ code: "CONTENT_REQUIREMENT_UNSATISFIED" });
-    // Deterministic failure short-circuits the semantic pass entirely.
-    expect(semanticCalls).toBe(0);
+    const artifact = await createStructuredContentPackage(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+      { llm },
+    );
+    // The deterministic claim check short-circuits the semantic pass for the
+    // initial generation AND the LLM repair; only the post-remediation
+    // re-validation (now deterministically clean) reaches the semantic pass.
+    expect(semanticCalls).toBe(1);
+    const text = JSON.stringify(artifact.payload).toLowerCase();
+    expect(text).not.toContain("decades of experience");
+    expect(text).not.toContain("25 year");
   });
 });
 

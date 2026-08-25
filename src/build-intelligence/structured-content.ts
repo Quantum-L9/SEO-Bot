@@ -522,6 +522,17 @@ export function applyDeterministicRemediation(
       const re = new RegExp(`\\b${escaped}\\b`, "gi");
       out = out.replace(re, " ");
     }
+    // Quantified "N years" assertions: a number the verified facts do not
+    // contain can never be corroborated (factNumbers authority). Drop the
+    // number, keep the unit, so the claim stops being a quantified claim.
+    const allowedNumbers = new Set(
+      (corpus.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((n) => n.replace(/,/g, "")),
+    );
+    out = out.replace(
+      /\b(\d+(?:-\d+)?)\s*(?:to|-|–|—)?\s*(?=years?\b|yrs?\b)/gi,
+      (match: string, num: string) =>
+        allowedNumbers.has(num.replace(/,/g, "")) ? match : " ",
+    );
     return out.replace(/\s{2,}/g, " ").trim();
   };
   for (const section of route.sections ?? []) {
