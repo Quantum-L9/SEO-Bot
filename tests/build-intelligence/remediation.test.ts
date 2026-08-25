@@ -134,6 +134,24 @@ describe("deterministic remediation scrub surface", () => {
     expect(joined).toContain("for 5 years");
   });
 
+  it("removes age-comparison clauses whole (golden run #50)", () => {
+    const split = {
+      ...verdict,
+      unsupported_claims: ['/: unsupported years of experience claim "20 years" — no verified fact asserts 20'],
+    };
+    const route = applyDeterministicRemediation(
+      makeRoute(
+        {},
+        [{ kind: "paragraph", text: "Roof age over 20 years typically favors replacement — substantive content here" }],
+      ),
+      split,
+      contract,
+    );
+    const joined = JSON.stringify(route).toLowerCase().replace(/\s+/g, " ");
+    expect(joined).not.toContain("20 years");
+    expect(joined).not.toContain("over years");
+  });
+
   it("removes derived forms of a banned token (substring authority, golden run #41)", () => {
     const split = {
       ...verdict,

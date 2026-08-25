@@ -766,11 +766,25 @@ function scrubTextSurfaces(
       (match: string, num: string) =>
         allowedNumbers.has(num.replace(/,/g, "")) ? match : " ",
     );
+    // Age-comparison clauses: "roof age over 20 years", "older than 20
+    // years", "20+ years old". The number-only backstop below would leave
+    // "age over years" residue the semantic validator flags (golden run
+    // #50). Remove preposition + number + unit whole.
+    out = out.replace(
+      /\b(?:over|older\s+than|beyond|past|ages?\s+over|ages?\s+of)\s+(\d+(?:-\d+)?)\s*(?:years?|yrs?)\b/gi,
+      (match: string, num: string) =>
+        allowedNumbers.has(num.replace(/,/g, "")) ? match : " ",
+    );
+    out = out.replace(
+      /\b(\d+(?:-\d+)?)\s*\+\s*(?:years?|yrs?)\s+old\b/gi,
+      (match: string, num: string) =>
+        allowedNumbers.has(num.replace(/,/g, "")) ? match : " ",
+    );
     // Quantified "N years" assertions: a number the verified facts do not
     // contain can never be corroborated (factNumbers authority). Drop the
     // number, keep the unit, so the claim stops being a quantified claim.
     out = out.replace(
-      /\b(\d+(?:-\d+)?)\s*(?:to|-|–|—)?\s*(?=years?\b|yrs?\b)/gi,
+      /\b(\d+(?:-\d+)?)\s*\+?\s*(?:to|-|–|—)?\s*(?=years?\b|yrs?\b)/gi,
       (match: string, num: string) =>
         allowedNumbers.has(num.replace(/,/g, "")) ? match : " ",
     );
@@ -1018,6 +1032,20 @@ function groundedVerdict(
     .filter(Boolean);
   const isAcceptanceTestFailure = (failure: string): boolean =>
     acceptancePhrases.some((phrase) => failure.toLowerCase().includes(phrase.toLowerCase()));
+  // Proof-requirement echoes: the validator quotes the contract's proof
+  // requirements by name ("damage thresholds", "inspection checklist" —
+  // golden run #50). Same authority shape as acceptance tests: subjective
+  // satisfaction judgments with no deterministic anchor; they enforce on
+  // attempt 1 (drive the one bounded repair) and drop at the grounded pass.
+  // Exact-match only — a failure that ADDS explanation beyond the proof
+  // name is a substantive finding and keeps its veto.
+  const proofPhrases = [
+    ...(contractRoute.sections ?? []).flatMap((section) => section.proof_requirements ?? []),
+  ]
+    .map((proof) => proof.trim().toLowerCase())
+    .filter(Boolean);
+  const isProofEcho = (failure: string): boolean =>
+    proofPhrases.some((phrase) => failure.trim().toLowerCase() === phrase);
   // The validator quoting a deterministic remediation coverage sentence
   // ("Regarding expertise: ...") is a stylistic objection to coverage
   // output — deterministic coverage is authority (golden run #48).
@@ -1028,10 +1056,11 @@ function groundedVerdict(
   const failedRequirements = verdict.failed_requirements.filter((failure) => {
     if (!/required (topic|entity)/.test(failure)) {
       if (isRemediationSentenceQuote(failure)) return false;
-      // Enforce mode (attempt 1): keep acceptance-test flags so they drive
-      // the bounded repair. Grounded mode: drop them — they have no
-      // deterministic anchor and cannot veto a clean deterministic pass.
-      return opts.enforceAcceptanceTests ? true : !isAcceptanceTestFailure(failure);
+      // Enforce mode (attempt 1): keep acceptance-test/proof-echo flags so
+      // they drive the bounded repair. Grounded mode: drop them — they have
+      // no deterministic anchor and cannot veto a clean deterministic pass.
+      if (opts.enforceAcceptanceTests) return true;
+      return !isAcceptanceTestFailure(failure) && !isProofEcho(failure);
     }
     const phrase = failure.match(/"([^"]+)"/)?.[1];
     return Boolean(phrase) && groundingFailurePhrases.has(phrase as string);

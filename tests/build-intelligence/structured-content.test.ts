@@ -664,6 +664,24 @@ describe("StructuredContentPackage — NC-11 shape discipline (content-alias →
     expect(artifact.payload.validation.failed_requirements).toEqual([]);
   });
 
+  it("proof-requirement echoes drive the repair but never veto the seal (golden run #50)", async () => {
+    const proofEcho: ContentValidationVerdict = {
+      seo_blueprint_passed: true,
+      contract_passed: false,
+      unsupported_claims: [],
+      failed_requirements: ["warranty"],
+    };
+    // The contract's hero section carries proof_requirements ["warranty"];
+    // an exact echo of the proof name is a subjective satisfaction flag.
+    const { llm } = fakeLlm([proofEcho, proofEcho]);
+    const { artifact, evidence } = await createStructuredContentPackageWithEvidence(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+      { llm },
+    );
+    expect(artifact.payload.validation.failed_requirements).toEqual([]);
+    expect(evidence.repair_attempts).toBe(1);
+  });
+
   it("non-acceptance semantic failures still veto the seal", async () => {
     // A real, non-filterable failure keeps the grounded pass closed.
     const { llm } = fakeLlm([fail, fail]);
