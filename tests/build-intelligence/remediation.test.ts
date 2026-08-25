@@ -152,6 +152,20 @@ describe("deterministic remediation scrub surface", () => {
     expect(joined).not.toContain("over years");
   });
 
+  it("removes forbidden claims from every surface (golden run #55)", () => {
+    const withForbidden = { ...contract, forbidden_claims: ["Best in Charlotte"] };
+    const route = applyDeterministicRemediation(
+      makeRoute(
+        {},
+        [{ kind: "paragraph", text: "We are the Best in Charlotte for metal roofing — substantive content here" }],
+      ),
+      verdict,
+      withForbidden,
+    );
+    const joined = JSON.stringify(route).toLowerCase().replace(/\s+/g, " ");
+    expect(joined).not.toContain("best in charlotte");
+  });
+
   it("removes derived forms of a banned token (substring authority, golden run #41)", () => {
     const split = {
       ...verdict,

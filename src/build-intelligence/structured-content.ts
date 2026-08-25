@@ -536,7 +536,7 @@ export function applyDeterministicRemediation(
   // a. Scrub ungrounded credential phrases from all prose (whitespace-flexible;
   //    see scrubTextSurfaces — this also covers phrases whose words straddle
   //    adjacent text fields, the escape that failed golden run #40).
-  scrubTextSurfaces(route, corpus, allowedNumbers);
+  scrubTextSurfaces(route, corpus, allowedNumbers, contractRoute.forbidden_claims);
 
   const facts = new Map(contractRoute.business_facts.map((f) => [f.key, f.value]));
   const biz = String(facts.get("business_name") ?? contractRoute.route_id);
@@ -616,7 +616,7 @@ export function applyDeterministicRemediation(
   // d. Total-scrub guarantee: the fact-derived filler/sentences appended
   //    above get the same surface pass, then the route is returned directly —
   //    all scrubbing mutated fields in place, no JSON round-trip needed.
-  scrubTextSurfaces(route, corpus, allowedNumbers);
+  scrubTextSurfaces(route, corpus, allowedNumbers, contractRoute.forbidden_claims);
   return route;
 }
 
@@ -720,9 +720,16 @@ function scrubTextSurfaces(
   route: StructuredContentRoute,
   corpus: string,
   allowedNumbers: Set<string>,
+  forbiddenPhrases: readonly string[] = [],
 ): void {
   const tokens = [...CREDENTIAL_CLAIM_TOKENS, ...MAGNITUDE_PHRASES];
-  const multiWordTokens = tokens.filter((token) => token.split(" ").length > 1);
+  const forbidden = forbiddenPhrases
+    .map((phrase) => phrase.toLowerCase().replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  // Forbidden claims scrub unconditionally (no corpus guard) and can
+  // straddle surfaces exactly like credential tokens (golden run #55:
+  // "Best in Charlotte").
+  const multiWordTokens = [...tokens, ...forbidden.filter((phrase) => phrase.split(" ").length > 1)];
 
   const surfaces = collectTextSurfaces(route);
   const values: string[] = [];
@@ -747,6 +754,15 @@ function scrubTextSurfaces(
       // containing it — a word-bounded `\btoken\b` lets derived forms like
       // "certifications" or "recertification" survive and 422 the route
       // (golden run #41).
+      out = out.replace(new RegExp(`\\b[a-z0-9]*${flexible}[a-z0-9]*\\b`, "gi"), " ");
+    }
+    // Forbidden claims: the deterministic check flags them wherever the
+    // phrase appears; remove the same maximal-word way, with NO corpus
+    // guard — a forbidden phrase is forbidden even if a fact contains it
+    // (golden run #55).
+    for (const phrase of forbidden) {
+      if (!haystack.includes(phrase)) continue;
+      const flexible = escapeRegex(phrase).replace(/ /g, "\\s+");
       out = out.replace(new RegExp(`\\b[a-z0-9]*${flexible}[a-z0-9]*\\b`, "gi"), " ");
     }
     // Lifespan clauses first: "can last 30 years", "often lasting 25-30
@@ -803,7 +819,9 @@ function scrubTextSurfaces(
     let rightBody = values[i]!.replace(/^[^\w\s]+/g, "").trimStart();
     let removed = false;
     for (const token of multiWordTokens) {
-      if (corpus.includes(token)) continue;
+      // Forbidden phrases scrub unconditionally — the deterministic check
+      // flags them wherever present, corpus grounding never rescues them.
+      if (!forbidden.includes(token) && corpus.includes(token)) continue;
       const words = token.split(" ");
       for (let k = 1; k < words.length && !removed; k++) {
         const prefix = words.slice(0, k).join(" ");
