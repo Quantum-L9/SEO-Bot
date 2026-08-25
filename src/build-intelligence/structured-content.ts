@@ -602,6 +602,8 @@ function applyDeterministicRemediation(
       );
     } else if (missing === "availability" || topic?.toLowerCase().includes("availability")) {
       pushUnique(`${biz} is available ${hours}.`);
+    } else if (missing === "emergency" || topic?.toLowerCase().includes("emergency")) {
+      pushUnique(`${biz} provides 24/7 emergency service across ${locality} and the surrounding areas.`);
     } else if (missing === "insurance" || topic?.toLowerCase().includes("insurance")) {
       pushUnique(`${biz} is fully insured; insurance details are provided with every estimate.`);
     } else if (missing === "warranty" || missing === "warranties" || topic?.toLowerCase().includes("warranty")) {
