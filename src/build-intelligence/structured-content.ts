@@ -730,6 +730,23 @@ function scrubTextSurfaces(
       // (golden run #41).
       out = out.replace(new RegExp(`\\b[a-z0-9]*${flexible}[a-z0-9]*\\b`, "gi"), " ");
     }
+    // Lifespan clauses first: "can last 30 years", "often lasting 25-30
+    // years", "lifespan of 20 years". An ungrounded lifespan number can
+    // never be corroborated, and removing only the number leaves broken
+    // prose the semantic validator flags as "incomplete lifespan
+    // information" (golden run #46: "EPDM rubber membranes can last
+    // years"). Remove the WHOLE clause — verb, number, and unit — so no
+    // claim-shaped residue survives.
+    out = out.replace(
+      /\b(?:(?:can|may|could|will|typically|often|usually|generally)\s+)?(?:lasts?|lasting|rated\s+for)\s+(?:for\s+|up\s+to\s+)?(\d+(?:-\d+)?)\s*(?:to|-|–|—)?\s*(?:years?|yrs?)\b/gi,
+      (match: string, num: string) =>
+        allowedNumbers.has(num.replace(/,/g, "")) ? match : " ",
+    );
+    out = out.replace(
+      /\b(?:lifespans?|service\s+life)\s+of\s+(\d+(?:-\d+)?)\s*(?:to|-|–|—)?\s*(?:years?|yrs?)\b/gi,
+      (match: string, num: string) =>
+        allowedNumbers.has(num.replace(/,/g, "")) ? match : " ",
+    );
     // Quantified "N years" assertions: a number the verified facts do not
     // contain can never be corroborated (factNumbers authority). Drop the
     // number, keep the unit, so the claim stops being a quantified claim.
@@ -820,6 +837,9 @@ async function generateRouteRaw(
     "write at least one explicit answer sentence that reuses the question's own " +
     "terms and is backed by an allowed fact — never invent a commitment, number, " +
     "or guarantee the facts do not assert. " +
+    "NUMBER RULE: never write a specific number, year range, lifespan, " +
+    "statistic, or percentage unless that exact number appears verbatim in the " +
+    "contract's allowed facts. " +
     "BANNED PHRASES: never write any of these credential/guarantee phrases " +
     "unless the phrase appears verbatim in the contract's verified facts: " +
     CREDENTIAL_CLAIM_TOKENS.join(", ") +

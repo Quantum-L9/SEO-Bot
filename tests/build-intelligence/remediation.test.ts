@@ -103,6 +103,37 @@ describe("deterministic remediation scrub surface", () => {
     expect(joined).not.toContain("free estimate");
   });
 
+  it("removes ungrounded lifespan clauses entirely (golden run #46)", () => {
+    const split = {
+      ...verdict,
+      unsupported_claims: ['/: unsupported years of experience claim "30 years" — no verified fact asserts 30'],
+    };
+    const route = applyDeterministicRemediation(
+      makeRoute(
+        {},
+        [{ kind: "paragraph", text: "EPDM rubber membranes can last 30 years with proper maintenance — substantive content here" }],
+      ),
+      split,
+      contract,
+    );
+    const joined = JSON.stringify(route).toLowerCase().replace(/\s+/g, " ");
+    expect(joined).not.toContain("30 years");
+    expect(joined).not.toContain("last years");
+    expect(joined).not.toContain("lifespan");
+  });
+
+  it("keeps grounded lifespan-adjacent facts (warranty years)", () => {
+    const route = applyDeterministicRemediation(
+      makeRoute({}, [{ kind: "paragraph", text: "Our 5-year workmanship warranty covers workmanship for 5 years — substantive content here" }]),
+      verdict,
+      contract,
+    );
+    const joined = JSON.stringify(route).toLowerCase().replace(/\s+/g, " ");
+    // The warranty fact asserts 5-year terms — both mentions stay.
+    expect(joined).toContain("5-year workmanship warranty");
+    expect(joined).toContain("for 5 years");
+  });
+
   it("removes derived forms of a banned token (substring authority, golden run #41)", () => {
     const split = {
       ...verdict,
