@@ -608,4 +608,42 @@ describe("StructuredContentPackage — NC-11 shape discipline (content-alias →
       "Your previous output had an invalid SHAPE: missing blocks / present content",
     );
   });
+
+  it("acceptance-test-shaped semantic flags drive the repair but never veto the seal (golden run #47)", async () => {
+    const acceptanceFail: ContentValidationVerdict = {
+      seo_blueprint_passed: true,
+      contract_passed: false,
+      unsupported_claims: [],
+      failed_requirements: [
+        "mentions warranty - the warranty is mentioned but not prominently displayed",
+      ],
+    };
+    // The strict judge returns the same subjective flag on every call: the
+    // one bounded repair runs, and the deterministically grounded route
+    // still seals with a clean validation block.
+    const { llm, counts } = fakeLlm([acceptanceFail, acceptanceFail]);
+    const { artifact, evidence } = await createStructuredContentPackageWithEvidence(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+      { llm },
+    );
+    expect(artifact.payload.validation.failed_requirements).toEqual([]);
+    expect(artifact.payload.validation.unsupported_claims).toEqual([]);
+    // The repair budget is honored: attempt 1 enforces the acceptance test
+    // (one repair + regeneration), attempt 2 applies the grounded pass and
+    // seals without a second repair.
+    expect(evidence.repair_attempts).toBe(1);
+    expect(counts.gen).toBe(2);
+    expect(counts.val).toBe(2);
+  });
+
+  it("non-acceptance semantic failures still veto the seal", async () => {
+    // A real, non-filterable failure keeps the grounded pass closed.
+    const { llm } = fakeLlm([fail, fail]);
+    await expect(
+      createStructuredContentPackage(
+        { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+        { llm },
+      ),
+    ).rejects.toBeInstanceOf(ContentRequirementUnsatisfiedError);
+  });
 });
