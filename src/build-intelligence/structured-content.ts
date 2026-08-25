@@ -504,7 +504,7 @@ const SHAPE_SPEC =
  * The oracle's repair budget is untouched: repair_attempts stays 1 and
  * generation_calls stays 2 — no second LLM generation happens.
  */
-function applyDeterministicRemediation(
+export function applyDeterministicRemediation(
   route: StructuredContentRoute,
   verdict: RouteValidationVerdict,
   contractRoute: PageContentContractRoute,
@@ -525,6 +525,9 @@ function applyDeterministicRemediation(
   for (const section of route.sections ?? []) {
     for (const block of section.blocks ?? []) {
       if ("text" in block && typeof block.text === "string") block.text = scrub(block.text);
+      if ("attribution" in block && typeof block.attribution === "string") {
+        block.attribution = scrub(block.attribution);
+      }
       if ("items" in block && Array.isArray(block.items)) {
         block.items = block.items.map((item: string) => scrub(String(item)));
       }
