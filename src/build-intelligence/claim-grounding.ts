@@ -109,7 +109,7 @@ const QUANTIFIED_CLAIM_PATTERNS: ReadonlyArray<{ category: string; pattern: RegE
  * Magnitude phrases that assert scale without a number. They can never be
  * corroborated by a number, so the phrase itself must appear in the facts.
  */
-const MAGNITUDE_PHRASES: readonly string[] = [
+export const MAGNITUDE_PHRASES: readonly string[] = [
   "decades of experience",
   "decades of",
   "generations of",

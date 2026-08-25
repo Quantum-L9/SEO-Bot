@@ -38,7 +38,7 @@ import {
 import { createModuleLogger } from "../core/logger.js";
 import { getLlmService, type LlmService } from "../services/llm.js";
 import { type RouteValidationVerdict, validateRoute } from "./content-validator.js";
-import { buildFactCorpus, checkRouteGrounding, collectRouteText, CREDENTIAL_CLAIM_TOKENS } from "./claim-grounding.js";
+import { buildFactCorpus, checkRouteGrounding, collectRouteText, CREDENTIAL_CLAIM_TOKENS, MAGNITUDE_PHRASES } from "./claim-grounding.js";
 import { PRODUCER } from "./producer.js";
 import { structuredContentRouteSchema } from "./schema-guards.js";
 
@@ -514,7 +514,7 @@ export function applyDeterministicRemediation(
   // a. Scrub ungrounded credential phrases from all prose.
   const scrub = (text: string): string => {
     let out = text;
-    for (const token of CREDENTIAL_CLAIM_TOKENS) {
+    for (const token of [...CREDENTIAL_CLAIM_TOKENS, ...MAGNITUDE_PHRASES]) {
       // Case-insensitive guard: the replace regex is /gi but the presence
       // check must match it, or capitalized claims escape the scrub.
       if (!out.toLowerCase().includes(token) || corpus.includes(token)) continue;
