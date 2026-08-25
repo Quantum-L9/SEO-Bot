@@ -800,10 +800,29 @@ function groundedVerdict(
     const phrase = claim.match(/"([^"]+)"/)?.[1];
     return Boolean(phrase) && groundedPhrases.has(phrase as string);
   });
+  // Deterministic coverage is also authority for topic/entity coverage: the
+  // semantic validator has repeatedly disagreed with a deterministic PASS
+  // (golden run #39, 'workmanship guarantee'). A coverage-shaped failure is
+  // kept only when the deterministic check agrees; other failure classes
+  // (proof, factual, structural) pass through untouched.
+  const groundingFailurePhrases = new Set(
+    grounding.failures
+      .map((failure) => failure.match(/"([^"]+)"/)?.[1])
+      .filter((phrase): phrase is string => Boolean(phrase)),
+  );
+  const failedRequirements = verdict.failed_requirements.filter((failure) => {
+    if (!/required (topic|entity)/.test(failure)) return true;
+    const phrase = failure.match(/"([^"]+)"/)?.[1];
+    return Boolean(phrase) && groundingFailurePhrases.has(phrase as string);
+  });
   return {
     ...verdict,
     unsupported_claims: unsupportedClaims,
-    contract_passed: verdict.contract_passed && unsupportedClaims.length === 0,
+    failed_requirements: failedRequirements,
+    contract_passed:
+      verdict.contract_passed &&
+      unsupportedClaims.length === 0 &&
+      failedRequirements.length === 0,
   };
 }
 
