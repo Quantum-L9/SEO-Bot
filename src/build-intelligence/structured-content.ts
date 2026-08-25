@@ -1015,8 +1015,30 @@ function groundedVerdict(
   const groundingFailurePhrases = new Set(
     grounding.failures
       .map((failure) => failure.match(/"([^"]+)"/)?.[1])
-      .filter((phrase): phrase is string => Boolean(phrase)),
+      .filter((phrase): phrase is string => Boolean(phrase))
+      .map((phrase) => phrase.toLowerCase()),
   );
+  // Coverage-shaped failures come in two validator phrasings: the single
+  // "required topic/entity \"X\"" form and the aggregated "Missing
+  // required topics: a, b, c" form (golden run #52). Deterministic
+  // coverage is authority for both: a listed label survives only when the
+  // deterministic grounding check flags the same label. The semantic pass
+  // only runs on deterministically clean routes, so an unmatched label is
+  // by construction a judge-vs-authority disagreement and drops.
+  const isCoverageShaped = (failure: string): boolean =>
+    /required (topic|entity)/.test(failure) ||
+    failure.includes("Missing required topics") ||
+    failure.includes("Missing required entities");
+  const coverageLabels = (failure: string): string[] => {
+    const quoted = [...failure.matchAll(/"([^"]+)"/g)].map((match) => match[1]!);
+    if (quoted.length > 0) return quoted.map((label) => label.toLowerCase());
+    const colon = failure.indexOf(":");
+    const list = colon >= 0 ? failure.slice(colon + 1) : "";
+    return list
+      .split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean);
+  };
   // Acceptance-test judgments: the validator echoes the contract's
   // acceptance tests as "<test> - <explanation>". These are subjective
   // quality flags with no deterministic anchor (golden run #47:
@@ -1044,8 +1066,14 @@ function groundedVerdict(
   ]
     .map((proof) => proof.trim().toLowerCase())
     .filter(Boolean);
-  const isProofEcho = (failure: string): boolean =>
-    proofPhrases.some((phrase) => failure.trim().toLowerCase() === phrase);
+  const isProofEcho = (failure: string): boolean => {
+    const lower = failure.trim().toLowerCase();
+    // Aggregated form: "Missing proof requirements: a, b, c" (golden run
+    // #52) — a subjective satisfaction judgment over contract proofs,
+    // same authority shape as an exact single-proof echo.
+    if (lower.startsWith("missing proof requirements")) return true;
+    return proofPhrases.some((phrase) => lower === phrase);
+  };
   // The validator quoting a deterministic remediation coverage sentence
   // ("Regarding expertise: ...") is a stylistic objection to coverage
   // output — deterministic coverage is authority (golden run #48).
@@ -1054,16 +1082,19 @@ function groundedVerdict(
     failure.trimStart().startsWith("Regarding ") &&
     routeTextLower.includes(failure.toLowerCase());
   const failedRequirements = verdict.failed_requirements.filter((failure) => {
-    if (!/required (topic|entity)/.test(failure)) {
-      if (isRemediationSentenceQuote(failure)) return false;
-      // Enforce mode (attempt 1): keep acceptance-test/proof-echo flags so
-      // they drive the bounded repair. Grounded mode: drop them — they have
-      // no deterministic anchor and cannot veto a clean deterministic pass.
-      if (opts.enforceAcceptanceTests) return true;
-      return !isAcceptanceTestFailure(failure) && !isProofEcho(failure);
+    if (isCoverageShaped(failure)) {
+      // Deterministic coverage is the authority; a judge-vs-authority
+      // disagreement (any label the grounding check does not flag) drops.
+      return coverageLabels(failure).some((label) =>
+        groundingFailurePhrases.has(label),
+      );
     }
-    const phrase = failure.match(/"([^"]+)"/)?.[1];
-    return Boolean(phrase) && groundingFailurePhrases.has(phrase as string);
+    if (isRemediationSentenceQuote(failure)) return false;
+    // Enforce mode (attempt 1): keep acceptance-test/proof-echo flags so
+    // they drive the bounded repair. Grounded mode: drop them — they have
+    // no deterministic anchor and cannot veto a clean deterministic pass.
+    if (opts.enforceAcceptanceTests) return true;
+    return !isAcceptanceTestFailure(failure) && !isProofEcho(failure);
   });
   // When every semantic failure was filtered by a deterministic authority
   // (grounding for claims, grounding for coverage, the acceptance-test rule),

@@ -682,6 +682,27 @@ describe("StructuredContentPackage — NC-11 shape discipline (content-alias →
     expect(evidence.repair_attempts).toBe(1);
   });
 
+  it("aggregated coverage/proof echoes cannot veto the seal (golden run #52)", async () => {
+    const aggregated: ContentValidationVerdict = {
+      seo_blueprint_passed: true,
+      contract_passed: false,
+      unsupported_claims: [],
+      failed_requirements: [
+        "Missing required topics: durability",
+        "Missing required entities: metal roof",
+        "Missing proof requirements: warranty",
+      ],
+    };
+    const { llm } = fakeLlm([aggregated, aggregated]);
+    const { artifact, evidence } = await createStructuredContentPackageWithEvidence(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+      { llm },
+    );
+    expect(artifact.payload.validation.failed_requirements).toEqual([]);
+    // The proof echo enforces on attempt 1, so one repair still runs.
+    expect(evidence.repair_attempts).toBe(1);
+  });
+
   it("non-acceptance semantic failures still veto the seal", async () => {
     // A real, non-filterable failure keeps the grounded pass closed.
     const { llm } = fakeLlm([fail, fail]);
