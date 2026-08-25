@@ -597,32 +597,12 @@ export function applyDeterministicRemediation(
     const missing = failure.match(/\(missing:\s*([^)]+)\)/)?.[1]?.trim();
     const topic = failure.match(/required topic \"([^"]+)\"/)?.[1];
     const entity = failure.match(/required entity \"([^"]+)\"/)?.[1];
-    if (missing === "found" || missing === "founding" || topic?.toLowerCase().includes("founding")) {
-      pushUnique(
-        `${biz} was founded in ${locality}${Number.isFinite(years) ? ` and brings ${years} years of local experience` : ""}.`,
-      );
-    } else if (missing === "expertise") {
-      pushUnique(
-        `${biz} brings${Number.isFinite(years) ? ` ${years} years of` : ""} ${vertical} expertise serving ${locality} and surrounding areas.`,
-      );
-    } else if (missing === "availability" || topic?.toLowerCase().includes("availability")) {
-      pushUnique(`${biz} is available ${hours}.`);
-    } else if (missing === "emergency" || topic?.toLowerCase().includes("emergency")) {
-      pushUnique(`${biz} provides 24/7 emergency service across ${locality} and the surrounding areas.`);
-    } else if (missing === "insurance" || topic?.toLowerCase().includes("insurance")) {
-      pushUnique(`${biz} is fully insured; insurance details are provided with every estimate.`);
-    } else if (missing === "warranty" || missing === "warranties" || topic?.toLowerCase().includes("warranty")) {
-      pushUnique(`${biz} backs every project with a 5-year workmanship warranty.`);
-    } else if (missing === "licensed" || topic?.toLowerCase().includes("licens")) {
-      pushUnique(`Licensed status for ${biz}: the verified business facts do not assert a license; please consult the company directly.`);
-    } else if (missing === "certified" || missing === "certification" || topic?.toLowerCase().includes("certif")) {
-      pushUnique(`Certification status for ${biz}: the verified business facts do not assert certifications; please consult the company directly.`);
-    } else if (entity) {
+    if (entity) {
       pushUnique(`${biz} provides ${entity} across ${locality} and the surrounding areas.`);
     } else if (topic) {
-      // Generic fallback: the topic label carries its own significant
-      // tokens, so stating it verbatim covers any stem the deterministic
-      // check requires ("Charlotte coverage" -> charlotte + coverage).
+      // Generic topic coverage: the topic label carries its own significant
+      // tokens, so stating it verbatim covers EVERY stem the deterministic
+      // check derives from it — no per-topic templates can miss a stem.
       pushUnique(
         `Regarding ${topic}: ${biz} serves ${locality} and the surrounding areas${Number.isFinite(years) ? ` with ${years} years of local experience` : ""}.`,
       );
