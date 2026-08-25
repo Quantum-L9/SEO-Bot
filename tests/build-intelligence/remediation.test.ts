@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { applyDeterministicRemediation } from "../../src/build-intelligence/structured-content.js";
 import type { PageContentContractRoute, StructuredContentRoute } from "@quantum-l9/bot-interop";
 
-function makeRoute(surface: Partial<Record<string, string>>, blocks: Array<Record<string, unknown>>): StructuredContentRoute {
+function makeRoute(surface: Partial<Record<string, string>>, blocks: Array<Record<string, unknown>>, ctaAction = "quote"): StructuredContentRoute {
   return {
     route_id: "/",
     path: "/",
@@ -13,7 +13,7 @@ function makeRoute(surface: Partial<Record<string, string>>, blocks: Array<Recor
         eyebrow: surface.eyebrow,
         heading: surface.heading ?? "Overview",
         subheading: surface.subheading,
-        cta: surface.cta ? { label: surface.cta, action: "quote" } : undefined,
+        cta: surface.cta ? { label: surface.cta, action: ctaAction } : undefined,
         blocks,
       },
     ],
@@ -68,5 +68,38 @@ describe("deterministic remediation scrub surface", () => {
       const route = applyDeterministicRemediation(makeRoute(surface, blocks), verdict, contract);
       expect(textOf(route)).not.toContain("certification");
     }
+  });
+
+  it("removes a claim whose words straddle adjacent text surfaces (golden run #40)", () => {
+    const split = {
+      ...verdict,
+      unsupported_claims: ['/: unsupported credential/guarantee claim "free estimate" — no verified fact asserts it'],
+    };
+    const route = applyDeterministicRemediation(
+      makeRoute(
+        { cta: "Get Your Free" },
+        [{ kind: "paragraph", text: "substantive content here for the floor" }],
+        "Estimate",
+      ),
+      split,
+      contract,
+    );
+    const joined = JSON.stringify(route).toLowerCase().replace(/\s+/g, " ");
+    expect(joined).not.toContain("free estimate");
+    expect(joined).not.toContain("estimate");
+  });
+
+  it("removes a claim split across a line break inside one field", () => {
+    const split = {
+      ...verdict,
+      unsupported_claims: ['/: unsupported credential/guarantee claim "free estimate" — no verified fact asserts it'],
+    };
+    const route = applyDeterministicRemediation(
+      makeRoute({}, [{ kind: "paragraph", text: "Call for a free\nestimate — substantive content here" }]),
+      split,
+      contract,
+    );
+    const joined = JSON.stringify(route).toLowerCase().replace(/\s+/g, " ");
+    expect(joined).not.toContain("free estimate");
   });
 });

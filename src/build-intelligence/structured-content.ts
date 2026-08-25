@@ -510,52 +510,14 @@ export function applyDeterministicRemediation(
   contractRoute: PageContentContractRoute,
 ): StructuredContentRoute {
   const corpus = buildFactCorpus(contractRoute.business_facts);
+  const allowedNumbers = new Set(
+    (corpus.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((n) => n.replace(/,/g, "")),
+  );
 
-  // a. Scrub ungrounded credential phrases from all prose.
-  const scrub = (text: string): string => {
-    let out = text;
-    for (const token of [...CREDENTIAL_CLAIM_TOKENS, ...MAGNITUDE_PHRASES]) {
-      // Case-insensitive guard: the replace regex is /gi but the presence
-      // check must match it, or capitalized claims escape the scrub.
-      if (!out.toLowerCase().includes(token) || corpus.includes(token)) continue;
-      const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const re = new RegExp(`\\b${escaped}\\b`, "gi");
-      out = out.replace(re, " ");
-    }
-    // Quantified "N years" assertions: a number the verified facts do not
-    // contain can never be corroborated (factNumbers authority). Drop the
-    // number, keep the unit, so the claim stops being a quantified claim.
-    const allowedNumbers = new Set(
-      (corpus.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((n) => n.replace(/,/g, "")),
-    );
-    out = out.replace(
-      /\b(\d+(?:-\d+)?)\s*(?:to|-|–|—)?\s*(?=years?\b|yrs?\b)/gi,
-      (match: string, num: string) =>
-        allowedNumbers.has(num.replace(/,/g, "")) ? match : " ",
-    );
-    return out.replace(/\s{2,}/g, " ").trim();
-  };
-  for (const section of route.sections ?? []) {
-    for (const block of section.blocks ?? []) {
-      if ("text" in block && typeof block.text === "string") block.text = scrub(block.text);
-      if ("attribution" in block && typeof block.attribution === "string") {
-        block.attribution = scrub(block.attribution);
-      }
-      if ("items" in block && Array.isArray(block.items)) {
-        block.items = block.items.map((item: string) => scrub(String(item)));
-      }
-    }
-    if (typeof section.eyebrow === "string") section.eyebrow = scrub(section.eyebrow);
-    if (typeof section.heading === "string") section.heading = scrub(section.heading);
-    if (typeof section.subheading === "string") section.subheading = scrub(section.subheading);
-    if (section.cta) {
-      if (typeof section.cta.label === "string") section.cta.label = scrub(section.cta.label);
-      if (typeof section.cta.action === "string") section.cta.action = scrub(section.cta.action);
-    }
-  }
-  for (const link of route.internal_links ?? []) {
-    if (typeof link.anchor_text === "string") link.anchor_text = scrub(link.anchor_text);
-  }
+  // a. Scrub ungrounded credential phrases from all prose (whitespace-flexible;
+  //    see scrubTextSurfaces — this also covers phrases whose words straddle
+  //    adjacent text fields, the escape that failed golden run #40).
+  scrubTextSurfaces(route, corpus, allowedNumbers);
 
   const facts = new Map(contractRoute.business_facts.map((f) => [f.key, f.value]));
   const biz = String(facts.get("business_name") ?? contractRoute.route_id);
@@ -588,15 +550,6 @@ export function applyDeterministicRemediation(
       ];
     }
   }
-  for (const faq of route.faqs ?? []) {
-    if (typeof faq.answer === "string") faq.answer = scrub(faq.answer);
-    if (typeof faq.question === "string") faq.question = scrub(faq.question);
-  }
-  if (route.metadata) {
-    if (typeof route.metadata.title === "string") route.metadata.title = scrub(route.metadata.title);
-    if (typeof route.metadata.description === "string") route.metadata.description = scrub(route.metadata.description);
-  }
-
   // b. Fact-derived literal sentences for each failed requirement.
 
   const sentences: string[] = [];
@@ -629,16 +582,192 @@ export function applyDeterministicRemediation(
     }
   }
 
-  // d. Total-scrub guarantee: no surface can escape the per-field scrub.
-  //    Serialize the whole route, apply the same corpus-aware scrub to the
-  //    raw JSON text, and re-parse. Schema field names never contain the
-  //    banned tokens, so only prose is affected. The fact-derived sentences
-  //    appended above contain only grounded phrases and survive.
-  try {
-    return JSON.parse(scrub(JSON.stringify(route))) as StructuredContentRoute;
-  } catch {
-    return route;
+  // d. Total-scrub guarantee: the fact-derived filler/sentences appended
+  //    above get the same surface pass, then the route is returned directly —
+  //    all scrubbing mutated fields in place, no JSON round-trip needed.
+  scrubTextSurfaces(route, corpus, allowedNumbers);
+  return route;
+}
+
+/** A single mutable author-visible string field of a route. */
+interface TextSurface {
+  read(): string | undefined;
+  write(value: string): void;
+}
+
+/**
+ * Every author-visible string field, in the same document order
+ * `collectRouteText` flattens them. That order is what makes cross-surface
+ * phrase detection faithful to the grounding check, which normalizes the
+ * whole joined text into one whitespace-collapsed haystack.
+ */
+function collectTextSurfaces(route: StructuredContentRoute): TextSurface[] {
+  const surfaces: TextSurface[] = [
+    { read: () => route.metadata?.title, write: (v) => { if (route.metadata) route.metadata.title = v; } },
+    { read: () => route.metadata?.description, write: (v) => { if (route.metadata) route.metadata.description = v; } },
+  ];
+  for (const section of route.sections ?? []) {
+    surfaces.push(
+      { read: () => section.eyebrow, write: (v) => { section.eyebrow = v; } },
+      { read: () => section.heading, write: (v) => { section.heading = v; } },
+      { read: () => section.subheading, write: (v) => { section.subheading = v; } },
+      { read: () => section.cta?.label, write: (v) => { if (section.cta) section.cta.label = v; } },
+      { read: () => section.cta?.action, write: (v) => { if (section.cta) section.cta.action = v; } },
+    );
+    for (const block of section.blocks ?? []) {
+      if (block.kind === "paragraph" || block.kind === "quote") {
+        surfaces.push({ read: () => block.text, write: (v) => { block.text = v; } });
+        if (block.kind === "quote") {
+          surfaces.push({ read: () => block.attribution, write: (v) => { block.attribution = v; } });
+        }
+      } else {
+        block.items.forEach((_, index) => {
+          surfaces.push({
+            read: () => block.items[index],
+            write: (v) => { block.items[index] = v; },
+          });
+        });
+      }
+    }
   }
+  for (const faq of route.faqs ?? []) {
+    surfaces.push(
+      { read: () => faq.question, write: (v) => { faq.question = v; } },
+      { read: () => faq.answer, write: (v) => { faq.answer = v; } },
+    );
+  }
+  for (const link of route.internal_links ?? []) {
+    surfaces.push({ read: () => link.anchor_text, write: (v) => { link.anchor_text = v; } });
+  }
+  return surfaces;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function endsWithWord(text: string, word: string): boolean {
+  const lower = text.toLowerCase();
+  if (!lower.endsWith(word)) return false;
+  const before = lower[lower.length - word.length - 1];
+  return before === undefined || !/[a-z0-9]/.test(before);
+}
+
+function startsWithWord(text: string, word: string): boolean {
+  const lower = text.toLowerCase();
+  if (!lower.startsWith(word)) return false;
+  const after = lower[word.length];
+  return after === undefined || !/[a-z0-9]/.test(after);
+}
+
+/** Unit words whose quantified-claim patterns can straddle a surface boundary
+ * ("5" at the end of one field, "years" at the start of the next). */
+const QUANTIFIED_UNIT_WORDS =
+  /^(?:years?|yrs?|projects?|jobs?|installs?|installations?|roofs?|homes?|properties|customers?|clients?|families|employees?|crews?|technicians?|installers?|staff)\b/i;
+
+/**
+ * Scrub every text surface of a route in one pass:
+ *
+ *  1. Normalize whitespace (the grounding check collapses whitespace runs, so
+ *     a phrase split across a line break or an NBSP is still one phrase
+ *     there — and must be one phrase here).
+ *  2. Remove credential/magnitude tokens the verified facts do not ground,
+ *     matching token-internal spaces against ANY whitespace run.
+ *  3. Remove unverifiable quantified years (factNumbers authority).
+ *  4. Cross-surface pass: a token whose words straddle two adjacent fields
+ *     (golden run #40: CTA label "Get Your Free" + action "Estimate") is
+ *     invisible to any per-field regex; remove the straddling words. The
+ *     same class applies to "5" / "years" quantified splits.
+ *
+ * Empty surfaces are skipped when pairing, so an empty optional field between
+ * two text-bearing fields cannot shield a straddling phrase.
+ */
+function scrubTextSurfaces(
+  route: StructuredContentRoute,
+  corpus: string,
+  allowedNumbers: Set<string>,
+): void {
+  const tokens = [...CREDENTIAL_CLAIM_TOKENS, ...MAGNITUDE_PHRASES];
+  const multiWordTokens = tokens.filter((token) => token.split(" ").length > 1);
+
+  const surfaces = collectTextSurfaces(route);
+  const values: string[] = [];
+  const defined: boolean[] = [];
+  for (const surface of surfaces) {
+    const raw = surface.read();
+    defined.push(typeof raw === "string");
+    values.push(typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "");
+  }
+
+  for (let i = 0; i < values.length; i++) {
+    if (!defined[i]) continue;
+    let out = values[i]!;
+    const haystack = out.toLowerCase();
+    for (const token of tokens) {
+      // Case-insensitive guard: the replace regex is /gi but the presence
+      // check must match it, or capitalized claims escape the scrub.
+      if (!haystack.includes(token) || corpus.includes(token)) continue;
+      const flexible = escapeRegex(token).replace(/ /g, "\\s+");
+      out = out.replace(new RegExp(`\\b${flexible}\\b`, "gi"), " ");
+    }
+    // Quantified "N years" assertions: a number the verified facts do not
+    // contain can never be corroborated (factNumbers authority). Drop the
+    // number, keep the unit, so the claim stops being a quantified claim.
+    out = out.replace(
+      /\b(\d+(?:-\d+)?)\s*(?:to|-|–|—)?\s*(?=years?\b|yrs?\b)/gi,
+      (match: string, num: string) =>
+        allowedNumbers.has(num.replace(/,/g, "")) ? match : " ",
+    );
+    values[i] = out.replace(/\s{2,}/g, " ").trim();
+  }
+
+  // Cross-surface pass: pair each surface with the NEXT non-empty surface.
+  let prev = -1;
+  for (let i = 0; i < values.length; i++) {
+    if (!values[i]) continue;
+    if (prev === -1) {
+      prev = i;
+      continue;
+    }
+    let leftBody = values[prev]!.replace(/[^\w\s]+$/g, "").trimEnd();
+    let rightBody = values[i]!.replace(/^[^\w\s]+/g, "").trimStart();
+    let removed = false;
+    for (const token of multiWordTokens) {
+      if (corpus.includes(token)) continue;
+      const words = token.split(" ");
+      for (let k = 1; k < words.length && !removed; k++) {
+        const prefix = words.slice(0, k).join(" ");
+        const suffix = words.slice(k).join(" ");
+        if (endsWithWord(leftBody, prefix) && startsWithWord(rightBody, suffix)) {
+          leftBody = leftBody.slice(0, leftBody.length - prefix.length).trimEnd();
+          rightBody = rightBody.slice(suffix.length).trimStart();
+          removed = true;
+        }
+      }
+    }
+    if (!removed) {
+      // A quantified unit can straddle the same way ("5" ends one field,
+      // "years" begins the next). The number is the claim — drop it.
+      const number = leftBody.match(/\d[\d,]*(?:\.\d+)?$/)?.[0];
+      if (
+        number &&
+        !allowedNumbers.has(number.replace(/,/g, "")) &&
+        QUANTIFIED_UNIT_WORDS.test(rightBody)
+      ) {
+        leftBody = leftBody.slice(0, leftBody.length - number.length).trimEnd();
+        removed = true;
+      }
+    }
+    if (removed) {
+      values[prev] = leftBody;
+      values[i] = rightBody;
+    }
+    prev = i;
+  }
+
+  surfaces.forEach((surface, index) => {
+    if (defined[index]) surface.write(values[index]!);
+  });
 }
 
 /**
