@@ -247,10 +247,7 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
     const modelRoutes = requested.map((r) => blueprintRoute(r.route_id, r.path));
     const calls = { strategize: 0 };
     const llm = {
-      strategizeJson: async (args: {
-        userPrompt: string;
-        validate: (v: unknown) => unknown;
-      }) => {
+      strategizeJson: async (args: { userPrompt: string; validate: (v: unknown) => unknown }) => {
         calls.strategize += 1;
         // Each strategize call must return EXACTLY its batch's routes — the
         // reconcile step rejects routes from other batches.

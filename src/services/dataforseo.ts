@@ -91,6 +91,44 @@ export class SerpEvidenceInvalidError extends Error {
   }
 }
 
+interface DataForSeoSerpItem {
+  type?: string;
+  url?: string;
+  rank_group?: number;
+  rank_absolute?: number;
+  title?: string;
+  description?: string;
+  meta?: {
+    content?: { plain_text_word_count?: number };
+    htags?: { h1?: unknown[]; h2?: unknown[]; h3?: unknown[] };
+    images_count?: number;
+    internal_links_count?: number;
+    external_links_count?: number;
+  };
+}
+
+interface DataForSeoTaskResult {
+  items?: DataForSeoSerpItem[];
+  item_types?: string[];
+  datetime?: string;
+  total_backlinks?: number;
+  referring_domains?: number;
+  rank?: number;
+}
+
+interface DataForSeoTaskContainer {
+  status_code?: number;
+  status_message?: string;
+  time?: string;
+  result?: DataForSeoTaskResult[];
+}
+
+interface DataForSeoResponse {
+  status_code?: number;
+  status_message?: string;
+  tasks?: DataForSeoTaskContainer[];
+}
+
 export class DataForSeoClient {
   private readonly baseUrl = "https://api.dataforseo.com/v3";
   private readonly auth: string;
@@ -102,8 +140,8 @@ export class DataForSeoClient {
     );
   }
 
-  private async request(endpoint: string, data: any[]): Promise<any> {
-    let response: { data: any };
+  private async request(endpoint: string, data: unknown[]): Promise<DataForSeoResponse> {
+    let response: { data: DataForSeoResponse };
     try {
       response = await axios.post(`${this.baseUrl}${endpoint}`, data, {
         headers: {
@@ -211,7 +249,7 @@ export class DataForSeoClient {
         );
       }
       items.push({
-        rankAbsolute: item.rank_absolute,
+        rankAbsolute: item.rank_absolute ?? rank,
         rankGroup: rank,
         url: item.url,
         domain,
@@ -273,16 +311,20 @@ export class DataForSeoClient {
     for (const item of items) {
       if (item.type !== "organic") continue;
 
-      const itemDomain = new URL(item.url).hostname.replace("www.", "");
+      const itemUrl = item.url;
+      const itemRank = item.rank_absolute;
+      if (typeof itemUrl !== "string" || typeof itemRank !== "number") continue;
+
+      const itemDomain = new URL(itemUrl).hostname.replace("www.", "");
 
       if (itemDomain === domain.replace("www.", "")) {
-        position = item.rank_absolute;
-        url = item.url;
+        position = itemRank;
+        url = itemUrl;
       } else {
         competitors.push({
           domain: itemDomain,
-          position: item.rank_absolute,
-          url: item.url,
+          position: itemRank,
+          url: itemUrl,
           title: item.title || "",
           snippet: item.description || "",
         });

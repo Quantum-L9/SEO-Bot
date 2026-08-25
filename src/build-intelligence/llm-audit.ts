@@ -24,12 +24,8 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import {
-  SearchPolicySource,
-  TaskType,
-  type RoutingDecision,
-} from "@quantum-l9/llm-router";
-import { type LlmService } from "../services/llm.js";
+import { type RoutingDecision, SearchPolicySource, TaskType } from "@quantum-l9/llm-router";
+import type { LlmService } from "../services/llm.js";
 
 export const LLM_AUDIT_OPERATIONS = [
   "SEO_CONTENT_BLUEPRINT",
@@ -95,9 +91,7 @@ function toCallRecord(decision: RoutingDecision): LlmAuditCallRecord | null {
       timestamp: decision.timestamp,
       search_required: decision.searchRequired,
       search_policy_source:
-        decision.searchPolicySource === SearchPolicySource.EXPLICIT
-          ? "EXPLICIT"
-          : "TASK_DEFAULT",
+        decision.searchPolicySource === SearchPolicySource.EXPLICIT ? "EXPLICIT" : "TASK_DEFAULT",
       outcome: decision.outcome,
       failure_kind: decision.failureKind,
       error_code: decision.errorCode,

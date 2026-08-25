@@ -106,7 +106,7 @@ export async function collectWeeklyData(clientId: string): Promise<WeeklyReportD
 
   if (!client) return null;
 
-  const clientConfig = (client.config as any) || {};
+  const clientConfig = (client.config as { ownerEmail?: string; dailyTokenBudget?: number }) || {};
 
   // Rankings
   const rankings = await db
@@ -122,13 +122,13 @@ export async function collectWeeklyData(clientId: string): Promise<WeeklyReportD
 
   const improved = rankings
     .filter((r) => r.previousPosition && r.position && r.position < r.previousPosition)
-    .map((r) => ({ keyword: r.keyword, from: r.previousPosition!, to: r.position! }));
+    .map((r) => ({ keyword: r.keyword, from: r.previousPosition ?? 0, to: r.position ?? 0 }));
 
   const declined = rankings
     .filter((r) => r.previousPosition && r.position && r.position > r.previousPosition)
-    .map((r) => ({ keyword: r.keyword, from: r.previousPosition!, to: r.position! }));
+    .map((r) => ({ keyword: r.keyword, from: r.previousPosition ?? 0, to: r.position ?? 0 }));
 
-  const positions = rankings.filter((r) => r.position).map((r) => r.position!);
+  const positions = rankings.filter((r) => r.position).map((r) => r.position ?? 0);
   const avgPosition =
     positions.length > 0 ? positions.reduce((a, b) => a + b, 0) / positions.length : 0;
 

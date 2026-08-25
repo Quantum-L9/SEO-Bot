@@ -26,7 +26,7 @@ interface Alert {
   severity: AlertSeverity;
   clientDomain?: string;
   module?: string;
-  data?: Record<string, any>;
+  data?: Record<string, unknown>;
 }
 
 export class NotificationService {
@@ -76,7 +76,12 @@ export class NotificationService {
     const severityEmoji = { info: "ℹ️", warning: "⚠️", critical: "🚨" };
 
     try {
-      await this.transporter!.sendMail({
+      const transporter = this.transporter;
+      if (!transporter) {
+        logger.warn("SMTP transporter not initialized; skipping email alert");
+        return;
+      }
+      await transporter.sendMail({
         from: `"L9 SEO Bot" <${config.OUTREACH_FROM_EMAIL || "bot@l9.dev"}>`,
         to: config.OPERATOR_EMAIL,
         subject: `${severityEmoji[alert.severity]} [L9 SEO] ${alert.title}`,
@@ -93,8 +98,11 @@ export class NotificationService {
         `,
       });
       logger.debug("Email alert sent");
-    } catch (error: any) {
-      logger.error({ error: error.message }, "Failed to send email alert");
+    } catch (error: unknown) {
+      logger.error(
+        { error: error instanceof Error ? error.message : String(error) },
+        "Failed to send email alert",
+      );
     }
   }
 
@@ -124,8 +132,11 @@ export class NotificationService {
         { timeout: 15_000 },
       );
       logger.debug("Telegram alert sent");
-    } catch (error: any) {
-      logger.error({ error: error.message }, "Failed to send Telegram alert");
+    } catch (error: unknown) {
+      logger.error(
+        { error: error instanceof Error ? error.message : String(error) },
+        "Failed to send Telegram alert",
+      );
     }
   }
 
@@ -146,8 +157,11 @@ export class NotificationService {
         html: report.htmlReport,
       });
       logger.info({ client: report.clientDomain }, "Weekly report sent");
-    } catch (error: any) {
-      logger.error({ error: error.message }, "Failed to send weekly report");
+    } catch (error: unknown) {
+      logger.error(
+        { error: error instanceof Error ? error.message : String(error) },
+        "Failed to send weekly report",
+      );
     }
   }
 }

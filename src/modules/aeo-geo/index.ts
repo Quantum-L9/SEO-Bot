@@ -75,8 +75,11 @@ async function checkAiCitation(
         citations.find((c: string) => !c.includes(clientDomain.replace("www.", ""))) || null;
 
       return { platform, query, cited, citedUrl, competitorCited, response: content.slice(0, 500) };
-    } catch (error: any) {
-      logger.error({ platform, query, error: error.message }, "Citation check failed");
+    } catch (error: unknown) {
+      logger.error(
+        { platform, query, error: error instanceof Error ? error.message : String(error) },
+        "Citation check failed",
+      );
       return { platform, query, cited: false, citedUrl: null, competitorCited: null, response: "" };
     }
   }
@@ -104,7 +107,7 @@ async function checkCitations(job: Job): Promise<void> {
   if (!queries.length && clientConfig?.targetKeywords?.length) {
     const keywordsStr = clientConfig.targetKeywords
       .slice(0, 5)
-      .map((k: any) => k.keyword)
+      .map((k: { keyword?: string }) => k.keyword)
       .join(", ");
     const generated = await llm.extractJson<{ queries: string[] }>(
       `Convert these SEO keywords into natural conversational questions that someone would ask an AI assistant.
@@ -273,7 +276,7 @@ Generate 5-8 optimized FAQ entries targeting the uncited queries:`,
       module: "aeo-geo",
       data: {
         faqCount: faqs.length,
-        schemaMarkup: JSON.stringify(schemaMarkup, null, 2).slice(0, 500) + "...",
+        schemaMarkup: `${JSON.stringify(schemaMarkup, null, 2).slice(0, 500)}...`,
         wordCounts: faqs.map((f) => ({
           q: f.question.slice(0, 50),
           words: f.answer.split(" ").length,

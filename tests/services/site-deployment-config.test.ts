@@ -11,7 +11,7 @@ const canonical = {
     sourceBranch: "main",
     verifiedCommitSha: "a".repeat(40),
     sourceDigest: "b".repeat(64),
-    contractId: "client:build:" + "a".repeat(40),
+    contractId: `client:build:${"a".repeat(40)}`,
     contractDigest: "c".repeat(64),
     verifiedAt: "2026-07-20T12:01:00.000Z",
     managedManifestPath: ".l9/generated-manifest.json",

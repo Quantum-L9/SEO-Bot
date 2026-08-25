@@ -1,8 +1,12 @@
-import { describe, it, expect } from "vitest";
-import { applyDeterministicRemediation } from "../../src/build-intelligence/structured-content.js";
 import type { PageContentContractRoute, StructuredContentRoute } from "@quantum-l9/bot-interop";
+import { describe, expect, it } from "vitest";
+import { applyDeterministicRemediation } from "../../src/build-intelligence/structured-content.js";
 
-function makeRoute(surface: Partial<Record<string, string>>, blocks: Array<Record<string, unknown>>, ctaAction = "quote"): StructuredContentRoute {
+function makeRoute(
+  surface: Partial<Record<string, string>>,
+  blocks: Array<Record<string, unknown>>,
+  ctaAction = "quote",
+): StructuredContentRoute {
   return {
     route_id: "/",
     path: "/",
@@ -27,15 +31,52 @@ const contract = {
   route_id: "/",
   path: "/",
   business_facts: [
-    { fact_id: "f1", key: "business_name", value: "Safe Haven Roofing & Renovations", verified: true, source_refs: ["x"] },
+    {
+      fact_id: "f1",
+      key: "business_name",
+      value: "Safe Haven Roofing & Renovations",
+      verified: true,
+      source_refs: ["x"],
+    },
     { fact_id: "f2", key: "locality", value: "Charlotte, NC", verified: true, source_refs: ["x"] },
-    { fact_id: "f3", key: "hours", value: "24/7 emergency service available", verified: true, source_refs: ["x"] },
+    {
+      fact_id: "f3",
+      key: "hours",
+      value: "24/7 emergency service available",
+      verified: true,
+      source_refs: ["x"],
+    },
     { fact_id: "f4", key: "years_local_experience", value: 6, verified: true, source_refs: ["x"] },
-    { fact_id: "f5", key: "fully_insured", value: "fully insured", verified: true, source_refs: ["x"] },
-    { fact_id: "f6", key: "free_inspection", value: "free inspection", verified: true, source_refs: ["x"] },
-    { fact_id: "f7", key: "workmanship_warranty_years", value: "5-year workmanship warranty; warranties cover workmanship for 5 years", verified: true, source_refs: ["x"] },
+    {
+      fact_id: "f5",
+      key: "fully_insured",
+      value: "fully insured",
+      verified: true,
+      source_refs: ["x"],
+    },
+    {
+      fact_id: "f6",
+      key: "free_inspection",
+      value: "free inspection",
+      verified: true,
+      source_refs: ["x"],
+    },
+    {
+      fact_id: "f7",
+      key: "workmanship_warranty_years",
+      value: "5-year workmanship warranty; warranties cover workmanship for 5 years",
+      verified: true,
+      source_refs: ["x"],
+    },
   ],
-  sections: [{ section_id: "overview", content_requirements: { topics: [], entities: [], questions: [], requirement_ids: [] }, allowed_fact_ids: [], proof_requirements: [] }],
+  sections: [
+    {
+      section_id: "overview",
+      content_requirements: { topics: [], entities: [], questions: [], requirement_ids: [] },
+      allowed_fact_ids: [],
+      proof_requirements: [],
+    },
+  ],
   internal_link_requirements: [],
   forbidden_claims: [],
   acceptance_tests: [],
@@ -46,7 +87,9 @@ const verdict = {
   contract_passed: false,
   seo_blueprint_passed: true,
   failed_requirements: [],
-  unsupported_claims: ['/: unsupported credential/guarantee claim "certification" — no verified fact asserts it'],
+  unsupported_claims: [
+    '/: unsupported credential/guarantee claim "certification" — no verified fact asserts it',
+  ],
 };
 
 function textOf(route: StructuredContentRoute): string {
@@ -57,13 +100,37 @@ describe("deterministic remediation scrub surface", () => {
   it("removes certification from every text surface", () => {
     for (const [label, surface, blocks] of [
       ["paragraph", {}, [{ kind: "paragraph", text: "We hold a certification for roofing." }]],
-      ["quote", {}, [{ kind: "quote", text: "certification matters", attribution: "Our certification team" }]],
+      [
+        "quote",
+        {},
+        [{ kind: "quote", text: "certification matters", attribution: "Our certification team" }],
+      ],
       ["bullets", {}, [{ kind: "bullets", items: ["certification included"] }]],
-      ["eyebrow", { eyebrow: "certification" }, [{ kind: "paragraph", text: "substantive content here for the floor" }]],
-      ["cta", { cta: "Get certification" }, [{ kind: "paragraph", text: "substantive content here for the floor" }]],
-      ["faq", { faq: "Is there a certification?" }, [{ kind: "paragraph", text: "substantive content here for the floor" }]],
-      ["link", { link: "certification details" }, [{ kind: "paragraph", text: "substantive content here for the floor" }]],
-      ["metadata", { title: "Certification Experts", description: "desc" }, [{ kind: "paragraph", text: "substantive content here for the floor" }]],
+      [
+        "eyebrow",
+        { eyebrow: "certification" },
+        [{ kind: "paragraph", text: "substantive content here for the floor" }],
+      ],
+      [
+        "cta",
+        { cta: "Get certification" },
+        [{ kind: "paragraph", text: "substantive content here for the floor" }],
+      ],
+      [
+        "faq",
+        { faq: "Is there a certification?" },
+        [{ kind: "paragraph", text: "substantive content here for the floor" }],
+      ],
+      [
+        "link",
+        { link: "certification details" },
+        [{ kind: "paragraph", text: "substantive content here for the floor" }],
+      ],
+      [
+        "metadata",
+        { title: "Certification Experts", description: "desc" },
+        [{ kind: "paragraph", text: "substantive content here for the floor" }],
+      ],
     ] as Array<[string, Record<string, string>, Array<Record<string, unknown>>]>) {
       const route = applyDeterministicRemediation(makeRoute(surface, blocks), verdict, contract);
       expect(textOf(route)).not.toContain("certification");
@@ -73,7 +140,9 @@ describe("deterministic remediation scrub surface", () => {
   it("removes a claim whose words straddle adjacent text surfaces (golden run #40)", () => {
     const split = {
       ...verdict,
-      unsupported_claims: ['/: unsupported credential/guarantee claim "free estimate" — no verified fact asserts it'],
+      unsupported_claims: [
+        '/: unsupported credential/guarantee claim "free estimate" — no verified fact asserts it',
+      ],
     };
     const route = applyDeterministicRemediation(
       makeRoute(
@@ -92,10 +161,14 @@ describe("deterministic remediation scrub surface", () => {
   it("removes a claim split across a line break inside one field", () => {
     const split = {
       ...verdict,
-      unsupported_claims: ['/: unsupported credential/guarantee claim "free estimate" — no verified fact asserts it'],
+      unsupported_claims: [
+        '/: unsupported credential/guarantee claim "free estimate" — no verified fact asserts it',
+      ],
     };
     const route = applyDeterministicRemediation(
-      makeRoute({}, [{ kind: "paragraph", text: "Call for a free\nestimate — substantive content here" }]),
+      makeRoute({}, [
+        { kind: "paragraph", text: "Call for a free\nestimate — substantive content here" },
+      ]),
       split,
       contract,
     );
@@ -106,13 +179,17 @@ describe("deterministic remediation scrub surface", () => {
   it("removes ungrounded lifespan clauses entirely (golden run #46)", () => {
     const split = {
       ...verdict,
-      unsupported_claims: ['/: unsupported years of experience claim "30 years" — no verified fact asserts 30'],
+      unsupported_claims: [
+        '/: unsupported years of experience claim "30 years" — no verified fact asserts 30',
+      ],
     };
     const route = applyDeterministicRemediation(
-      makeRoute(
-        {},
-        [{ kind: "paragraph", text: "EPDM rubber membranes can last 30 years with proper maintenance — substantive content here" }],
-      ),
+      makeRoute({}, [
+        {
+          kind: "paragraph",
+          text: "EPDM rubber membranes can last 30 years with proper maintenance — substantive content here",
+        },
+      ]),
       split,
       contract,
     );
@@ -124,7 +201,12 @@ describe("deterministic remediation scrub surface", () => {
 
   it("keeps grounded lifespan-adjacent facts (warranty years)", () => {
     const route = applyDeterministicRemediation(
-      makeRoute({}, [{ kind: "paragraph", text: "Our 5-year workmanship warranty covers workmanship for 5 years — substantive content here" }]),
+      makeRoute({}, [
+        {
+          kind: "paragraph",
+          text: "Our 5-year workmanship warranty covers workmanship for 5 years — substantive content here",
+        },
+      ]),
       verdict,
       contract,
     );
@@ -137,13 +219,17 @@ describe("deterministic remediation scrub surface", () => {
   it("removes age-comparison clauses whole (golden run #50)", () => {
     const split = {
       ...verdict,
-      unsupported_claims: ['/: unsupported years of experience claim "20 years" — no verified fact asserts 20'],
+      unsupported_claims: [
+        '/: unsupported years of experience claim "20 years" — no verified fact asserts 20',
+      ],
     };
     const route = applyDeterministicRemediation(
-      makeRoute(
-        {},
-        [{ kind: "paragraph", text: "Roof age over 20 years typically favors replacement — substantive content here" }],
-      ),
+      makeRoute({}, [
+        {
+          kind: "paragraph",
+          text: "Roof age over 20 years typically favors replacement — substantive content here",
+        },
+      ]),
       split,
       contract,
     );
@@ -155,10 +241,12 @@ describe("deterministic remediation scrub surface", () => {
   it("removes forbidden claims from every surface (golden run #55)", () => {
     const withForbidden = { ...contract, forbidden_claims: ["Best in Charlotte"] };
     const route = applyDeterministicRemediation(
-      makeRoute(
-        {},
-        [{ kind: "paragraph", text: "We are the Best in Charlotte for metal roofing — substantive content here" }],
-      ),
+      makeRoute({}, [
+        {
+          kind: "paragraph",
+          text: "We are the Best in Charlotte for metal roofing — substantive content here",
+        },
+      ]),
       verdict,
       withForbidden,
     );
@@ -169,16 +257,20 @@ describe("deterministic remediation scrub surface", () => {
   it("strips the dangling number when a straddling phrase is removed (golden run #59)", () => {
     const split = {
       ...verdict,
-      unsupported_claims: ['/: unsupported magnitude claim "years of experience" — no verified fact asserts it'],
+      unsupported_claims: [
+        '/: unsupported magnitude claim "years of experience" — no verified fact asserts it',
+      ],
     };
     // "6 years of" ends the heading; "experience serving..." starts the
     // paragraph. The straddle pass must remove the phrase AND the dangling
     // quantifying number, never leaving "6 serving".
     const route = applyDeterministicRemediation(
-      makeRoute(
-        { heading: "Trusted local service with 6 years of" },
-        [{ kind: "paragraph", text: "experience serving Charlotte's unique weather conditions — substantive content" }],
-      ),
+      makeRoute({ heading: "Trusted local service with 6 years of" }, [
+        {
+          kind: "paragraph",
+          text: "experience serving Charlotte's unique weather conditions — substantive content",
+        },
+      ]),
       split,
       contract,
     );
@@ -190,13 +282,17 @@ describe("deterministic remediation scrub surface", () => {
   it("removes derived forms of a banned token (substring authority, golden run #41)", () => {
     const split = {
       ...verdict,
-      unsupported_claims: ['/: unsupported credential/guarantee claim "certification" — no verified fact asserts it'],
+      unsupported_claims: [
+        '/: unsupported credential/guarantee claim "certification" — no verified fact asserts it',
+      ],
     };
     const route = applyDeterministicRemediation(
-      makeRoute(
-        {},
-        [{ kind: "paragraph", text: "Our recertification program and GAF certifications matter — substantive content here" }],
-      ),
+      makeRoute({}, [
+        {
+          kind: "paragraph",
+          text: "Our recertification program and GAF certifications matter — substantive content here",
+        },
+      ]),
       split,
       contract,
     );

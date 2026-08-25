@@ -55,7 +55,7 @@ export interface ActionProposal {
   aiRecommendation?: string;
   aiConfidence?: number; // 0-1
   estimatedImpact?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ActionOption {
@@ -210,7 +210,7 @@ export function createProposal(params: {
   options?: ActionOption[];
   aiRecommendation?: string;
   aiConfidence?: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }): ActionProposal {
   const { riskLevel, reversible } = classifyAction(params.action);
 
@@ -278,7 +278,7 @@ export async function logAction(
 /**
  * Get all pending approval items (only CRITICAL actions end up here).
  */
-export async function getPendingApprovals(clientId?: string): Promise<any[]> {
+export async function getPendingApprovals(clientId?: string): Promise<unknown[]> {
   const db = getDb();
 
   const conditions = [eq(schema.actionLog.status, "pending_approval")];

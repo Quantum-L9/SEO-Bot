@@ -84,7 +84,7 @@ function rankDeltaText(position: number | undefined, previous: number | undefine
 export async function registerDashboard(app: FastifyInstance): Promise<void> {
   // ─── Portfolio Overview ───────────────────────────────────────────────────
 
-  app.get("/dashboard", async (request, reply) => {
+  app.get("/dashboard", async (_request, reply) => {
     const db = getDb();
 
     const clients = await db
@@ -212,7 +212,7 @@ export async function registerDashboard(app: FastifyInstance): Promise<void> {
 
   // ─── Pending Approvals ────────────────────────────────────────────────────
 
-  app.get("/dashboard/approvals", async (request, reply) => {
+  app.get("/dashboard/approvals", async (_request, reply) => {
     const db = getDb();
 
     const pending = await db
@@ -248,7 +248,7 @@ export async function registerDashboard(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const db = getDb();
       const { id } = request.params;
-      const { option } = (request.body as any) || {};
+      const { option } = request.body ?? {};
 
       await db
         .update(schema.actionLog)
@@ -272,7 +272,7 @@ export async function registerDashboard(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const db = getDb();
       const { id } = request.params;
-      const { reason } = (request.body as any) || {};
+      const { reason } = request.body ?? {};
 
       await db
         .update(schema.actionLog)
@@ -354,7 +354,69 @@ function baseLayout(title: string, content: string): string {
 </html>`;
 }
 
-function renderPortfolio(clients: any[], pendingCount: number, todaySpend: number): string {
+interface DashboardClientDetailRow {
+  id: string;
+  name: string;
+  domain: string;
+  industry: string;
+  city?: string | null;
+  state?: string | null;
+}
+
+interface DashboardClientRow {
+  id: string;
+  name: string;
+  domain: string;
+  industry: string;
+  city?: string | null;
+  state?: string | null;
+  avgPosition?: number | null;
+  healthRating: string;
+  pendingApprovals: number;
+}
+
+interface DashboardRankingRow {
+  keyword: string;
+  position: number | null;
+  previousPosition: number | null;
+}
+
+interface DashboardActionRow {
+  action: string;
+  description: string;
+  riskLevel: string;
+  status: string;
+  triggeredBy: string;
+}
+
+interface DashboardApprovalRow {
+  id: string;
+  action: string;
+  clientDomain: string;
+  module: string;
+  riskLevel: string;
+  reversible?: boolean;
+  description: string;
+  rationale: string;
+  triggeredBy: string;
+  aiRecommendation?: string | null;
+  aiConfidence?: number | null;
+  options?: unknown;
+}
+
+interface DashboardOptionRow {
+  id?: string | number;
+  label?: string;
+  description?: string;
+  recommended?: boolean;
+  confidence?: number;
+}
+
+function renderPortfolio(
+  clients: DashboardClientRow[],
+  pendingCount: number,
+  todaySpend: number,
+): string {
   const statsHtml = `
     <div class="grid">
       <div class="card">
@@ -409,10 +471,10 @@ function renderPortfolio(clients: any[], pendingCount: number, todaySpend: numbe
 }
 
 function renderClientDetail(
-  client: any,
-  rankings: any[],
-  actions: any[],
-  _engagement: any[],
+  client: DashboardClientDetailRow,
+  rankings: DashboardRankingRow[],
+  actions: DashboardActionRow[],
+  _engagement: unknown[],
 ): string {
   const rankingRows = rankings
     .slice(0, 10)
@@ -422,8 +484,8 @@ function renderClientDetail(
       <td>${esc(r.keyword)}</td>
       <td>${r.position || "—"}</td>
       <td>${r.previousPosition || "—"}</td>
-      <td style="color: ${rankDeltaColor(r.position, r.previousPosition)}">
-        ${rankDeltaText(r.position, r.previousPosition)}
+      <td style="color: ${rankDeltaColor(r.position ?? undefined, r.previousPosition ?? undefined)}">
+        ${rankDeltaText(r.position ?? undefined, r.previousPosition ?? undefined)}
       </td>
     </tr>
   `,
@@ -465,7 +527,7 @@ function renderClientDetail(
   return baseLayout(client.name, content);
 }
 
-function renderApprovals(pending: any[]): string {
+function renderApprovals(pending: DashboardApprovalRow[]): string {
   if (pending.length === 0) {
     const content = `
       <h2 style="margin-bottom: 16px; color: #f8fafc;">Pending Approvals</h2>
@@ -478,7 +540,7 @@ function renderApprovals(pending: any[]): string {
 
   const approvalCards = pending
     .map((a) => {
-      let options: any[] = [];
+      let options: DashboardOptionRow[] = [];
       try {
         const parsed = typeof a.options === "string" ? JSON.parse(a.options) : a.options;
         if (Array.isArray(parsed)) options = parsed;
@@ -491,7 +553,7 @@ function renderApprovals(pending: any[]): string {
       <ul class="options-list">
         ${options
           .map(
-            (o: any) => `
+            (o: DashboardOptionRow) => `
           <li class="${o.recommended ? "recommended" : ""}">
             <strong>${esc(String(o.id ?? "").toUpperCase())})</strong> ${esc(o.label)} — ${esc(o.description)}
             ${o.recommended ? '<span class="badge badge-good" style="margin-left: 8px;">AI Recommended</span>' : ""}
@@ -521,7 +583,7 @@ function renderApprovals(pending: any[]): string {
         <div style="margin-top: 16px; display: flex; gap: 8px;">
           ${options
             .map(
-              (o: any) => `
+              (o: DashboardOptionRow) => `
             <form method="POST" action="/dashboard/approve/${encodeURIComponent(a.id)}">
               <input type="hidden" name="option" value="${esc(o.id)}">
               <button type="submit" class="btn ${o.recommended ? "btn-approve" : "btn-view"}">

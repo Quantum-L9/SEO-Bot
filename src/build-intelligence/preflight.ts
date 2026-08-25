@@ -160,18 +160,23 @@ export function runPreflight(contractSeen: boolean): PreflightReport {
   // 2. Machine auth: the hook that guards /api/build-intelligence/ admitted
   //    this request AND the secret is configured (a misconfigured secret would
   //    let the hook fall back to operator auth — FAIL, never assume).
-  checks.push(probe("seo_bot_machine_auth", () => {
-    if (!contractSeen) throw new PreflightCheckFailure("request was not machine-authenticated");
-    if (!env("SEO_BOT_API_KEY")) throw new PreflightCheckFailure("SEO_BOT_API_KEY is not configured");
-    return "machine secret present and request authenticated";
-  }));
+  checks.push(
+    probe("seo_bot_machine_auth", () => {
+      if (!contractSeen) throw new PreflightCheckFailure("request was not machine-authenticated");
+      if (!env("SEO_BOT_API_KEY"))
+        throw new PreflightCheckFailure("SEO_BOT_API_KEY is not configured");
+      return "machine secret present and request authenticated";
+    }),
+  );
 
   // 3. DataForSEO configuration (used by the competitive-landscape producer).
-  checks.push(probe("dataforseo_configured", () => {
-    requireEnv("DATAFORSEO_LOGIN");
-    requireEnv("DATAFORSEO_PASSWORD");
-    return "DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD present";
-  }));
+  checks.push(
+    probe("dataforseo_configured", () => {
+      requireEnv("DATAFORSEO_LOGIN");
+      requireEnv("DATAFORSEO_PASSWORD");
+      return "DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD present";
+    }),
+  );
 
   // 4. Competitive-landscape capability = its evidence source is configured.
   checks.push({
@@ -184,54 +189,67 @@ export function runPreflight(contractSeen: boolean): PreflightReport {
   });
 
   // 5. LLM provider configuration (used by every governed LLM op).
-  checks.push(probe("llm_provider_configured", () => {
-    requireEnv("OPENROUTER_API_KEY");
-    requireEnv("PERPLEXITY_API_KEY");
-    return "OPENROUTER_API_KEY and PERPLEXITY_API_KEY present";
-  }));
+  checks.push(
+    probe("llm_provider_configured", () => {
+      requireEnv("OPENROUTER_API_KEY");
+      requireEnv("PERPLEXITY_API_KEY");
+      return "OPENROUTER_API_KEY and PERPLEXITY_API_KEY present";
+    }),
+  );
 
   // 6. SEO-content-blueprint capability = LLM providers + router importable.
-  checks.push(probe("seo_content_blueprint_capability", () => {
-    if (!env("OPENROUTER_API_KEY")) {
-      throw new PreflightCheckFailure("OPENROUTER_API_KEY is required for blueprint strategy");
-    }
-    const routerVersion = packageVersion("@quantum-l9/llm-router");
-    if (!routerVersion) throw new PreflightCheckFailure("@quantum-l9/llm-router is not resolvable");
-    if (typeof L9LLMRouter !== "function") {
-      throw new PreflightCheckFailure("L9LLMRouter export is missing");
-    }
-    return "LLM strategy stack present and importable";
-  }));
+  checks.push(
+    probe("seo_content_blueprint_capability", () => {
+      if (!env("OPENROUTER_API_KEY")) {
+        throw new PreflightCheckFailure("OPENROUTER_API_KEY is required for blueprint strategy");
+      }
+      const routerVersion = packageVersion("@quantum-l9/llm-router");
+      if (!routerVersion)
+        throw new PreflightCheckFailure("@quantum-l9/llm-router is not resolvable");
+      if (typeof L9LLMRouter !== "function") {
+        throw new PreflightCheckFailure("L9LLMRouter export is missing");
+      }
+      return "LLM strategy stack present and importable";
+    }),
+  );
 
   // 7. Structured-content capability = LLM providers + strict schema importable.
-  checks.push(probe("structured_content_capability", () => {
-    if (!env("OPENROUTER_API_KEY") || !env("PERPLEXITY_API_KEY")) {
-      throw new PreflightCheckFailure("LLM provider keys are required for prose generation");
-    }
-    return "structured-content LLM stack present";
-  }));
+  checks.push(
+    probe("structured_content_capability", () => {
+      if (!env("OPENROUTER_API_KEY") || !env("PERPLEXITY_API_KEY")) {
+        throw new PreflightCheckFailure("LLM provider keys are required for prose generation");
+      }
+      return "structured-content LLM stack present";
+    }),
+  );
 
   // 8. bot-interop compatibility: the contract package resolves AND the
   //    protocol constant matches the one the producers seal with.
-  checks.push(probe("bot_interop_compatible", () => {
-    const version = packageVersion("@quantum-l9/bot-interop");
-    if (!version) throw new PreflightCheckFailure("@quantum-l9/bot-interop is not resolvable");
-    if (WEBSITE_INTELLIGENCE_PROTOCOL !== "l9.website-intelligence") {
-      throw new PreflightCheckFailure(`unexpected protocol constant: ${WEBSITE_INTELLIGENCE_PROTOCOL}`);
-    }
-    return `bot-interop ${version} resolves; protocol constant matches`;
-  }));
+  checks.push(
+    probe("bot_interop_compatible", () => {
+      const version = packageVersion("@quantum-l9/bot-interop");
+      if (!version) throw new PreflightCheckFailure("@quantum-l9/bot-interop is not resolvable");
+      if (WEBSITE_INTELLIGENCE_PROTOCOL !== "l9.website-intelligence") {
+        throw new PreflightCheckFailure(
+          `unexpected protocol constant: ${WEBSITE_INTELLIGENCE_PROTOCOL}`,
+        );
+      }
+      return `bot-interop ${version} resolves; protocol constant matches`;
+    }),
+  );
 
   // 9. llm-router compatibility: the package resolves and the router class is
   //    the one the LlmService constructs.
-  checks.push(probe("llm_router_compatible", () => {
-    const version = packageVersion("@quantum-l9/llm-router");
-    if (!version) throw new PreflightCheckFailure("@quantum-l9/llm-router is not resolvable");
-    if (typeof L9LLMRouter !== "function") {
-      throw new PreflightCheckFailure("L9LLMRouter export is missing");
-    }
-    return `llm-router ${version} resolves; L9LLMRouter present`;
-  }));
+  checks.push(
+    probe("llm_router_compatible", () => {
+      const version = packageVersion("@quantum-l9/llm-router");
+      if (!version) throw new PreflightCheckFailure("@quantum-l9/llm-router is not resolvable");
+      if (typeof L9LLMRouter !== "function") {
+        throw new PreflightCheckFailure("L9LLMRouter export is missing");
+      }
+      return `llm-router ${version} resolves; L9LLMRouter present`;
+    }),
+  );
 
   const statusOf = (name: string): PreflightStatus =>
     checks.find((check) => check.name === name)?.status ?? "UNKNOWN";

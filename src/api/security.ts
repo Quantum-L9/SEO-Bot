@@ -82,7 +82,7 @@ function pathname(url: string): string {
 }
 
 function isAuthExempt(path: string): boolean {
-  return AUTH_EXEMPT.some((p) => path === p || path.startsWith(p + "/"));
+  return AUTH_EXEMPT.some((p) => path === p || path.startsWith(`${p}/`));
 }
 
 export function registerApiSecurity(app: FastifyInstance): void {

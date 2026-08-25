@@ -10,7 +10,7 @@ async function atomicWrite(filePath: string, content: string): Promise<void> {
 }
 export async function generateManifest(root = process.cwd()): Promise<void> {
   const manifest = await buildManifest(root);
-  await atomicWrite(path.join(root, "MANIFEST.json"), JSON.stringify(manifest, null, 2) + "\n");
+  await atomicWrite(path.join(root, "MANIFEST.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   await atomicWrite(path.join(root, "MANIFEST.md"), renderManifestMarkdown(manifest));
   console.log(
     `Generated ${manifest.entries.length} manifest entries (${manifest.inventory_digest})`,

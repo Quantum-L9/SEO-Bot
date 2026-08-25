@@ -101,7 +101,7 @@ export class LlmService {
       );
       await this.logUsage(task, response);
       return response;
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (error instanceof BudgetExhaustedError) {
         logger.warn(
           {
@@ -113,7 +113,10 @@ export class LlmService {
           "Task deferred by budget engine",
         );
       } else {
-        logger.error({ error: error.message, task: task.description }, "LLM execution failed");
+        logger.error(
+          { error: error instanceof Error ? error.message : String(error), task: task.description },
+          "LLM execution failed",
+        );
       }
       throw error;
     }
@@ -438,9 +441,9 @@ export class LlmService {
         .from(schema.llmUsage)
         .where(gte(schema.llmUsage.timestamp, todayStart));
       return Number(result[0]?.totalCost ?? 0);
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.warn(
-        { error: error.message },
+        { error: error instanceof Error ? error.message : String(error) },
         "getDailySpend DB query failed, falling back to in-memory call log",
       );
       const today = new Date().toISOString().slice(0, 10);
@@ -479,8 +482,11 @@ export class LlmService {
           outputTokens: response.outputTokens,
           cost: response.cost,
         });
-    } catch (error: any) {
-      logger.warn({ error: error.message }, "Failed to log LLM usage to database");
+    } catch (error: unknown) {
+      logger.warn(
+        { error: error instanceof Error ? error.message : String(error) },
+        "Failed to log LLM usage to database",
+      );
     }
   }
 

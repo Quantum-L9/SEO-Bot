@@ -181,7 +181,10 @@ function contentShapedRoute(): unknown {
   return {
     route_id: "home",
     path: "/",
-    metadata: { title: "Metal Roofing in Austin, Texas", description: "Durable metal roof systems." },
+    metadata: {
+      title: "Metal Roofing in Austin, Texas",
+      description: "Durable metal roof systems.",
+    },
     sections: [
       {
         section_id: "hero",

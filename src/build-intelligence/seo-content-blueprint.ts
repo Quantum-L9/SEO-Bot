@@ -416,8 +416,7 @@ function buildBatchPrompt(
           ],
           internal_links: [
             {
-              target_route_id:
-                `string (must be one of the site route ids: ${allRouteIds.join(", ")})`,
+              target_route_id: `string (must be one of the site route ids: ${allRouteIds.join(", ")})`,
               purpose: "string",
             },
           ],
@@ -472,9 +471,7 @@ function reconcileBatchRoutes(
   }
 
   const batchIds = new Set(batch.map((route) => route.route_id));
-  const unexpected = parsed.routes
-    .map((route) => route.route_id)
-    .filter((id) => !batchIds.has(id));
+  const unexpected = parsed.routes.map((route) => route.route_id).filter((id) => !batchIds.has(id));
   if (unexpected.length > 0) {
     throw new Error(
       `Unexpected route_id(s) not in this batch's requested set: ${unexpected.join(", ")}`,

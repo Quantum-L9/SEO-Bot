@@ -14,10 +14,28 @@
  * Vercel deploy; an unconfigured client falls back to dry-run.
  */
 
+import type { Job } from "bullmq";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+interface MockGap {
+  id: string;
+  clientId: string;
+  keyword: string;
+  clientUrl: string;
+  competitorUrl: string;
+  surpassPlan: Array<{
+    priority: number;
+    action: string;
+    effort: string;
+    impact: string;
+    autonomous: boolean;
+    status: string;
+  }>;
+  status: string;
+}
+
 // Mutable gap fixture — each test sets what the "planned" query returns.
-let mockGaps: any[] = [];
+let mockGaps: MockGap[] = [];
 
 const metaTitleGap = () => ({
   id: "gap-1",
@@ -74,15 +92,15 @@ const mockInjectSchema = vi.fn().mockResolvedValue({ success: true, dryRun: true
 const mockTriggerDeploy = vi.fn().mockResolvedValue(undefined);
 
 // Mirror the real dry-run guard: absent OR blank token/repo ⇒ dryRun.
-const mockSiteConfigFromClient = vi.fn((clientConfig: any) => {
-  const sd = clientConfig?.site_deployment;
-  const githubToken = sd?.githubToken ?? "";
-  const websiteBotRepo = sd?.websiteBotRepo ?? "";
+const mockSiteConfigFromClient = vi.fn((clientConfig: Record<string, unknown>) => {
+  const sd = (clientConfig?.site_deployment ?? {}) as Record<string, unknown>;
+  const githubToken = String(sd?.githubToken ?? "");
+  const websiteBotRepo = String(sd?.websiteBotRepo ?? "");
   return {
     githubToken,
-    vercelDeployHook: sd?.vercelDeployHook ?? "",
+    vercelDeployHook: String(sd?.vercelDeployHook ?? ""),
     websiteBotRepo,
-    sourceBranch: sd?.sourceBranch || "main",
+    sourceBranch: String(sd?.sourceBranch || "main"),
     dryRun: !githubToken || !websiteBotRepo,
   };
 });
@@ -134,7 +152,7 @@ describe("executeSurpassPlans — GAP-07", () => {
 
   it("dispatches meta_title_update action to site-deployment", async () => {
     const { executeSurpassPlans } = await import("../../src/services/plan-executor.js");
-    const mockJob = { data: { clientId: "client-1", clientDomain: "test.com" } } as any;
+    const mockJob = { data: { clientId: "client-1", clientDomain: "test.com" } } as unknown as Job;
 
     await executeSurpassPlans(mockJob);
 
@@ -149,7 +167,7 @@ describe("executeSurpassPlans — GAP-07", () => {
 
   it("triggers Vercel deploy after dispatching actions", async () => {
     const { executeSurpassPlans } = await import("../../src/services/plan-executor.js");
-    const mockJob = { data: { clientId: "client-1", clientDomain: "test.com" } } as any;
+    const mockJob = { data: { clientId: "client-1", clientDomain: "test.com" } } as unknown as Job;
 
     await executeSurpassPlans(mockJob);
 
@@ -158,7 +176,7 @@ describe("executeSurpassPlans — GAP-07", () => {
 
   it("sets gap status to executing after processing", async () => {
     const { executeSurpassPlans } = await import("../../src/services/plan-executor.js");
-    const mockJob = { data: { clientId: "client-1", clientDomain: "test.com" } } as any;
+    const mockJob = { data: { clientId: "client-1", clientDomain: "test.com" } } as unknown as Job;
 
     await executeSurpassPlans(mockJob);
 
@@ -168,7 +186,7 @@ describe("executeSurpassPlans — GAP-07", () => {
 
   it("logs action through execution-policy before dispatching", async () => {
     const { executeSurpassPlans } = await import("../../src/services/plan-executor.js");
-    const mockJob = { data: { clientId: "client-1", clientDomain: "test.com" } } as any;
+    const mockJob = { data: { clientId: "client-1", clientDomain: "test.com" } } as unknown as Job;
 
     await executeSurpassPlans(mockJob);
 
@@ -190,7 +208,7 @@ describe("executeSurpassPlans — GAP-07", () => {
     };
     const mockJob = {
       data: { clientId: "client-1", clientDomain: "test.com", clientConfig },
-    } as any;
+    } as unknown as Job;
 
     await executeSurpassPlans(mockJob);
 
@@ -211,7 +229,7 @@ describe("executeSurpassPlans — GAP-07", () => {
     const { executeSurpassPlans } = await import("../../src/services/plan-executor.js");
     const mockJob = {
       data: { clientId: "client-1", clientDomain: "test.com", clientConfig: {} },
-    } as any;
+    } as unknown as Job;
 
     await executeSurpassPlans(mockJob);
 
@@ -226,7 +244,7 @@ describe("executeSurpassPlans — GAP-07", () => {
   it("does NOT dispatch a write for faq_content_update (G3 — no FAQ payload)", async () => {
     mockGaps = [faqGap()];
     const { executeSurpassPlans } = await import("../../src/services/plan-executor.js");
-    const mockJob = { data: { clientId: "client-1", clientDomain: "test.com" } } as any;
+    const mockJob = { data: { clientId: "client-1", clientDomain: "test.com" } } as unknown as Job;
 
     await executeSurpassPlans(mockJob);
 

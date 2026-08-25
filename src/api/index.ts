@@ -277,7 +277,7 @@ export async function buildApiServer(): Promise<FastifyInstance> {
     "/api/clients/:clientId/trigger",
     async (request) => {
       const { clientId } = request.params;
-      const { module } = request.body as any;
+      const { module } = request.body as { module?: string };
       const scheduler = getScheduler();
       const validModules = [
         "serp:check-rankings",
@@ -291,7 +291,7 @@ export async function buildApiServer(): Promise<FastifyInstance> {
         "behavior:pull-engagement",
         "behavior:generate-insights",
       ];
-      if (!validModules.includes(module))
+      if (!module || !validModules.includes(module))
         return { error: `Invalid module. Valid: ${validModules.join(", ")}` };
       const db = getDb();
       const [client] = await db
@@ -333,8 +333,9 @@ export async function startApiServer(port: number = 3100): Promise<void> {
   try {
     await app.listen({ port, host: "0.0.0.0" });
     logger.info({ port }, "API server started (Fastify — sole HTTP server)");
-  } catch (error: any) {
-    logger.error({ error: error.message }, "API server failed to start");
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error({ error: message }, "API server failed to start");
     throw error;
   }
 }

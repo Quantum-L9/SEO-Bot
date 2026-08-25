@@ -721,11 +721,11 @@ async function databaseGate(context: GateContext): Promise<GateResult> {
     await mkdir(path.dirname(receiptPath), { recursive: true });
     await writeFile(
       receiptPath,
-      JSON.stringify(
+      `${JSON.stringify(
         { databaseName, expectedTables, actualTables, missingTables, journalCount },
         null,
         2,
-      ) + "\n",
+      )}\n`,
       { mode: 0o600 },
     );
     return {

@@ -22,6 +22,8 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import {
   assertIntelligenceArtifactIntegrity,
   type CompetitiveLandscapeArtifact,
@@ -32,19 +34,15 @@ import {
   type WebsiteIntelligenceArtifact,
 } from "@quantum-l9/bot-interop";
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { mkdirSync, writeFileSync } from "node:fs";
-import path from "node:path";
 import { z } from "zod";
-import { getConfig } from "../core/config.js";
-import { projectLlmAudit } from "../build-intelligence/llm-audit.js";
-import { runPreflight } from "../build-intelligence/preflight.js";
-import { constantTimeEqual, parseAuthSecret } from "./security.js";
 import {
   CompetitiveDonorQualificationError,
   CompetitiveEvidenceIncompleteError,
   CompetitiveLandscapeInvalidError,
   createCompetitiveLandscape,
 } from "../build-intelligence/competitive-landscape.js";
+import { projectLlmAudit } from "../build-intelligence/llm-audit.js";
+import { runPreflight } from "../build-intelligence/preflight.js";
 import {
   CompetitiveLandscapeInputInvalidError,
   CompetitiveLandscapeRefMismatchError,
@@ -64,6 +62,7 @@ import {
   StructuredContentRouteMismatchError,
   StructuredContentShapeError,
 } from "../build-intelligence/structured-content.js";
+import { getConfig } from "../core/config.js";
 import { createModuleLogger } from "../core/logger.js";
 import {
   DataForSeoTaskError,
@@ -71,6 +70,7 @@ import {
   SerpEvidenceInvalidError,
 } from "../services/dataforseo.js";
 import { getLlmService } from "../services/llm.js";
+import { constantTimeEqual, parseAuthSecret } from "./security.js";
 
 const logger = createModuleLogger("api:build-intelligence");
 

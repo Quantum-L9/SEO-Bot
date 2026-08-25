@@ -72,7 +72,8 @@ describe("EvidenceWriter", () => {
     const writer = new EvidenceWriter(repositoryRoot, "ci", "a".repeat(40));
     await writer.initialize();
     const relative = await writer.writeLog("test", "stdout", "Authorization: Bearer secret-value");
-    const content = await readFile(path.join(repositoryRoot, relative!), "utf8");
+    if (!relative) throw new Error("writer returned no relative path");
+    const content = await readFile(path.join(repositoryRoot, relative), "utf8");
     expect(content).not.toContain("secret-value");
     expect(content).toContain("[REDACTED:AUTHORIZATION]");
   });

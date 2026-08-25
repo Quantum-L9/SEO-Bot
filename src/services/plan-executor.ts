@@ -23,6 +23,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { getDb, schema } from "../core/database/index.js";
 import { createProposal, evaluateExecution, logAction } from "../core/execution-policy.js";
 import { createModuleLogger } from "../core/logger.js";
+import type { Scheduler } from "../core/scheduler.js";
 import type { SurpassAction } from "../types/index.js";
 import {
   injectSchema,
@@ -176,8 +177,11 @@ async function dispatchSurpassAction(
     await dispatcher(action, clientDomain, gap.clientUrl, siteConfig);
     logger.info({ actionType, keyword: gap.keyword }, "Action dispatched to site-deployment");
     return "success";
-  } catch (err: any) {
-    logger.error({ actionType, keyword: gap.keyword, error: err.message }, "Dispatch failed");
+  } catch (err: unknown) {
+    logger.error(
+      { actionType, keyword: gap.keyword, error: err instanceof Error ? err.message : String(err) },
+      "Dispatch failed",
+    );
     return "failed";
   }
 }
@@ -277,7 +281,7 @@ function inferActionType(actionText: string): string {
   return "competitor_surpass_execute";
 }
 
-export function registerPlanExecutorHandlers(scheduler: any): void {
+export function registerPlanExecutorHandlers(scheduler: Scheduler): void {
   scheduler.registerHandler("serp:execute-surpass-plans", executeSurpassPlans);
   logger.info("Plan executor handler registered");
 }

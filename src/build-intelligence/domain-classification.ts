@@ -55,7 +55,9 @@ export function canonicalizeDomain(input: string): string {
     }
   }
   // Drop path/query/port that survive when there was no scheme.
-  value = value.split("/")[0]!.split("?")[0]!.split("#")[0]!.split(":")[0]!;
+  const hostPart = value.split("/")[0]?.split("?")[0]?.split("#")[0]?.split(":")[0];
+  if (!hostPart) return "";
+  value = hostPart;
   value = value.replace(/^www\./, "").replace(/\.$/, "");
   return value;
 }

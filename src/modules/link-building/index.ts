@@ -90,8 +90,11 @@ async function findEmail(domain: string): Promise<{ email: string | null; name: 
       email: best.value || null,
       name: [best.first_name, best.last_name].filter(Boolean).join(" ") || null,
     };
-  } catch (error: any) {
-    logger.debug({ domain, error: error.message }, "Hunter.io lookup failed");
+  } catch (error: unknown) {
+    logger.debug(
+      { domain, error: error instanceof Error ? error.message : String(error) },
+      "Hunter.io lookup failed",
+    );
     return { email: null, name: null };
   }
 }
@@ -137,26 +140,29 @@ async function discoverBacklinkProspects(
     const items = response.data.tasks?.[0]?.result?.[0]?.items || [];
 
     return items
-      .filter((item: any) => {
-        const refDomain = item.referring_main_domain || "";
+      .filter((item: Record<string, unknown>) => {
+        const refDomain = String(item.referring_main_domain || "");
         return !refDomain.includes(clientDomain.replace("www.", ""));
       })
-      .map((item: any) => ({
-        targetUrl: item.url_from || "",
-        targetDomain: item.referring_main_domain || "",
-        domainRating: item.rank || 0,
-        anchorText: item.anchor || "",
+      .map((item: Record<string, unknown>) => ({
+        targetUrl: String(item.url_from || ""),
+        targetDomain: String(item.referring_main_domain || ""),
+        domainRating: Number(item.rank || 0),
+        anchorText: String(item.anchor || ""),
         tactic: classifyTactic(item),
       }))
       .slice(0, 20);
-  } catch (error: any) {
-    logger.error({ competitorDomain, error: error.message }, "Backlink discovery failed");
+  } catch (error: unknown) {
+    logger.error(
+      { competitorDomain, error: error instanceof Error ? error.message : String(error) },
+      "Backlink discovery failed",
+    );
     return [];
   }
 }
 
-function classifyTactic(backlink: any): LinkTactic {
-  const url = (backlink.url_from || "").toLowerCase();
+function classifyTactic(backlink: Record<string, unknown>): LinkTactic {
+  const url = String(backlink.url_from || "").toLowerCase();
 
   if (url.includes("/resources") || url.includes("/links") || url.includes("/tools"))
     return "resource_page";
@@ -351,7 +357,7 @@ TACTIC: ${prospect.tactic}`,
 Prospect: ${prospect.targetUrl}
 Contact: ${prospect.contactName || "there"}
 Domain Rating: ${prospect.domainRating}
-Relevance: ${(prospect.relevanceScore! * 100).toFixed(0)}%
+Relevance: ${((prospect.relevanceScore ?? 0) * 100).toFixed(0)}%
 
 Write the outreach email:`,
         clientId,
@@ -403,9 +409,12 @@ Write the outreach email:`,
 
       sentCount++;
       await new Promise((resolve) => setTimeout(resolve, 2000));
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
-        { prospect: prospect.targetUrl, error: error.message },
+        {
+          prospect: prospect.targetUrl,
+          error: error instanceof Error ? error.message : String(error),
+        },
         "Outreach processing failed",
       );
     }

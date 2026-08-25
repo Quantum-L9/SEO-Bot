@@ -37,8 +37,14 @@ import {
 } from "@quantum-l9/bot-interop";
 import { createModuleLogger } from "../core/logger.js";
 import { getLlmService, type LlmService } from "../services/llm.js";
+import {
+  buildFactCorpus,
+  CREDENTIAL_CLAIM_TOKENS,
+  checkRouteGrounding,
+  collectRouteText,
+  MAGNITUDE_PHRASES,
+} from "./claim-grounding.js";
 import { type RouteValidationVerdict, validateRoute } from "./content-validator.js";
-import { buildFactCorpus, checkRouteGrounding, collectRouteText, CREDENTIAL_CLAIM_TOKENS, MAGNITUDE_PHRASES } from "./claim-grounding.js";
 import { PRODUCER } from "./producer.js";
 import { structuredContentRouteSchema } from "./schema-guards.js";
 
@@ -502,11 +508,11 @@ const SHAPE_SPEC =
   "REQUIRED OUTPUT SHAPE (strict — the validation schema rejects anything else):\n" +
   "- Top-level keys: route_id, path, metadata, sections, faqs, internal_links, schema_content_inputs. No other keys.\n" +
   "- metadata must have a non-empty title and description.\n" +
-  "- Every section MUST include a non-empty \"blocks\" array; a section with prose and no blocks is invalid.\n" +
-  "- Each block is one of: {\"kind\":\"paragraph\",\"text\"} | {\"kind\":\"bullets\",\"items\"} | " +
-  "{\"kind\":\"steps\",\"items\"} | {\"kind\":\"quote\",\"text\",\"attribution\"?}.\n" +
-  "- FORBIDDEN alias fields on a section: \"content\", \"body\", \"copy\", \"paragraphs\" — all prose lives in \"blocks\".\n" +
-  "- faqs: array of {\"question\",\"answer\"}; internal_links: array of {\"target_route_id\",\"anchor_text\"}; " +
+  '- Every section MUST include a non-empty "blocks" array; a section with prose and no blocks is invalid.\n' +
+  '- Each block is one of: {"kind":"paragraph","text"} | {"kind":"bullets","items"} | ' +
+  '{"kind":"steps","items"} | {"kind":"quote","text","attribution"?}.\n' +
+  '- FORBIDDEN alias fields on a section: "content", "body", "copy", "paragraphs" — all prose lives in "blocks".\n' +
+  '- faqs: array of {"question","answer"}; internal_links: array of {"target_route_id","anchor_text"}; ' +
   "schema_content_inputs: object with optional faq/service/local_business booleans.";
 
 /**
@@ -544,9 +550,7 @@ export function applyDeterministicRemediation(
   // Number("") is 0 — an absent years fact must not read as "0 years".
   const years = Number(facts.get("years_local_experience") ?? NaN);
   const fillerYearsPhrase =
-    Number.isFinite(years) && years > 0
-      ? ` with ${years} years of local roofing experience`
-      : "";
+    Number.isFinite(years) && years > 0 ? ` with ${years} years of local roofing experience` : "";
   const hours = String(facts.get("hours") ?? "24/7");
   const vertical = String(facts.get("vertical") ?? "roofing and renovation");
   // c. Substantive-content floor: scrubbing (or a lazy model) can leave a
@@ -567,10 +571,7 @@ export function applyDeterministicRemediation(
       .join(" ")
       .trim();
     if (words.split(/\s+/).filter(Boolean).length < 10) {
-      section.blocks = [
-        ...(section.blocks ?? []),
-        { kind: "paragraph", text: filler },
-      ];
+      section.blocks = [...(section.blocks ?? []), { kind: "paragraph", text: filler }];
     }
   }
   // b. Fact-derived literal sentences for each failed requirement.
@@ -578,8 +579,8 @@ export function applyDeterministicRemediation(
   const topics: string[] = [];
   const entities: string[] = [];
   for (const failure of verdict.failed_requirements) {
-    const topic = failure.match(/required topic \"([^"]+)\"/)?.[1];
-    const entity = failure.match(/required entity \"([^"]+)\"/)?.[1];
+    const topic = failure.match(/required topic "([^"]+)"/)?.[1];
+    const entity = failure.match(/required entity "([^"]+)"/)?.[1];
     if (entity) entities.push(entity);
     else if (topic) topics.push(topic);
   }
@@ -634,28 +635,75 @@ interface TextSurface {
  */
 function collectTextSurfaces(route: StructuredContentRoute): TextSurface[] {
   const surfaces: TextSurface[] = [
-    { read: () => route.metadata?.title, write: (v) => { if (route.metadata) route.metadata.title = v; } },
-    { read: () => route.metadata?.description, write: (v) => { if (route.metadata) route.metadata.description = v; } },
+    {
+      read: () => route.metadata?.title,
+      write: (v) => {
+        if (route.metadata) route.metadata.title = v;
+      },
+    },
+    {
+      read: () => route.metadata?.description,
+      write: (v) => {
+        if (route.metadata) route.metadata.description = v;
+      },
+    },
   ];
   for (const section of route.sections ?? []) {
     surfaces.push(
-      { read: () => section.eyebrow, write: (v) => { section.eyebrow = v; } },
-      { read: () => section.heading, write: (v) => { section.heading = v; } },
-      { read: () => section.subheading, write: (v) => { section.subheading = v; } },
-      { read: () => section.cta?.label, write: (v) => { if (section.cta) section.cta.label = v; } },
-      { read: () => section.cta?.action, write: (v) => { if (section.cta) section.cta.action = v; } },
+      {
+        read: () => section.eyebrow,
+        write: (v) => {
+          section.eyebrow = v;
+        },
+      },
+      {
+        read: () => section.heading,
+        write: (v) => {
+          section.heading = v;
+        },
+      },
+      {
+        read: () => section.subheading,
+        write: (v) => {
+          section.subheading = v;
+        },
+      },
+      {
+        read: () => section.cta?.label,
+        write: (v) => {
+          if (section.cta) section.cta.label = v;
+        },
+      },
+      {
+        read: () => section.cta?.action,
+        write: (v) => {
+          if (section.cta) section.cta.action = v;
+        },
+      },
     );
     for (const block of section.blocks ?? []) {
       if (block.kind === "paragraph" || block.kind === "quote") {
-        surfaces.push({ read: () => block.text, write: (v) => { block.text = v; } });
+        surfaces.push({
+          read: () => block.text,
+          write: (v) => {
+            block.text = v;
+          },
+        });
         if (block.kind === "quote") {
-          surfaces.push({ read: () => block.attribution, write: (v) => { block.attribution = v; } });
+          surfaces.push({
+            read: () => block.attribution,
+            write: (v) => {
+              block.attribution = v;
+            },
+          });
         }
       } else {
         block.items.forEach((_, index) => {
           surfaces.push({
             read: () => block.items[index],
-            write: (v) => { block.items[index] = v; },
+            write: (v) => {
+              block.items[index] = v;
+            },
           });
         });
       }
@@ -663,12 +711,27 @@ function collectTextSurfaces(route: StructuredContentRoute): TextSurface[] {
   }
   for (const faq of route.faqs ?? []) {
     surfaces.push(
-      { read: () => faq.question, write: (v) => { faq.question = v; } },
-      { read: () => faq.answer, write: (v) => { faq.answer = v; } },
+      {
+        read: () => faq.question,
+        write: (v) => {
+          faq.question = v;
+        },
+      },
+      {
+        read: () => faq.answer,
+        write: (v) => {
+          faq.answer = v;
+        },
+      },
     );
   }
   for (const link of route.internal_links ?? []) {
-    surfaces.push({ read: () => link.anchor_text, write: (v) => { link.anchor_text = v; } });
+    surfaces.push({
+      read: () => link.anchor_text,
+      write: (v) => {
+        link.anchor_text = v;
+      },
+    });
   }
   return surfaces;
 }
@@ -729,7 +792,10 @@ function scrubTextSurfaces(
   // Forbidden claims scrub unconditionally (no corpus guard) and can
   // straddle surfaces exactly like credential tokens (golden run #55:
   // "Best in Charlotte").
-  const multiWordTokens = [...tokens, ...forbidden.filter((phrase) => phrase.split(" ").length > 1)];
+  const multiWordTokens = [
+    ...tokens,
+    ...forbidden.filter((phrase) => phrase.split(" ").length > 1),
+  ];
 
   const surfaces = collectTextSurfaces(route);
   const values: string[] = [];
@@ -774,13 +840,11 @@ function scrubTextSurfaces(
     // claim-shaped residue survives.
     out = out.replace(
       /\b(?:(?:can|may|could|will|typically|often|usually|generally)\s+)?(?:lasts?|lasting|rated\s+for)\s+(?:for\s+|up\s+to\s+)?(\d+(?:-\d+)?)\s*(?:to|-|–|—)?\s*(?:years?|yrs?)\b/gi,
-      (match: string, num: string) =>
-        allowedNumbers.has(num.replace(/,/g, "")) ? match : " ",
+      (match: string, num: string) => (allowedNumbers.has(num.replace(/,/g, "")) ? match : " "),
     );
     out = out.replace(
       /\b(?:lifespans?|service\s+life)\s+of\s+(\d+(?:-\d+)?)\s*(?:to|-|–|—)?\s*(?:years?|yrs?)\b/gi,
-      (match: string, num: string) =>
-        allowedNumbers.has(num.replace(/,/g, "")) ? match : " ",
+      (match: string, num: string) => (allowedNumbers.has(num.replace(/,/g, "")) ? match : " "),
     );
     // Age-comparison clauses: "roof age over 20 years", "older than 20
     // years", "20+ years old". The number-only backstop below would leave
@@ -788,21 +852,18 @@ function scrubTextSurfaces(
     // #50). Remove preposition + number + unit whole.
     out = out.replace(
       /\b(?:over|older\s+than|beyond|past|ages?\s+over|ages?\s+of)\s+(\d+(?:-\d+)?)\s*(?:years?|yrs?)\b/gi,
-      (match: string, num: string) =>
-        allowedNumbers.has(num.replace(/,/g, "")) ? match : " ",
+      (match: string, num: string) => (allowedNumbers.has(num.replace(/,/g, "")) ? match : " "),
     );
     out = out.replace(
       /\b(\d+(?:-\d+)?)\s*\+\s*(?:years?|yrs?)\s+old\b/gi,
-      (match: string, num: string) =>
-        allowedNumbers.has(num.replace(/,/g, "")) ? match : " ",
+      (match: string, num: string) => (allowedNumbers.has(num.replace(/,/g, "")) ? match : " "),
     );
     // Quantified "N years" assertions: a number the verified facts do not
     // contain can never be corroborated (factNumbers authority). Drop the
     // number, keep the unit, so the claim stops being a quantified claim.
     out = out.replace(
       /\b(\d+(?:-\d+)?)\s*\+?\s*(?:to|-|–|—)?\s*(?=years?\b|yrs?\b)/gi,
-      (match: string, num: string) =>
-        allowedNumbers.has(num.replace(/,/g, "")) ? match : " ",
+      (match: string, num: string) => (allowedNumbers.has(num.replace(/,/g, "")) ? match : " "),
     );
     values[i] = out.replace(/\s{2,}/g, " ").trim();
   }
@@ -887,7 +948,7 @@ async function generateRouteRaw(
     "requirements. CRITICAL COVERAGE RULE: every required topic, entity, and " +
     "question must be covered with its EXACT terminology — the validation is " +
     "deterministic and looks for the literal terms, so a required topic phrased " +
-    "as \"24/7 availability\" requires the words \"24/7\" AND \"availability\" to " +
+    'as "24/7 availability" requires the words "24/7" AND "availability" to ' +
     "appear in your prose (a paraphrase is scored as missing). " +
     "QUESTION RULE: for every question in the contract's content_requirements, " +
     "write at least one explicit answer sentence that reuses the question's own " +
@@ -923,23 +984,24 @@ async function generateRouteRaw(
   );
 
   try {
-    return await llm.executePolicyJson("STRUCTURED_CONTENT_GENERATION", {
-      clientId: request.client_id,
-      module: "build-intelligence",
-      purpose: `structured-content:${contractRoute.route_id}`,
-      systemPrompt,
-      userPrompt,
-      // Identity validator: shape is enforced by the loop, not here.
-      validate: (value) => value,
-    }, { noInternalRepair: true });
+    return await llm.executePolicyJson(
+      "STRUCTURED_CONTENT_GENERATION",
+      {
+        clientId: request.client_id,
+        module: "build-intelligence",
+        purpose: `structured-content:${contractRoute.route_id}`,
+        systemPrompt,
+        userPrompt,
+        // Identity validator: shape is enforced by the loop, not here.
+        validate: (value) => value,
+      },
+      { noInternalRepair: true },
+    );
   } catch (error) {
     // The ONLY failure this call can produce with an identity validator is a
     // malformed-JSON parse error from llm-parse.ts (stable message prefix).
     // Everything else (budget, router, provider) propagates untouched.
-    if (
-      error instanceof Error &&
-      error.message.startsWith("LLM did not return valid JSON")
-    ) {
+    if (error instanceof Error && error.message.startsWith("LLM did not return valid JSON")) {
       throw new StructuredRouteShapeFailure(error.message);
     }
     throw error;
@@ -1116,15 +1178,12 @@ function groundedVerdict(
   // output — deterministic coverage is authority (golden run #48).
   const routeTextLower = collectRouteText(route).toLowerCase();
   const isRemediationSentenceQuote = (failure: string): boolean =>
-    failure.trimStart().startsWith("Regarding ") &&
-    routeTextLower.includes(failure.toLowerCase());
+    failure.trimStart().startsWith("Regarding ") && routeTextLower.includes(failure.toLowerCase());
   const failedRequirements = verdict.failed_requirements.filter((failure) => {
     if (isCoverageShaped(failure)) {
       // Deterministic coverage is the authority; a judge-vs-authority
       // disagreement (any label the grounding check does not flag) drops.
-      return coverageLabels(failure).some((label) =>
-        groundingFailurePhrases.has(label),
-      );
+      return coverageLabels(failure).some((label) => groundingFailurePhrases.has(label));
     }
     if (isRemediationSentenceQuote(failure)) return false;
     // Enforce mode (attempt 1): keep acceptance-test/proof/requirement-echo
@@ -1133,9 +1192,7 @@ function groundedVerdict(
     // deterministic pass.
     if (opts.enforceAcceptanceTests) return true;
     return (
-      !isAcceptanceTestFailure(failure) &&
-      !isProofEcho(failure) &&
-      !isRequirementEcho(failure)
+      !isAcceptanceTestFailure(failure) && !isProofEcho(failure) && !isRequirementEcho(failure)
     );
   });
   // When every semantic failure was filtered by a deterministic authority

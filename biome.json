@@ -25,7 +25,13 @@
       "!**/validation/runs",
       "!**/.validation-tmp",
       "!**/package-lock.json",
-      "!**/npm-shrinkwrap.json"
+      "!**/npm-shrinkwrap.json",
+      "!**/.claude",
+      "!**/WIP",
+      "!**/reports/semgrep",
+      "!**/.seam-*.mts",
+      "!**/reports/seam-*",
+      "!**/scripts/semgrep*"
     ]
   },
   "formatter": {

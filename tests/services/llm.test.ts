@@ -17,7 +17,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── @quantum-l9/llm-router mock: capture constructor config + execute calls ────
-const routerCtor = vi.hoisted(() => ({ calls: [] as any[] }));
+const routerCtor = vi.hoisted(() => ({ calls: [] as unknown[] }));
 const executeMock = vi.hoisted(() => vi.fn());
 const initClientMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 
@@ -102,7 +102,12 @@ vi.mock("../../src/services/llm-parse.js", () => ({
 }));
 
 import { BudgetExhaustedError, TaskComplexity, TaskType } from "@quantum-l9/llm-router";
-import { DailyBudgetExhaustedError, LlmService } from "../../src/services/llm.js";
+import {
+  DailyBudgetExhaustedError,
+  LlmService,
+  type TaskDescriptor,
+} from "../../src/services/llm.js";
+import type { ModuleName } from "../../src/types/index.js";
 
 const okResponse = {
   content: "ok",
@@ -147,7 +152,10 @@ describe("LlmService.execute — gate ordering + memory + usage (GAP-005)", () =
     const svc = new LlmService();
     await expect(
       svc.execute(
-        { type: TaskType.CLASSIFICATION, complexity: TaskComplexity.LOW } as any,
+        {
+          type: TaskType.CLASSIFICATION,
+          complexity: TaskComplexity.LOW,
+        } as unknown as TaskDescriptor,
         "sys",
         "user",
       ),
@@ -159,7 +167,11 @@ describe("LlmService.execute — gate ordering + memory + usage (GAP-005)", () =
   it("initializes an unregistered client before dispatch so build-time calls work", async () => {
     const svc = new LlmService();
     await svc.execute(
-      { clientId: "safehavenrr", type: TaskType.SCORING, complexity: TaskComplexity.LOW } as any,
+      {
+        clientId: "safehavenrr",
+        type: TaskType.SCORING,
+        complexity: TaskComplexity.LOW,
+      } as unknown as TaskDescriptor,
       "sys",
       "user",
     );
@@ -174,7 +186,11 @@ describe("LlmService.execute — gate ordering + memory + usage (GAP-005)", () =
 
     await expect(
       svc.execute(
-        { clientId: "c1", type: TaskType.SCORING, complexity: TaskComplexity.LOW } as any,
+        {
+          clientId: "c1",
+          type: TaskType.SCORING,
+          complexity: TaskComplexity.LOW,
+        } as unknown as TaskDescriptor,
         "sys",
         "user",
       ),
@@ -194,7 +210,7 @@ describe("LlmService.execute — gate ordering + memory + usage (GAP-005)", () =
         type: TaskType.CONTENT_GENERATION,
         complexity: TaskComplexity.MEDIUM,
         description: "[web-vitals] fix",
-      } as any,
+      } as unknown as TaskDescriptor,
       "SYSTEM",
       "USER",
       { images },
@@ -216,7 +232,7 @@ describe("LlmService.execute — gate ordering + memory + usage (GAP-005)", () =
         type: TaskType.EXTRACTION,
         complexity: TaskComplexity.LOW,
         description: "[serp-intelligence] parse",
-      } as any,
+      } as unknown as TaskDescriptor,
       "sys",
       "user",
     );
@@ -235,7 +251,11 @@ describe("LlmService.execute — gate ordering + memory + usage (GAP-005)", () =
     const svc = new LlmService();
     await expect(
       svc.execute(
-        { clientId: "c1", type: TaskType.SCORING, complexity: TaskComplexity.LOW } as any,
+        {
+          clientId: "c1",
+          type: TaskType.SCORING,
+          complexity: TaskComplexity.LOW,
+        } as unknown as TaskDescriptor,
         "sys",
         "user",
       ),
@@ -255,7 +275,11 @@ describe("LlmService.execute — gate ordering + memory + usage (GAP-005)", () =
     const svc = new LlmService();
     await expect(
       svc.execute(
-        { clientId: "c1", type: TaskType.SCORING, complexity: TaskComplexity.LOW } as any,
+        {
+          clientId: "c1",
+          type: TaskType.SCORING,
+          complexity: TaskComplexity.LOW,
+        } as unknown as TaskDescriptor,
         "sys",
         "user",
       ),
@@ -266,7 +290,7 @@ describe("LlmService.execute — gate ordering + memory + usage (GAP-005)", () =
 
 describe("LlmService public methods route the correct task type + complexity (GAP-005)", () => {
   it("classify → CLASSIFICATION / LOW", async () => {
-    await new LlmService().classify("prompt", "c1", "web-vitals" as any, "purpose");
+    await new LlmService().classify("prompt", "c1", "web-vitals" as ModuleName, "purpose");
     expect(executeMock.mock.calls[0][0]).toMatchObject({
       type: TaskType.CLASSIFICATION,
       complexity: TaskComplexity.LOW,
@@ -274,7 +298,7 @@ describe("LlmService public methods route the correct task type + complexity (GA
   });
 
   it("score → SCORING / LOW", async () => {
-    await new LlmService().score("prompt", "c1", "web-vitals" as any, "purpose");
+    await new LlmService().score("prompt", "c1", "web-vitals" as ModuleName, "purpose");
     expect(executeMock.mock.calls[0][0]).toMatchObject({
       type: TaskType.SCORING,
       complexity: TaskComplexity.LOW,
@@ -282,17 +306,23 @@ describe("LlmService public methods route the correct task type + complexity (GA
   });
 
   it("extractJson → EXTRACTION", async () => {
-    await new LlmService().extractJson("prompt", "c1", "web-vitals" as any, "purpose");
+    await new LlmService().extractJson("prompt", "c1", "web-vitals" as ModuleName, "purpose");
     expect(executeMock.mock.calls[0][0]).toMatchObject({ type: TaskType.EXTRACTION });
   });
 
   it("generateContent → CONTENT_GENERATION", async () => {
-    await new LlmService().generateContent("sys", "user", "c1", "web-vitals" as any, "purpose");
+    await new LlmService().generateContent(
+      "sys",
+      "user",
+      "c1",
+      "web-vitals" as ModuleName,
+      "purpose",
+    );
     expect(executeMock.mock.calls[0][0]).toMatchObject({ type: TaskType.CONTENT_GENERATION });
   });
 
   it("strategize → STRATEGIC_REASONING / HIGH with reasoning required", async () => {
-    await new LlmService().strategize("sys", "user", "c1", "web-vitals" as any, "purpose");
+    await new LlmService().strategize("sys", "user", "c1", "web-vitals" as ModuleName, "purpose");
     expect(executeMock.mock.calls[0][0]).toMatchObject({
       type: TaskType.STRATEGIC_REASONING,
       complexity: TaskComplexity.HIGH,

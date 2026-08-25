@@ -55,7 +55,7 @@ function overallRating(
   const ratings = new Set(
     Object.entries(metrics)
       .filter(([_, v]) => v !== null)
-      .map(([k, v]) => rateMetric(k, v!)),
+      .map(([k, v]) => rateMetric(k, v ?? 0)),
   );
 
   if (ratings.has("poor")) return "poor";
@@ -98,8 +98,11 @@ async function fetchPageSpeedInsights(
       fcp: metrics["first-contentful-paint"]?.numericValue || null,
       ttfb: metrics["server-response-time"]?.numericValue || null,
     };
-  } catch (error: any) {
-    logger.error({ url, device, error: error.message }, "PSI fetch failed");
+  } catch (error: unknown) {
+    logger.error(
+      { url, device, error: error instanceof Error ? error.message : String(error) },
+      "PSI fetch failed",
+    );
     return null;
   }
 }
@@ -138,7 +141,10 @@ async function fetchCruxData(
     const record = response.data.record?.metrics;
     if (!record) return null;
 
-    const getP75 = (metric: any) => metric?.percentiles?.p75 || null;
+    const getP75 = (metric: Record<string, unknown>) => {
+      const percentiles = metric?.percentiles as Record<string, unknown> | undefined;
+      return typeof percentiles?.p75 === "number" ? percentiles.p75 : null;
+    };
 
     return {
       lcp: getP75(record.largest_contentful_paint),
@@ -150,12 +156,16 @@ async function fetchCruxData(
       fcp: getP75(record.first_contentful_paint),
       ttfb: getP75(record.experimental_time_to_first_byte),
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     // CrUX returns 404 for sites without enough traffic data
-    if (error.response?.status === 404) {
+    const status = (error as { response?: { status?: number } }).response?.status;
+    if (status === 404) {
       logger.debug({ origin }, "No CrUX data available (insufficient traffic)");
     } else {
-      logger.error({ origin, error: error.message }, "CrUX fetch failed");
+      logger.error(
+        { origin, error: error instanceof Error ? error.message : String(error) },
+        "CrUX fetch failed",
+      );
     }
     return null;
   }
@@ -231,8 +241,11 @@ async function fetchRumFromPosthog(
       fcp: results[3] || null,
       ttfb: results[4] || null,
     };
-  } catch (error: any) {
-    logger.error({ clientId, error: error.message }, "PostHog RUM fetch failed");
+  } catch (error: unknown) {
+    logger.error(
+      { clientId, error: error instanceof Error ? error.message : String(error) },
+      "PostHog RUM fetch failed",
+    );
     return null;
   }
 }
@@ -264,7 +277,7 @@ async function checkAllSources(job: Job): Promise<void> {
 
   logger.info({ clientDomain }, "Running multi-signal vitals check");
 
-  const sources: Array<{ name: string; device: string; data: any }> = [];
+  const sources: Array<{ name: string; device: string; data: Record<string, number | null> }> = [];
 
   // Source 1: PSI (Mobile)
   const psiMobile = await fetchPageSpeedInsights(url, "mobile");
