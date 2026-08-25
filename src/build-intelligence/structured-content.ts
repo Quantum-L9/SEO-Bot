@@ -38,7 +38,7 @@ import {
 import { createModuleLogger } from "../core/logger.js";
 import { getLlmService, type LlmService } from "../services/llm.js";
 import { type RouteValidationVerdict, validateRoute } from "./content-validator.js";
-import { buildFactCorpus, collectRouteText, CREDENTIAL_CLAIM_TOKENS } from "./claim-grounding.js";
+import { buildFactCorpus, checkRouteGrounding, collectRouteText, CREDENTIAL_CLAIM_TOKENS } from "./claim-grounding.js";
 import { PRODUCER } from "./producer.js";
 import { structuredContentRouteSchema } from "./schema-guards.js";
 
@@ -234,7 +234,7 @@ export async function createStructuredContentPackageWithEvidence(
       });
       routeEvidence.validation_calls += 1;
 
-      if (routePassed(verdict)) break;
+      if (routePassed(route, contractRoute, verdict)) break;
 
       // 4. ONE bounded repair — the budget is already consumed after this.
       if (attempt === 2) {
@@ -250,7 +250,7 @@ export async function createStructuredContentPackageWithEvidence(
           llm,
         });
         routeEvidence.validation_calls += 1;
-        if (!routePassed(verdict)) {
+        if (!routePassed(route, contractRoute, verdict)) {
           terminal = "semantic";
         }
         break;
@@ -766,12 +766,41 @@ function reconcileStructuredRoute(
   return { ...parsed, route_id: contractRoute.route_id, path: contractRoute.path, sections };
 }
 
-function routePassed(verdict: RouteValidationVerdict): boolean {
+/** Claim grounding is deterministic authority: an "unsupported claim" is
+ * defined by the facts corpus, not by model judgment. The semantic pass may
+ * flag phrases the corpus actually grounds (golden run #26: "emergency
+ * service"), so the pass/seal gates intersect the semantic claims with the
+ * deterministic grounding result. The repair loop keeps the raw semantic
+ * flags so repair feedback is never lost. */
+function groundedVerdict(
+  route: StructuredContentRoute,
+  contractRoute: PageContentContractRoute,
+  verdict: RouteValidationVerdict,
+): RouteValidationVerdict {
+  const grounding = checkRouteGrounding(route, contractRoute);
+  const groundedPhrases = new Set(
+    grounding.unsupportedClaims
+      .map((claim: string) => claim.match(/"([^"]+)"/)?.[1])
+      .filter((phrase: string | undefined): phrase is string => Boolean(phrase)),
+  );
+  const unsupportedClaims = verdict.unsupported_claims.filter((claim: string) => {
+    const phrase = claim.match(/"([^"]+)"/)?.[1];
+    return Boolean(phrase) && groundedPhrases.has(phrase as string);
+  });
+  return {
+    ...verdict,
+    unsupported_claims: unsupportedClaims,
+    contract_passed: verdict.contract_passed && unsupportedClaims.length === 0,
+  };
+}
+
+function routePassed(route: StructuredContentRoute, contractRoute: PageContentContractRoute, verdict: RouteValidationVerdict): boolean {
+  const grounded = groundedVerdict(route, contractRoute, verdict);
   return (
-    verdict.contract_passed &&
-    verdict.seo_blueprint_passed &&
-    verdict.failed_requirements.length === 0 &&
-    verdict.unsupported_claims.length === 0
+    grounded.contract_passed &&
+    grounded.seo_blueprint_passed &&
+    grounded.failed_requirements.length === 0 &&
+    grounded.unsupported_claims.length === 0
   );
 }
 
