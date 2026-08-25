@@ -283,6 +283,18 @@ export async function createStructuredContentPackageWithEvidence(
       );
     }
     if (terminal === "semantic" && verdict) {
+      logger.warn(
+        {
+          routeId: contractRoute.route_id,
+          failed: verdict.failed_requirements,
+          unsupported: verdict.unsupported_claims,
+          // Prose at the point of terminal failure — the verdict alone cannot
+          // say WHY a semantic judge disagreed with deterministically passing
+          // content (golden run #44: "Multiple contact options").
+          routeText: route ? collectRouteText(route).slice(0, 4000) : undefined,
+        },
+        "Route terminal after one bounded repair; prose for diagnosis",
+      );
       throw new ContentRequirementUnsatisfiedError(
         `Route "${contractRoute.route_id}" still fails validation after one bounded repair`,
         verdict.failed_requirements,
@@ -804,6 +816,10 @@ async function generateRouteRaw(
     "deterministic and looks for the literal terms, so a required topic phrased " +
     "as \"24/7 availability\" requires the words \"24/7\" AND \"availability\" to " +
     "appear in your prose (a paraphrase is scored as missing). " +
+    "QUESTION RULE: for every question in the contract's content_requirements, " +
+    "write at least one explicit answer sentence that reuses the question's own " +
+    "terms and is backed by an allowed fact — never invent a commitment, number, " +
+    "or guarantee the facts do not assert. " +
     "BANNED PHRASES: never write any of these credential/guarantee phrases " +
     "unless the phrase appears verbatim in the contract's verified facts: " +
     CREDENTIAL_CLAIM_TOKENS.join(", ") +
