@@ -703,6 +703,24 @@ describe("StructuredContentPackage — NC-11 shape discipline (content-alias →
     expect(evidence.repair_attempts).toBe(1);
   });
 
+  it("requirement-id echoes drive the repair but never veto the seal (golden run #53)", async () => {
+    // The contract's hero section carries requirement_ids ["r1"]; a bare
+    // id echo is a subjective group-satisfaction judgment.
+    const reqEcho: ContentValidationVerdict = {
+      seo_blueprint_passed: true,
+      contract_passed: false,
+      unsupported_claims: [],
+      failed_requirements: ["r1"],
+    };
+    const { llm } = fakeLlm([reqEcho, reqEcho]);
+    const { artifact, evidence } = await createStructuredContentPackageWithEvidence(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+      { llm },
+    );
+    expect(artifact.payload.validation.failed_requirements).toEqual([]);
+    expect(evidence.repair_attempts).toBe(1);
+  });
+
   it("non-acceptance semantic failures still veto the seal", async () => {
     // A real, non-filterable failure keeps the grounded pass closed.
     const { llm } = fakeLlm([fail, fail]);

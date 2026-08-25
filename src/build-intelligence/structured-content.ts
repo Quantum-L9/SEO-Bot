@@ -1074,6 +1074,20 @@ function groundedVerdict(
     if (lower.startsWith("missing proof requirements")) return true;
     return proofPhrases.some((phrase) => lower === phrase);
   };
+  // Requirement-id echoes: the validator quotes a contract requirement id
+  // bare ("inspection-benefits" — golden run #53), judging the whole
+  // requirement group unmet. Same authority shape as proof echoes: the
+  // group's topics/entities/questions are deterministically covered
+  // (the semantic pass only runs then), so a bare id echo is subjective.
+  const requirementIdPhrases = [
+    ...(contractRoute.sections ?? []).flatMap(
+      (section) => section.content_requirements?.requirement_ids ?? [],
+    ),
+  ]
+    .map((id) => id.trim().toLowerCase())
+    .filter(Boolean);
+  const isRequirementEcho = (failure: string): boolean =>
+    requirementIdPhrases.some((phrase) => failure.trim().toLowerCase() === phrase);
   // The validator quoting a deterministic remediation coverage sentence
   // ("Regarding expertise: ...") is a stylistic objection to coverage
   // output — deterministic coverage is authority (golden run #48).
@@ -1090,11 +1104,16 @@ function groundedVerdict(
       );
     }
     if (isRemediationSentenceQuote(failure)) return false;
-    // Enforce mode (attempt 1): keep acceptance-test/proof-echo flags so
-    // they drive the bounded repair. Grounded mode: drop them — they have
-    // no deterministic anchor and cannot veto a clean deterministic pass.
+    // Enforce mode (attempt 1): keep acceptance-test/proof/requirement-echo
+    // flags so they drive the bounded repair. Grounded mode: drop them —
+    // they have no deterministic anchor and cannot veto a clean
+    // deterministic pass.
     if (opts.enforceAcceptanceTests) return true;
-    return !isAcceptanceTestFailure(failure) && !isProofEcho(failure);
+    return (
+      !isAcceptanceTestFailure(failure) &&
+      !isProofEcho(failure) &&
+      !isRequirementEcho(failure)
+    );
   });
   // When every semantic failure was filtered by a deterministic authority
   // (grounding for claims, grounding for coverage, the acceptance-test rule),
