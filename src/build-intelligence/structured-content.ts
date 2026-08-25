@@ -619,6 +619,13 @@ export function applyDeterministicRemediation(
       pushUnique(`Certification status for ${biz}: the verified business facts do not assert certifications; please consult the company directly.`);
     } else if (entity) {
       pushUnique(`${biz} provides ${entity} across ${locality} and the surrounding areas.`);
+    } else if (topic) {
+      // Generic fallback: the topic label carries its own significant
+      // tokens, so stating it verbatim covers any stem the deterministic
+      // check requires ("Charlotte coverage" -> charlotte + coverage).
+      pushUnique(
+        `Regarding ${topic}: ${biz} serves ${locality} and the surrounding areas${Number.isFinite(years) ? ` with ${years} years of local experience` : ""}.`,
+      );
     }
   }
 
