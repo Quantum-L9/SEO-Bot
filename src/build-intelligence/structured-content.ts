@@ -829,6 +829,11 @@ function scrubTextSurfaces(
         if (endsWithWord(leftBody, prefix) && startsWithWord(rightBody, suffix)) {
           leftBody = leftBody.slice(0, leftBody.length - prefix.length).trimEnd();
           rightBody = rightBody.slice(suffix.length).trimStart();
+          // The removed phrase was quantified by an adjacent number in the
+          // left surface ("6 years of" | "experience serving..."): the
+          // dangling number is a claim remnant — strip it too (golden run
+          // #59: "6 serving Charlotte's unique weather conditions").
+          leftBody = leftBody.replace(/\d[\d,]*(?:\.\d+)?\+?\s*$/, "").trimEnd();
           removed = true;
         }
       }

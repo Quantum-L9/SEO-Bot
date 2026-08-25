@@ -166,6 +166,27 @@ describe("deterministic remediation scrub surface", () => {
     expect(joined).not.toContain("best in charlotte");
   });
 
+  it("strips the dangling number when a straddling phrase is removed (golden run #59)", () => {
+    const split = {
+      ...verdict,
+      unsupported_claims: ['/: unsupported magnitude claim "years of experience" — no verified fact asserts it'],
+    };
+    // "6 years of" ends the heading; "experience serving..." starts the
+    // paragraph. The straddle pass must remove the phrase AND the dangling
+    // quantifying number, never leaving "6 serving".
+    const route = applyDeterministicRemediation(
+      makeRoute(
+        { heading: "Trusted local service with 6 years of" },
+        [{ kind: "paragraph", text: "experience serving Charlotte's unique weather conditions — substantive content" }],
+      ),
+      split,
+      contract,
+    );
+    const joined = JSON.stringify(route).toLowerCase().replace(/\s+/g, " ");
+    expect(joined).not.toContain("6 serving");
+    expect(joined).not.toContain("years of experience");
+  });
+
   it("removes derived forms of a banned token (substring authority, golden run #41)", () => {
     const split = {
       ...verdict,
