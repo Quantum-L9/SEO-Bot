@@ -215,7 +215,7 @@ export async function validateRoute(
   );
   const unsupportedClaims = verdict.unsupported_claims.filter((claim) => {
     const phrase = claim.match(/"([^"]+)"/)?.[1];
-    return Boolean(phrase) && groundedPhrases.has(phrase);
+    return Boolean(phrase) && groundedPhrases.has(phrase as string);
   });
   return {
     route_id: contractRoute.route_id,
