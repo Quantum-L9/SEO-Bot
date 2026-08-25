@@ -200,11 +200,28 @@ export async function validateRoute(
   // Semantic validation is secondary authority: it may only ADD failures, never
   // clear a deterministic one (there are none left at this point) and never
   // turn a failing verdict into a pass.
+  //
+  // Claim grounding is deterministic authority: an "unsupported claim" is
+  // defined by the facts corpus, not by model judgment. The semantic pass
+  // may flag phrases the corpus actually grounds (observed with
+  // "emergency service" in golden run #26), so its unsupported_claims are
+  // intersected with the deterministic grounding result — a claim the corpus
+  // supports is never a failure.
+  const grounding = checkRouteGrounding(route, contractRoute);
+  const groundedPhrases = new Set(
+    grounding.unsupportedClaims
+      .map((claim) => claim.match(/"([^"]+)"/)?.[1])
+      .filter((phrase): phrase is string => Boolean(phrase)),
+  );
+  const unsupportedClaims = verdict.unsupported_claims.filter((claim) => {
+    const phrase = claim.match(/"([^"]+)"/)?.[1];
+    return Boolean(phrase) && groundedPhrases.has(phrase);
+  });
   return {
     route_id: contractRoute.route_id,
-    contract_passed: verdict.contract_passed,
+    contract_passed: verdict.contract_passed && unsupportedClaims.length === 0,
     seo_blueprint_passed: verdict.seo_blueprint_passed,
-    unsupported_claims: verdict.unsupported_claims,
+    unsupported_claims: unsupportedClaims,
     failed_requirements: verdict.failed_requirements,
   };
 }
