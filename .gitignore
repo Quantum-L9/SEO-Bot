@@ -19,3 +19,13 @@ validation/runs/
 # per run, so it is never shared branch content. Matches the constellation
 # convention (Website-Bot, l9-ci-core, l9-meta-injector, Cognitive.Engine.Graphs).
 .l9/
+
+# Agent session bootstrap — injected into the checkout per session, not
+# repository content (session IDs, absolute governance-clone paths). The
+# repo-owned session-start hook stays tracked; everything else under
+# .claude/ plus .mcp.json is per-session noise. Matches LLM-Router.
+/.claude/*
+!/.claude/hooks/
+/.claude/hooks/*
+!/.claude/hooks/session-start.sh
+/.mcp.json
