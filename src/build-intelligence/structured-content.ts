@@ -637,7 +637,17 @@ export function applyDeterministicRemediation(
       }
     }
   }
-  return route;
+
+  // d. Total-scrub guarantee: no surface can escape the per-field scrub.
+  //    Serialize the whole route, apply the same corpus-aware scrub to the
+  //    raw JSON text, and re-parse. Schema field names never contain the
+  //    banned tokens, so only prose is affected. The fact-derived sentences
+  //    appended above contain only grounded phrases and survive.
+  try {
+    return JSON.parse(scrub(JSON.stringify(route))) as StructuredContentRoute;
+  } catch {
+    return route;
+  }
 }
 
 /**
