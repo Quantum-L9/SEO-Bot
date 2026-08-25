@@ -515,7 +515,9 @@ export function applyDeterministicRemediation(
   const scrub = (text: string): string => {
     let out = text;
     for (const token of CREDENTIAL_CLAIM_TOKENS) {
-      if (!out.includes(token) || corpus.includes(token)) continue;
+      // Case-insensitive guard: the replace regex is /gi but the presence
+      // check must match it, or capitalized claims escape the scrub.
+      if (!out.toLowerCase().includes(token) || corpus.includes(token)) continue;
       const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const re = new RegExp(`\\b${escaped}\\b`, "gi");
       out = out.replace(re, " ");
