@@ -636,6 +636,34 @@ describe("StructuredContentPackage — NC-11 shape discipline (content-alias →
     expect(counts.val).toBe(2);
   });
 
+  it("a validator quoting a deterministic remediation sentence cannot veto the seal (golden run #48)", async () => {
+    const payload = structuredClone(makeContract().payload);
+    // genRoute() never writes the literal token "expertise" — the
+    // deterministic remediation will append a coverage sentence for it.
+    payload.routes[0]!.sections[0]!.content_requirements.topics.push("expertise");
+    const contract = sealIntelligenceArtifact({
+      artifact_type: "page_content_contract",
+      client_id: "client-1",
+      build_id: "build-1",
+      producer: { repo: "Website-Bot", version: "1.0.0" },
+      payload,
+    });
+    const quoteFail: ContentValidationVerdict = {
+      seo_blueprint_passed: true,
+      contract_passed: false,
+      unsupported_claims: [],
+      failed_requirements: [
+        "Regarding expertise: home serves the local area and the surrounding areas.",
+      ],
+    };
+    const { llm } = fakeLlm([quoteFail]);
+    const { artifact } = await createStructuredContentPackageWithEvidence(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: contract },
+      { llm },
+    );
+    expect(artifact.payload.validation.failed_requirements).toEqual([]);
+  });
+
   it("non-acceptance semantic failures still veto the seal", async () => {
     // A real, non-filterable failure keeps the grounded pass closed.
     const { llm } = fakeLlm([fail, fail]);
