@@ -590,18 +590,18 @@ export function applyDeterministicRemediation(
     const existing = collectRouteText(route);
     if (!existing.includes(text)) sentences.push(text);
   };
-  if (topics.length > 0) {
-    // Generic topic coverage: the topic labels carry their own significant
-    // tokens, so stating them verbatim covers EVERY stem the deterministic
-    // check derives from them — no per-topic templates can miss a stem.
-    // All missed topics share one sentence (one per-failure sentence reads
-    // as duplicated boilerplate — golden run #48).
+  // Generic coverage: topic/entity labels carry their own significant
+  // tokens (and entities must appear literally), so stating them verbatim
+  // covers EVERY stem the deterministic check derives from them. All
+  // missed labels share ONE sentence — one per failure reads as duplicated
+  // boilerplate (golden run #48), and a "provides X" entity template reads
+  // as nonsense for non-service entities ("provides storm damage" — golden
+  // run #49).
+  const labels = [...new Set([...topics, ...entities])];
+  if (labels.length > 0) {
     pushUnique(
-      `Regarding ${topics.join(" and ")}: ${biz} serves ${locality} and the surrounding areas${topicYearsPhrase}.`,
+      `Regarding ${labels.join(" and ")}: ${biz} serves ${locality} and the surrounding areas${topicYearsPhrase}.`,
     );
-  }
-  for (const entity of entities) {
-    pushUnique(`${biz} provides ${entity} across ${locality} and the surrounding areas.`);
   }
 
   if (sentences.length > 0) {
