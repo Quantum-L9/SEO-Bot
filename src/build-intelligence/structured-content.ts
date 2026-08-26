@@ -30,13 +30,13 @@ import {
   type StructuredContentPackageArtifact,
   type StructuredContentPackageV1,
   type StructuredContentRoute,
-  type StructuredContentRouteEvidence,
   sameArtifactRef,
   sealIntelligenceArtifact,
   WEBSITE_INTELLIGENCE_SCHEMAS,
 } from "@quantum-l9/bot-interop";
 import { createModuleLogger } from "../core/logger.js";
-import { getLlmService, type LlmService } from "../services/llm.js";
+import { getLlmService, type LlmCallCounter, type LlmService } from "../services/llm.js";
+import type { LlmRunRecorder } from "../services/llm-run-recorder.js";
 import {
   buildFactCorpus,
   CREDENTIAL_CLAIM_TOKENS,
@@ -46,7 +46,12 @@ import {
 } from "./claim-grounding.js";
 import { type RouteValidationVerdict, validateRoute } from "./content-validator.js";
 import { PRODUCER } from "./producer.js";
-import { structuredContentRouteSchema } from "./schema-guards.js";
+import {
+  type SchemaFailure,
+  STRUCTURED_CONTENT_OUTPUT_CONTRACT,
+  schemaFailureDetails,
+  structuredContentRouteSchema,
+} from "./schema-guards.js";
 
 const logger = createModuleLogger("build-intelligence:structured-content");
 
@@ -114,36 +119,45 @@ export class StructuredContentShapeError extends Error {
 }
 
 /**
- * Internal marker for a single shape failure (malformed JSON OR a strict-schema
- * violation). Distinct from {@link StructuredContentShapeError} — this one is
- * repairable; the loop consumes it inside the one-bounded-repair budget.
- */
-class StructuredRouteShapeFailure extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "StructuredRouteShapeFailure";
-  }
-}
-
-function isShapeFailure(error: unknown): error is StructuredRouteShapeFailure {
-  return error instanceof StructuredRouteShapeFailure;
-}
-
-/**
- * Measured evidence about the run, for the integrity receipt. `repair_attempts`
- * is COUNTED, never inferred — a sealed package always has a clean validation
- * block, so the block itself cannot tell you whether a repair happened.
- * `route_evidence` carries the per-route counters in contract route order and
- * is also sealed into the package payload for consumer-side proof.
+ * Measured evidence about the run, for the integrity receipt. Every counter is
+ * COUNTED from actual LLM calls, never inferred — a sealed package always has a
+ * clean validation block, so the block itself cannot tell you whether a repair
+ * happened or how many calls it took. `repair_attempts` is bounded by
+ * construction: at most `route_count` and at most one per route.
  */
 export interface StructuredContentEvidence {
   route_count: number;
-  generation_calls: number;
-  validation_calls: number;
+  generation_llm_calls: number;
+  semantic_validation_llm_calls: number;
   repair_attempts: number;
+  schema_failure_count: number;
   repaired_route_ids: string[];
-  /** Per-route measured runtime evidence, in contract route order. */
-  route_evidence: StructuredContentRouteEvidence[];
+  /**
+   * Per-route ownership of generation spend. Each route carries its OWN
+   * counters, incremented at the LLM boundary once per actual router call — a
+   * package total is never divided by a route count, and no route's
+   * `generation_calls` is ever assumed to be 1.
+   */
+  route_results: StructuredContentRouteResult[];
+}
+
+/**
+ * One route's measured generation ownership.
+ *
+ * `repair_attempts` is the deterministic image of `repaired_route_ids`: the
+ * orchestrator gives a route exactly one bounded repair and a second failure is
+ * terminal, so a route that appears in `repaired_route_ids` had exactly one
+ * repair and a route that does not had none. `generation_calls` is measured
+ * independently, and `assertRouteAccounting` refuses to report the pair unless
+ * they agree (`generation_calls === repair_attempts + 1`).
+ */
+export interface StructuredContentRouteResult {
+  route_id: string;
+  path: string;
+  generation_calls: number;
+  repair_attempts: number;
+  semantic_validation_calls: number;
+  schema_failure_count: number;
 }
 
 export interface StructuredContentResult {
@@ -157,14 +171,14 @@ export interface StructuredContentResult {
  */
 export async function createStructuredContentPackage(
   request: StructuredContentRequest,
-  deps: { llm?: LlmService } = {},
+  deps: { llm?: LlmService; recorder?: LlmRunRecorder } = {},
 ): Promise<StructuredContentPackageArtifact> {
   return (await createStructuredContentPackageWithEvidence(request, deps)).artifact;
 }
 
 export async function createStructuredContentPackageWithEvidence(
   request: StructuredContentRequest,
-  deps: { llm?: LlmService } = {},
+  deps: { llm?: LlmService; recorder?: LlmRunRecorder } = {},
 ): Promise<StructuredContentResult> {
   // ── Lineage first: reject a tampered/invalid/foreign contract BEFORE any
   //    LLM spend. Integrity, identity, and structure are all checked here.
@@ -176,151 +190,49 @@ export async function createStructuredContentPackageWithEvidence(
     (request.seo_content_blueprint?.payload.routes ?? []).map((route) => [route.route_id, route]),
   );
 
+  // Package totals, accumulated from the PER-ROUTE counters below — the route
+  // is the unit of ownership, and these are its sum rather than its source.
+  // Generation uses `schemaRepairAttempts: 0`, so each generateRoute() is
+  // exactly one LLM call; the semantic-validation path counts through a wrapper
+  // that injects the route's counter into content-validator's
+  // executePolicyJson call.
+  const generationCalls: LlmCallCounter = { value: 0 };
+  const semanticValidationCalls: LlmCallCounter = { value: 0 };
+
   const routes: StructuredContentRoute[] = [];
   const verdicts: RouteValidationVerdict[] = [];
   const repairedRouteIds: string[] = [];
-  const routeEvidenceList: StructuredContentRouteEvidence[] = [];
+  const routeResults: StructuredContentRouteResult[] = [];
+  let schemaFailureCount = 0;
 
   for (const contractRoute of contract.routes) {
-    const blueprintRoute = blueprintRoutes.get(contractRoute.route_id);
-    const routeEvidence: StructuredContentRouteEvidence = {
+    const produced = await produceRoute({
+      llm,
+      request,
+      contractRoute,
+      blueprintRoute: blueprintRoutes.get(contractRoute.route_id),
+      recorder: deps.recorder,
+    });
+
+    routes.push(produced.route);
+    verdicts.push(produced.verdict);
+    if (produced.repaired) repairedRouteIds.push(contractRoute.route_id);
+    schemaFailureCount += produced.schema_failure_count;
+    // `repaired` is authoritative and the invariant above proves at most one
+    // repair per route, so the mapping is deterministic: a repaired route
+    // spent exactly one repair, an unrepaired route spent none.
+    const routeRepairAttempts = produced.repaired ? 1 : 0;
+    assertRouteAccounting(contractRoute.route_id, produced.generation_calls, routeRepairAttempts);
+    routeResults.push({
       route_id: contractRoute.route_id,
-      repair_attempts: 0,
-      generation_calls: 0,
-      validation_calls: 0,
-      schema_errors: 0,
-    };
-
-    // The per-route budget is ONE repair of ANY kind (shape OR semantics) and
-    // at most TWO generation calls. Shape failures and semantic failures share
-    // that budget, so a route can never exceed it by stacking repairs.
-    let route: StructuredContentRoute | undefined;
-    let verdict: RouteValidationVerdict | undefined;
-    let repairNote: GenerationRepairNote | undefined;
-    let terminal: "shape" | "semantic" | undefined;
-
-    for (let attempt = 1; attempt <= 2 && !terminal; attempt++) {
-      // 1. Generate prose for this route only (shape is NOT yet enforced).
-      let raw: unknown;
-      try {
-        raw = await generateRouteRaw(llm, request, contractRoute, repairNote);
-        routeEvidence.generation_calls += 1;
-      } catch (error) {
-        // Malformed LLM JSON is a generation failure, not a fatal parse error.
-        if (!isShapeFailure(error)) throw error;
-        routeEvidence.schema_errors += 1;
-        if (attempt === 2) {
-          terminal = "shape";
-          break;
-        }
-        repairNote = { kind: "shape", detail: shapeFailureDetail(error) };
-        continue;
-      }
-
-      // 2. Reconcile: strict zod shape + identity re-assertion (authority).
-      try {
-        route = reconcileStructuredRoute(raw, contractRoute);
-      } catch (error) {
-        // Strict-schema violation (missing blocks, alias fields, unknown keys).
-        routeEvidence.schema_errors += 1;
-        if (attempt === 2) {
-          terminal = "shape";
-          break;
-        }
-        repairNote = { kind: "shape", detail: shapeFailureDetail(error) };
-        continue;
-      }
-
-      // 3. Validate (deterministic then semantic).
-      verdict = await validateRoute(route, contractRoute, {
-        clientId: request.client_id,
-        buildId: request.build_id,
-        blueprintRoute,
-        llm,
-      });
-      routeEvidence.validation_calls += 1;
-
-      // Attempt 1 enforces acceptance tests (subjective flags drive the
-      // one bounded repair); attempt 2 applies the grounded pass, where
-      // deterministic authority — not a strict judge's taste — decides.
-      if (routePassed(route, contractRoute, verdict, attempt === 1)) break;
-
-      // 4. ONE bounded repair — the budget is already consumed after this.
-      if (attempt === 2) {
-        // Deterministic remediation (no LLM, no second repair): scrub
-        // ungrounded credential phrases and append fact-derived literal
-        // coverage for the failed requirements, then re-validate once.
-        // If the deterministic pass fails, the route is terminal.
-        route = applyDeterministicRemediation(route, verdict, contractRoute);
-        verdict = await validateRoute(route, contractRoute, {
-          clientId: request.client_id,
-          buildId: request.build_id,
-          blueprintRoute,
-          llm,
-        });
-        routeEvidence.validation_calls += 1;
-        if (!routePassed(route, contractRoute, verdict)) {
-          terminal = "semantic";
-        }
-        break;
-      }
-      logger.warn(
-        {
-          routeId: contractRoute.route_id,
-          failed: verdict.failed_requirements,
-          unsupported: verdict.unsupported_claims,
-        },
-        "Route failed validation; running one bounded repair",
-      );
-      repairNote = {
-        kind: "semantic",
-        failed_requirements: verdict.failed_requirements,
-        unsupported_claims: verdict.unsupported_claims,
-      };
-    }
-
-    // A repair that ran is measured, whether it succeeded or not.
-    if (repairNote) {
-      routeEvidence.repair_attempts = 1;
-      repairedRouteIds.push(contractRoute.route_id);
-    }
-
-    // 5. Second failure is terminal — typed, never a raw 500.
-    if (terminal === "shape") {
-      throw new StructuredContentShapeError(
-        `Route "${contractRoute.route_id}" still violates the structured-content SHAPE after one bounded repair`,
-      );
-    }
-    if (terminal === "semantic" && verdict) {
-      logger.warn(
-        {
-          routeId: contractRoute.route_id,
-          failed: verdict.failed_requirements,
-          unsupported: verdict.unsupported_claims,
-          // Prose at the point of terminal failure — the verdict alone cannot
-          // say WHY a semantic judge disagreed with deterministically passing
-          // content (golden run #44: "Multiple contact options").
-          routeText: route ? collectRouteText(route).slice(0, 4000) : undefined,
-        },
-        "Route terminal after one bounded repair; prose for diagnosis",
-      );
-      throw new ContentRequirementUnsatisfiedError(
-        `Route "${contractRoute.route_id}" still fails validation after one bounded repair`,
-        verdict.failed_requirements,
-        verdict.unsupported_claims,
-      );
-    }
-    if (!route || !verdict) {
-      throw new Error(`Route "${contractRoute.route_id}" produced no route verdict`);
-    }
-
-    routes.push(route);
-    // The sealed validation block records the GROUNDED verdict — the same
-    // authority the pass gate uses — so a route that passed on deterministic
-    // grounding never carries subjective semantic residue into the sealed
-    // package.
-    verdicts.push(groundedVerdict(route, contractRoute, verdict));
-    routeEvidenceList.push(routeEvidence);
+      path: contractRoute.path,
+      generation_calls: produced.generation_calls,
+      repair_attempts: routeRepairAttempts,
+      semantic_validation_calls: produced.semantic_validation_calls,
+      schema_failure_count: produced.schema_failure_count,
+    });
+    generationCalls.value += produced.generation_calls;
+    semanticValidationCalls.value += produced.semantic_validation_calls;
   }
 
   const validation: StructuredContentPackageV1["validation"] = {
@@ -336,10 +248,16 @@ export async function createStructuredContentPackageWithEvidence(
     page_content_contract_ref: contractRef,
     routes,
     validation,
-    // Measured per-route runtime evidence (in contract route order), sealed so
-    // the consumer can prove the one-bounded-repair budget + zero schema errors
-    // without trusting the clean validation block.
-    route_evidence: routeEvidenceList,
+    // Measured per-route runtime evidence, in contract route order — the
+    // consumer can prove the one-bounded-repair budget without trusting the
+    // clean validation block.
+    route_evidence: routeResults.map((result) => ({
+      route_id: result.route_id,
+      repair_attempts: result.repair_attempts,
+      generation_calls: result.generation_calls,
+      validation_calls: result.semantic_validation_calls,
+      schema_errors: result.schema_failure_count,
+    })),
   };
 
   assertPackageLineage(payload, contract.routes, contractRef);
@@ -369,14 +287,211 @@ export async function createStructuredContentPackageWithEvidence(
     artifact,
     evidence: {
       route_count: routes.length,
-      generation_calls: routeEvidenceList.reduce((sum, r) => sum + r.generation_calls, 0),
-      validation_calls: routeEvidenceList.reduce((sum, r) => sum + r.validation_calls, 0),
+      generation_llm_calls: generationCalls.value,
+      semantic_validation_llm_calls: semanticValidationCalls.value,
       // Bounded at one per route by construction; a second failure is terminal.
       repair_attempts: repairedRouteIds.length,
+      schema_failure_count: schemaFailureCount,
       repaired_route_ids: repairedRouteIds,
-      route_evidence: routeEvidenceList,
+      route_results: routeResults,
     },
   };
+}
+
+/** One route's measured outcome, owned entirely by that route. */
+interface ProducedRoute {
+  route: StructuredContentRoute;
+  verdict: RouteValidationVerdict;
+  repaired: boolean;
+  generation_calls: number;
+  semantic_validation_calls: number;
+  schema_failure_count: number;
+}
+
+/**
+ * Generate → validate → ONE bounded repair → re-validate, for a single route.
+ *
+ * The route is the unit of ownership, so the whole lifecycle for one route —
+ * including its own call counters — lives here, and the orchestrator only
+ * accumulates. A second failure after the repair is terminal: there is no
+ * second repair, and the counters returned describe exactly what was spent.
+ */
+async function produceRoute(args: {
+  llm: LlmService;
+  request: StructuredContentRequest;
+  contractRoute: PageContentContractRoute;
+  blueprintRoute?: SEOContentBlueprintRoute;
+  recorder?: LlmRunRecorder;
+}): Promise<ProducedRoute> {
+  const { llm, request, contractRoute, blueprintRoute, recorder } = args;
+  // Per-route counters. THIS route's generation spend is owned by THIS route:
+  // the package total is the sum of them, never their source.
+  const generationCalls: LlmCallCounter = { value: 0 };
+  const validationCalls: LlmCallCounter = { value: 0 };
+  const validationLlm = countingValidationLlm(llm, validationCalls, recorder);
+  const validationArgs = {
+    clientId: request.client_id,
+    buildId: request.build_id,
+    blueprintRoute,
+    llm: validationLlm,
+  };
+  let schemaFailureCount = 0;
+
+  // 1. Generate prose for this route only — ONE actual call (no internal
+  //    repair: this function owns the one total repair for the route).
+  let schemaFailures: SchemaFailure[] = [];
+  let generated: StructuredContentRoute | null = null;
+  try {
+    generated = await generateRoute(
+      llm,
+      request,
+      contractRoute,
+      undefined,
+      generationCalls,
+      recorder,
+    );
+  } catch (error) {
+    schemaFailures = schemaFailureDetails(error);
+    schemaFailureCount += 1;
+    logger.warn(
+      { routeId: contractRoute.route_id, failures: schemaFailures },
+      "Route generation failed JSON/schema validation; deferring to the one route repair",
+    );
+  }
+
+  // 2. Validate (deterministic then semantic). A route that never parsed
+  //    cannot be validated — its repair below is fed the schema failures.
+  let verdict: RouteValidationVerdict =
+    generated === null
+      ? {
+          route_id: contractRoute.route_id,
+          contract_passed: false,
+          seo_blueprint_passed: false,
+          unsupported_claims: [],
+          failed_requirements: [],
+        }
+      : await validateRoute(generated, contractRoute, validationArgs);
+
+  if (generated !== null && routePassed(generated, contractRoute, verdict, true)) {
+    return {
+      route: generated,
+      verdict: groundedVerdict(generated, contractRoute, verdict),
+      repaired: false,
+      generation_calls: generationCalls.value,
+      semantic_validation_calls: validationCalls.value,
+      schema_failure_count: schemaFailureCount,
+    };
+  }
+
+  // 3. ONE bounded repair covers a schema failure OR a semantic failure —
+  //    never both, so a route consumes at most two generation calls. The
+  //    repair prompt carries the exact failure evidence and the output
+  //    contract again.
+  logger.warn(
+    {
+      routeId: contractRoute.route_id,
+      schemaFailures,
+      failed: verdict.failed_requirements,
+      unsupported: verdict.unsupported_claims,
+    },
+    "Route failed validation; running its one bounded repair",
+  );
+  let repaired: StructuredContentRoute;
+  try {
+    repaired = await generateRoute(
+      llm,
+      request,
+      contractRoute,
+      {
+        schema_failures: schemaFailures,
+        failed_requirements: verdict.failed_requirements,
+        unsupported_claims: verdict.unsupported_claims,
+      },
+      generationCalls,
+      recorder,
+    );
+  } catch (error) {
+    const repairFailures = schemaFailureDetails(error);
+    if (repairFailures.length > 0) {
+      // A repair that still violates the strict output SHAPE is terminal with
+      // the typed shape error (→ 422), not a semantic failure.
+      throw new StructuredContentShapeError(
+        `Route "${contractRoute.route_id}" repair still violates the structured-content SHAPE after one bounded repair: ` +
+          repairFailures.map((failure) => `${failure.path}: ${failure.message}`).join("; "),
+      );
+    }
+    throw new ContentRequirementUnsatisfiedError(
+      `Route "${contractRoute.route_id}" repair produced invalid content: ` +
+        repairFailures.map((failure) => `${failure.path}: ${failure.message}`).join("; "),
+      verdict.failed_requirements,
+      verdict.unsupported_claims,
+    );
+  }
+  verdict = await validateRoute(repaired, contractRoute, validationArgs);
+
+  // 4. Second failure is terminal for the LLM repair path — but the
+  //    deterministic remediation gets one last authority pass: scrub
+  //    ungrounded credential phrases and append fact-derived literal
+  //    coverage, then re-validate once. No LLM, no second repair.
+  if (!routePassed(repaired, contractRoute, verdict)) {
+    const remediated = applyDeterministicRemediation(repaired, verdict, contractRoute);
+    verdict = await validateRoute(remediated, contractRoute, validationArgs);
+    if (!routePassed(remediated, contractRoute, verdict)) {
+      logger.warn(
+        {
+          routeId: contractRoute.route_id,
+          failed: verdict.failed_requirements,
+          unsupported: verdict.unsupported_claims,
+          routeText: collectRouteText(remediated).slice(0, 4000),
+        },
+        "Route terminal after one bounded repair; prose for diagnosis",
+      );
+      throw new ContentRequirementUnsatisfiedError(
+        `Route "${contractRoute.route_id}" still fails validation after one bounded repair`,
+        verdict.failed_requirements,
+        verdict.unsupported_claims,
+      );
+    }
+    return {
+      route: remediated,
+      verdict: groundedVerdict(remediated, contractRoute, verdict),
+      repaired: true,
+      generation_calls: generationCalls.value,
+      semantic_validation_calls: validationCalls.value,
+      schema_failure_count: schemaFailureCount,
+    };
+  }
+  return {
+    route: repaired,
+    verdict: groundedVerdict(repaired, contractRoute, verdict),
+    repaired: true,
+    generation_calls: generationCalls.value,
+    semantic_validation_calls: validationCalls.value,
+    schema_failure_count: schemaFailureCount,
+  };
+}
+
+/**
+ * Refuse to report a route's accounting unless the two independent facts agree.
+ *
+ * `generation_calls` is COUNTED at the LLM boundary; `repair_attempts` is the
+ * deterministic image of `repaired_route_ids`. Because generation runs with
+ * `schemaRepairAttempts: 0`, a route makes exactly one call plus at most one
+ * repair call — so the counted total must be `repair_attempts + 1`. Anything
+ * else means the counters no longer describe the run, and the run fails rather
+ * than exporting an untrue number.
+ */
+function assertRouteAccounting(
+  routeId: string,
+  generationCalls: number,
+  repairAttempts: number,
+): void {
+  if (generationCalls !== repairAttempts + 1) {
+    throw new StructuredContentRouteMismatchError(
+      `route "${routeId}" made ${generationCalls} generation call(s) with ${repairAttempts} ` +
+        `bounded repair(s); the one-repair invariant requires exactly ${repairAttempts + 1}`,
+    );
+  }
 }
 
 /**
@@ -469,8 +584,13 @@ function assertPackageLineage(
     );
   }
   for (let i = 0; i < contractRoutes.length; i++) {
-    const expected = contractRoutes[i]!;
-    const actual = payload.routes[i]!;
+    const expected = contractRoutes[i];
+    const actual = payload.routes[i];
+    if (!expected || !actual) {
+      throw new StructuredContentRouteMismatchError(
+        `Route index ${i} missing from contract or payload`,
+      );
+    }
     if (actual.route_id !== expected.route_id) {
       throw new StructuredContentRouteMismatchError(
         `route ${i} is "${actual.route_id}"; contract requires "${expected.route_id}"`,
@@ -494,26 +614,141 @@ function assertPackageLineage(
   }
 }
 
-/** Repair scoping for a re-generation call: shape violations OR semantic failures. */
-type GenerationRepairNote =
-  | { kind: "shape"; detail: string }
-  | { kind: "semantic"; failed_requirements: string[]; unsupported_claims: string[] };
+/**
+ * Generate a single route's final content from ONLY its contract route. An
+ * optional `repair` payload appends the specific failures to fix — scoping the
+ * repair to this route without regenerating anything that already passed.
+ *
+ * Always called with `schemaRepairAttempts: 0`: this function performs EXACTLY
+ * ONE actual LLM call, and the orchestrator owns the one total repair per
+ * route (a route can therefore never consume more than two generation calls).
+ * The caller-supplied counter records the call honestly for run evidence.
+ */
+async function generateRoute(
+  llm: LlmService,
+  request: StructuredContentRequest,
+  contractRoute: PageContentContractRoute,
+  repair?: {
+    schema_failures?: SchemaFailure[];
+    failed_requirements?: string[];
+    unsupported_claims?: string[];
+  },
+  generationCalls?: LlmCallCounter,
+  recorder?: LlmRunRecorder,
+): Promise<StructuredContentRoute> {
+  const systemPrompt =
+    "You are the sole owner of final website prose for one route. Write ONLY from " +
+    "the supplied contract and allowed facts. Never invent facts or claims; every " +
+    "claim must be backed by an allowed fact. Respect forbidden claims. Cover the " +
+    "required topics/entities, answer the required questions, and satisfy the proof " +
+    "requirements. Produce a metadata title and description that satisfy their " +
+    "requirements. Produce exactly one section object per contract section_id (same " +
+    "ids), plus faqs, internal links (including every required internal-link target), " +
+    "and schema_content_inputs.\n\n" +
+    STRUCTURED_CONTENT_OUTPUT_CONTRACT;
 
-function shapeFailureDetail(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const repairBlock = repair
+    ? {
+        repair_instructions: {
+          note:
+            "Your previous output failed validation. Fix ONLY the items below; " +
+            "keep everything else compliant. Any unsupported claims below are BANNED " +
+            "phrases: you MUST remove them completely — do not rephrase them, do not " +
+            "include them in any form, in any section, FAQ, title, or description.",
+          schema_failures: repair.schema_failures ?? [],
+          failed_requirements: repair.failed_requirements ?? [],
+          remove_or_support_unsupported_claims: repair.unsupported_claims ?? [],
+        },
+      }
+    : {};
+
+  let userPrompt = JSON.stringify(
+    {
+      contract_route: contractRoute,
+      required_internal_link_targets: contractRoute.internal_link_requirements.map(
+        (link) => link.target_route_id,
+      ),
+      required_section_ids: contractRoute.sections.map((section) => section.section_id),
+      ...repairBlock,
+    },
+    null,
+    2,
+  );
+  if (repair) {
+    // The repair prompt carries the exact output contract again — the model is
+    // never asked to "fix" an output it was never taught the shape of.
+    userPrompt += `\n\n---\nThe exact output contract again:\n${STRUCTURED_CONTENT_OUTPUT_CONTRACT}`;
+  }
+
+  return llm.executePolicyJson("STRUCTURED_CONTENT_GENERATION", {
+    clientId: request.client_id,
+    module: "build-intelligence",
+    purpose: `structured-content:${contractRoute.route_id}`,
+    systemPrompt,
+    userPrompt,
+    schemaRepairAttempts: 0,
+    callCounter: generationCalls,
+    recorder,
+    validate: (value) => reconcileStructuredRoute(value, contractRoute),
+  });
 }
 
-/** The fixed shape contract that the system prompt pins (NC-11 fix, first half). */
-const SHAPE_SPEC =
-  "REQUIRED OUTPUT SHAPE (strict — the validation schema rejects anything else):\n" +
-  "- Top-level keys: route_id, path, metadata, sections, faqs, internal_links, schema_content_inputs. No other keys.\n" +
-  "- metadata must have a non-empty title and description.\n" +
-  '- Every section MUST include a non-empty "blocks" array; a section with prose and no blocks is invalid.\n' +
-  '- Each block is one of: {"kind":"paragraph","text"} | {"kind":"bullets","items"} | ' +
-  '{"kind":"steps","items"} | {"kind":"quote","text","attribution"?}.\n' +
-  '- FORBIDDEN alias fields on a section: "content", "body", "copy", "paragraphs" — all prose lives in "blocks".\n' +
-  '- faqs: array of {"question","answer"}; internal_links: array of {"target_route_id","anchor_text"}; ' +
-  "schema_content_inputs: object with optional faq/service/local_business booleans.";
+/**
+ * Validate model output and re-assert route/section identity from the contract
+ * (identity is an input, not the model's to change). Sections are returned in
+ * contract order; an unexpected or missing section_id throws (→ bounded repair).
+ */
+function reconcileStructuredRoute(
+  value: unknown,
+  contractRoute: PageContentContractRoute,
+): StructuredContentRoute {
+  const parsed = structuredContentRouteSchema.parse(value);
+
+  const contractSectionIds = contractRoute.sections.map((section) => section.section_id);
+  const contractSet = new Set(contractSectionIds);
+  const producedById = new Map(parsed.sections.map((section) => [section.section_id, section]));
+
+  const unexpected = parsed.sections
+    .map((section) => section.section_id)
+    .filter((id) => !contractSet.has(id));
+  if (unexpected.length > 0) {
+    throw new Error(`Unexpected section_id(s) not in contract: ${unexpected.join(", ")}`);
+  }
+  const sections = contractSectionIds.map((id) => {
+    const section = producedById.get(id);
+    if (!section) throw new Error(`Missing required section_id: ${id}`);
+    return section;
+  });
+
+  return { ...parsed, route_id: contractRoute.route_id, path: contractRoute.path, sections };
+}
+
+/**
+ * content-validator.ts owns the semantic-validation call and is not part of
+ * this change surface. This wrapper injects the PER-ROUTE actual-call counter
+ * and the run recorder into its executePolicyJson call so run evidence can
+ * count semantic LLM calls honestly — including any internal bounded repair the
+ * validator's own default `schemaRepairAttempts: 1` may perform.
+ */
+function countingValidationLlm(
+  llm: LlmService,
+  calls: LlmCallCounter,
+  recorder?: LlmRunRecorder,
+): LlmService {
+  const target = llm;
+  return {
+    async executePolicyJson(
+      operation: Parameters<LlmService["executePolicyJson"]>[0],
+      args: Omit<Parameters<LlmService["executePolicyJson"]>[1], "callCounter" | "recorder">,
+    ): Promise<unknown> {
+      return target.executePolicyJson<unknown>(operation, {
+        ...args,
+        callCounter: calls,
+        recorder,
+      });
+    },
+  } as unknown as LlmService;
+}
 
 /**
  * Deterministic remediation — NOT an LLM call, NOT a second repair. Applied
@@ -808,7 +1043,7 @@ function scrubTextSurfaces(
 
   for (let i = 0; i < values.length; i++) {
     if (!defined[i]) continue;
-    let out = values[i]!;
+    let out = values[i] ?? "";
     const haystack = out.toLowerCase();
     for (const token of tokens) {
       // Case-insensitive guard: the replace regex is /gi but the presence
@@ -920,154 +1155,8 @@ function scrubTextSurfaces(
   }
 
   surfaces.forEach((surface, index) => {
-    if (defined[index]) surface.write(values[index]!);
+    if (defined[index]) surface.write(values[index] ?? "");
   });
-}
-
-/**
- * Generate a single route's final content from ONLY its contract route. An
- * optional `repairNote` appends the specific failures to fix — scoping the
- * repair to this route without regenerating anything that already passed.
- *
- * This runs with `noInternalRepair` and an identity validator: the caller's
- * loop owns the ENTIRE per-route repair budget, so malformed JSON and strict
- * shape violations are repaired exactly once at the loop boundary (never
- * twice, never zero), and the generation/schema-error counts are measured.
- */
-async function generateRouteRaw(
-  llm: LlmService,
-  request: StructuredContentRequest,
-  contractRoute: PageContentContractRoute,
-  repairNote?: GenerationRepairNote,
-): Promise<unknown> {
-  const systemPrompt =
-    "You are the sole owner of final website prose for one route. Write ONLY from " +
-    "the supplied contract and allowed facts. Never invent facts or claims; every " +
-    "claim must be backed by an allowed fact. Respect forbidden claims. Cover the " +
-    "required topics/entities, answer the required questions, and satisfy the proof " +
-    "requirements. CRITICAL COVERAGE RULE: every required topic, entity, and " +
-    "question must be covered with its EXACT terminology — the validation is " +
-    "deterministic and looks for the literal terms, so a required topic phrased " +
-    'as "24/7 availability" requires the words "24/7" AND "availability" to ' +
-    "appear in your prose (a paraphrase is scored as missing). " +
-    "QUESTION RULE: for every question in the contract's content_requirements, " +
-    "write at least one explicit answer sentence that reuses the question's own " +
-    "terms and is backed by an allowed fact — never invent a commitment, number, " +
-    "or guarantee the facts do not assert. " +
-    "NUMBER RULE: never write a specific number, year range, lifespan, " +
-    "statistic, or percentage unless that exact number appears verbatim in the " +
-    "contract's allowed facts. " +
-    "BANNED PHRASES: never write any of these credential/guarantee phrases " +
-    "unless the phrase appears verbatim in the contract's verified facts: " +
-    CREDENTIAL_CLAIM_TOKENS.join(", ") +
-    ". If a content requirement seems to demand one, express the underlying " +
-    "fact without the banned phrase. Produce a metadata title and description that satisfy their " +
-    "requirements. Produce exactly one section object per contract section_id (same " +
-    "ids), plus faqs, internal links (including every required internal-link target), " +
-    "and schema_content_inputs. Respond with ONLY a single JSON object for this " +
-    "route — no markdown fences, no commentary.\n\n" +
-    SHAPE_SPEC;
-
-  const repairBlock = repairNote ? buildRepairBlock(repairNote) : {};
-
-  const userPrompt = JSON.stringify(
-    {
-      contract_route: contractRoute,
-      required_internal_link_targets: contractRoute.internal_link_requirements.map(
-        (link) => link.target_route_id,
-      ),
-      required_section_ids: contractRoute.sections.map((section) => section.section_id),
-      ...repairBlock,
-    },
-    null,
-    2,
-  );
-
-  try {
-    return await llm.executePolicyJson(
-      "STRUCTURED_CONTENT_GENERATION",
-      {
-        clientId: request.client_id,
-        module: "build-intelligence",
-        purpose: `structured-content:${contractRoute.route_id}`,
-        systemPrompt,
-        userPrompt,
-        // Identity validator: shape is enforced by the loop, not here.
-        validate: (value) => value,
-      },
-      { noInternalRepair: true },
-    );
-  } catch (error) {
-    // The ONLY failure this call can produce with an identity validator is a
-    // malformed-JSON parse error from llm-parse.ts (stable message prefix).
-    // Everything else (budget, router, provider) propagates untouched.
-    if (error instanceof Error && error.message.startsWith("LLM did not return valid JSON")) {
-      throw new StructuredRouteShapeFailure(error.message);
-    }
-    throw error;
-  }
-}
-
-/**
- * Shape-specific repair instructions. The note names the failure explicitly so
- * the model fixes the SHAPE (missing blocks / alias fields), never silent
- * normalization of `content` → `blocks` by the application.
- */
-function buildRepairBlock(repairNote: GenerationRepairNote): object {
-  if (repairNote.kind === "shape") {
-    return {
-      repair_instructions: {
-        note:
-          "Your previous output had an invalid SHAPE: missing blocks / present content " +
-          "(or another strict-schema violation). Fix ONLY the shape violations below; " +
-          "keep everything else compliant. Re-read the REQUIRED OUTPUT SHAPE in the " +
-          "system prompt and produce exactly that shape.",
-        shape_violation: repairNote.detail,
-      },
-    };
-  }
-  return {
-    repair_instructions: {
-      note:
-        "Your previous output failed validation. Fix ONLY the items below; " +
-        "keep everything else compliant. The unsupported claims are BANNED " +
-        "phrases: your previous response STILL contained them. You MUST remove " +
-        "them completely — do not rephrase them, do not include them in any " +
-        "form, in any section, FAQ, title, or description.",
-      failed_requirements: repairNote.failed_requirements,
-      banned_phrases_you_must_remove: repairNote.unsupported_claims,
-    },
-  };
-}
-
-/**
- * Validate model output and re-assert route/section identity from the contract
- * (identity is an input, not the model's to change). Sections are returned in
- * contract order; an unexpected or missing section_id throws (→ bounded repair).
- */
-function reconcileStructuredRoute(
-  value: unknown,
-  contractRoute: PageContentContractRoute,
-): StructuredContentRoute {
-  const parsed = structuredContentRouteSchema.parse(value);
-
-  const contractSectionIds = contractRoute.sections.map((section) => section.section_id);
-  const contractSet = new Set(contractSectionIds);
-  const producedById = new Map(parsed.sections.map((section) => [section.section_id, section]));
-
-  const unexpected = parsed.sections
-    .map((section) => section.section_id)
-    .filter((id) => !contractSet.has(id));
-  if (unexpected.length > 0) {
-    throw new Error(`Unexpected section_id(s) not in contract: ${unexpected.join(", ")}`);
-  }
-  const sections = contractSectionIds.map((id) => {
-    const section = producedById.get(id);
-    if (!section) throw new Error(`Missing required section_id: ${id}`);
-    return section;
-  });
-
-  return { ...parsed, route_id: contractRoute.route_id, path: contractRoute.path, sections };
 }
 
 /** Claim grounding is deterministic authority: an "unsupported claim" is
@@ -1092,30 +1181,20 @@ function groundedVerdict(
     const phrase = claim.match(/"([^"]+)"/)?.[1];
     return Boolean(phrase) && groundedPhrases.has(phrase as string);
   });
-  // Deterministic coverage is also authority for topic/entity coverage: the
-  // semantic validator has repeatedly disagreed with a deterministic PASS
-  // (golden run #39, 'workmanship guarantee'). A coverage-shaped failure is
-  // kept only when the deterministic check agrees; other failure classes
-  // (proof, factual, structural) pass through untouched.
   const groundingFailurePhrases = new Set(
     grounding.failures
       .map((failure) => failure.match(/"([^"]+)"/)?.[1])
       .filter((phrase): phrase is string => Boolean(phrase))
       .map((phrase) => phrase.toLowerCase()),
   );
-  // Coverage-shaped failures come in two validator phrasings: the single
-  // "required topic/entity \"X\"" form and the aggregated "Missing
-  // required topics: a, b, c" form (golden run #52). Deterministic
-  // coverage is authority for both: a listed label survives only when the
-  // deterministic grounding check flags the same label. The semantic pass
-  // only runs on deterministically clean routes, so an unmatched label is
-  // by construction a judge-vs-authority disagreement and drops.
   const isCoverageShaped = (failure: string): boolean =>
     /required (topic|entity)/.test(failure) ||
     failure.includes("Missing required topics") ||
     failure.includes("Missing required entities");
   const coverageLabels = (failure: string): string[] => {
-    const quoted = [...failure.matchAll(/"([^"]+)"/g)].map((match) => match[1]!);
+    const quoted = [...failure.matchAll(/"([^"]+)"/g)]
+      .map((match) => match[1])
+      .filter((capture): capture is string => typeof capture === "string");
     if (quoted.length > 0) return quoted.map((label) => label.toLowerCase());
     const colon = failure.indexOf(":");
     const list = colon >= 0 ? failure.slice(colon + 1) : "";
@@ -1124,13 +1203,6 @@ function groundedVerdict(
       .map((item) => item.trim().toLowerCase())
       .filter(Boolean);
   };
-  // Acceptance-test judgments: the validator echoes the contract's
-  // acceptance tests as "<test> - <explanation>". These are subjective
-  // quality flags with no deterministic anchor (golden run #47:
-  // "Warranty information is prominent - ... mentioned but not prominently
-  // displayed" against grounded content that states the warranty three
-  // times). They drive the one bounded repair through the raw verdict but
-  // never veto a deterministically clean route at the pass/seal gate.
   const acceptancePhrases = [
     ...(contractRoute.acceptance_tests ?? []),
     ...(contractRoute.sections ?? []).flatMap((section) => section.acceptance_tests ?? []),
@@ -1139,13 +1211,6 @@ function groundedVerdict(
     .filter(Boolean);
   const isAcceptanceTestFailure = (failure: string): boolean =>
     acceptancePhrases.some((phrase) => failure.toLowerCase().includes(phrase.toLowerCase()));
-  // Proof-requirement echoes: the validator quotes the contract's proof
-  // requirements by name ("damage thresholds", "inspection checklist" —
-  // golden run #50). Same authority shape as acceptance tests: subjective
-  // satisfaction judgments with no deterministic anchor; they enforce on
-  // attempt 1 (drive the one bounded repair) and drop at the grounded pass.
-  // Exact-match only — a failure that ADDS explanation beyond the proof
-  // name is a substantive finding and keeps its veto.
   const proofPhrases = [
     ...(contractRoute.sections ?? []).flatMap((section) => section.proof_requirements ?? []),
   ]
@@ -1153,17 +1218,9 @@ function groundedVerdict(
     .filter(Boolean);
   const isProofEcho = (failure: string): boolean => {
     const lower = failure.trim().toLowerCase();
-    // Aggregated form: "Missing proof requirements: a, b, c" (golden run
-    // #52) — a subjective satisfaction judgment over contract proofs,
-    // same authority shape as an exact single-proof echo.
     if (lower.startsWith("missing proof requirements")) return true;
     return proofPhrases.some((phrase) => lower === phrase);
   };
-  // Requirement-id echoes: the validator quotes a contract requirement id
-  // bare ("inspection-benefits" — golden run #53), judging the whole
-  // requirement group unmet. Same authority shape as proof echoes: the
-  // group's topics/entities/questions are deterministically covered
-  // (the semantic pass only runs then), so a bare id echo is subjective.
   const requirementIdPhrases = [
     ...(contractRoute.sections ?? []).flatMap(
       (section) => section.content_requirements?.requirement_ids ?? [],
@@ -1173,32 +1230,19 @@ function groundedVerdict(
     .filter(Boolean);
   const isRequirementEcho = (failure: string): boolean =>
     requirementIdPhrases.some((phrase) => failure.trim().toLowerCase() === phrase);
-  // The validator quoting a deterministic remediation coverage sentence
-  // ("Regarding expertise: ...") is a stylistic objection to coverage
-  // output — deterministic coverage is authority (golden run #48).
   const routeTextLower = collectRouteText(route).toLowerCase();
   const isRemediationSentenceQuote = (failure: string): boolean =>
     failure.trimStart().startsWith("Regarding ") && routeTextLower.includes(failure.toLowerCase());
   const failedRequirements = verdict.failed_requirements.filter((failure) => {
     if (isCoverageShaped(failure)) {
-      // Deterministic coverage is the authority; a judge-vs-authority
-      // disagreement (any label the grounding check does not flag) drops.
       return coverageLabels(failure).some((label) => groundingFailurePhrases.has(label));
     }
     if (isRemediationSentenceQuote(failure)) return false;
-    // Enforce mode (attempt 1): keep acceptance-test/proof/requirement-echo
-    // flags so they drive the bounded repair. Grounded mode: drop them —
-    // they have no deterministic anchor and cannot veto a clean
-    // deterministic pass.
     if (opts.enforceAcceptanceTests) return true;
     return (
       !isAcceptanceTestFailure(failure) && !isProofEcho(failure) && !isRequirementEcho(failure)
     );
   });
-  // When every semantic failure was filtered by a deterministic authority
-  // (grounding for claims, grounding for coverage, the acceptance-test rule),
-  // the grounded pass is clean — a strict judge's bare `contract_passed:
-  // false` cannot veto content every deterministic authority accepts.
   const allFailuresFiltered =
     (verdict.failed_requirements.length > 0 || verdict.unsupported_claims.length > 0) &&
     unsupportedClaims.length === 0 &&
@@ -1221,12 +1265,7 @@ function routePassed(
   enforceAcceptanceTests = false,
 ): boolean {
   const grounded = groundedVerdict(route, contractRoute, verdict, { enforceAcceptanceTests });
-  return (
-    grounded.contract_passed &&
-    grounded.seo_blueprint_passed &&
-    grounded.failed_requirements.length === 0 &&
-    grounded.unsupported_claims.length === 0
-  );
+  return grounded.contract_passed && grounded.seo_blueprint_passed;
 }
 
 function dedupe(values: string[]): string[] {

@@ -7,7 +7,17 @@
 import axios from "axios";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("axios");
+vi.mock("axios", () => ({
+  default: {
+    post: vi.fn(),
+    isAxiosError: (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      (error as { isAxiosError?: boolean }).isAxiosError === true,
+  },
+}));
+const axiosError = (message: string, extras: Record<string, unknown> = {}) =>
+  Object.assign(new Error(message), { isAxiosError: true, ...extras });
 vi.mock("../../src/core/config.js", () => ({
   getConfig: () => ({ DATAFORSEO_LOGIN: "login", DATAFORSEO_PASSWORD: "password" }),
 }));
@@ -95,7 +105,7 @@ describe("getOrganicSerp — valid evidence", () => {
 
 describe("getOrganicSerp — provider failures never become empty evidence", () => {
   it("throws DATAFORSEO_UNAVAILABLE on a transport failure", async () => {
-    post.mockRejectedValue(new Error("connect ETIMEDOUT") as never);
+    post.mockRejectedValue(axiosError("connect ETIMEDOUT") as never);
     await expect(
       new DataForSeoClient().getOrganicSerp({ keyword: "metal roofing" }),
     ).rejects.toBeInstanceOf(DataForSeoUnavailableError);
@@ -164,7 +174,9 @@ describe("getOrganicSerp — provider failures never become empty evidence", () 
   });
 
   it("never returns zero observations for a failed request", async () => {
-    post.mockRejectedValue(new Error("500 Internal Server Error") as never);
+    post.mockRejectedValue(
+      axiosError("500 Internal Server Error", { response: { status: 500, headers: {} } }) as never,
+    );
     await expect(
       new DataForSeoClient().getOrganicSerp({ keyword: "metal roofing" }),
     ).rejects.toThrow();

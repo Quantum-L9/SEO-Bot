@@ -10,11 +10,14 @@
  *
  * Two onRequest hooks, registered before all routes:
  *   1. Fixed-window per-IP rate limiter (dependency-free, single-instance).
- *   2. Operator authentication (shared secret via Basic password or Bearer).
+ *   2. Split authentication (shared secret via Basic password or Bearer):
+ *      - /api/build-intelligence/* → SEO_BOT_API_KEY machine credential only
+ *        (the Website-Bot machine-auth surface);
+ *      - other protected routes → OPERATOR_API_KEY only (dashboard/operator).
  *
- * Fail-closed: if OPERATOR_API_KEY is unset, every protected route returns 401.
- * Exempt: /health (liveness) and /api/clients/register (authenticated by its
- * own SEO_BOT_API_KEY machine handoff).
+ * Fail-closed: if the surface's own key is unset, its protected routes return
+ * 401. Exempt: /health (liveness) and /api/clients/register (authenticated by
+ * its own SEO_BOT_API_KEY machine handoff inside the route).
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -118,30 +121,41 @@ export function registerApiSecurity(app: FastifyInstance): void {
     }
   });
 
-  // ── 2. Operator authentication ───────────────────────────────────────────────
+  // ── 2. Split authentication (least-privilege seam) ───────────────────────────
+  //
+  // Two surfaces, two credentials:
+  //   - /api/build-intelligence/* is the machine-auth surface. Only the
+  //     SEO_BOT_API_KEY machine credential is accepted; Website-Bot is the
+  //     named consumer of l9.website-intelligence/v1 and calls these endpoints
+  //     at build time (WEBSITE_INTELLIGENCE_LOCK). The operator key is
+  //     deliberately rejected here so the dashboard key never grants build
+  //     intelligence access.
+  //   - Every other protected route is the operator surface and accepts only
+  //     OPERATOR_API_KEY.
+  //   - /health stays public; /api/clients/register authenticates its own
+  //     SEO_BOT_API_KEY machine handoff inside the route.
+  //
+  // Both surfaces fail closed when their own key is unset.
   app.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
     const path = pathname(request.url);
     if (isAuthExempt(path)) return;
 
-    const key = getConfig().OPERATOR_API_KEY;
-    // Build-intelligence routes also accept the SEO_BOT_API_KEY machine secret —
-    // Website-Bot is the named consumer of l9.website-intelligence/v1 and calls
-    // these endpoints at build time (WEBSITE_INTELLIGENCE_LOCK). Operator routes
-    // remain operator-key-only.
-    const machineKey = path.startsWith("/api/build-intelligence/")
-      ? getConfig().SEO_BOT_API_KEY
-      : undefined;
-    if (!key && !machineKey) {
-      logger.error({ path }, "No operator or machine key configured; API is locked");
+    const presented = parseAuthSecret(request.headers.authorization);
+    const machine = path.startsWith("/api/build-intelligence/");
+
+    const expectedKey = machine ? getConfig().SEO_BOT_API_KEY : getConfig().OPERATOR_API_KEY;
+    if (!expectedKey) {
+      logger.error(
+        { path },
+        machine
+          ? "No SEO_BOT_API_KEY machine key configured; build intelligence is locked"
+          : "No operator key configured; API is locked",
+      );
       reply.header("WWW-Authenticate", 'Basic realm="L9 SEO Bot"');
       return reply.status(401).send({ error: "authentication not configured" });
     }
 
-    const presented = parseAuthSecret(request.headers.authorization);
-    const accepted =
-      presented !== null &&
-      ((key ? constantTimeEqual(presented, key) : false) ||
-        (machineKey ? constantTimeEqual(presented, machineKey) : false));
+    const accepted = presented !== null && constantTimeEqual(presented, expectedKey);
     if (!accepted) {
       logger.warn({ ip: request.ip, path }, "Rejected unauthenticated request");
       reply.header("WWW-Authenticate", 'Basic realm="L9 SEO Bot"');

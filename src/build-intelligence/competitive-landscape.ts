@@ -67,6 +67,8 @@ export interface DataForSeoOrganicPort {
     device?: "desktop" | "mobile";
     depth?: number;
   }): Promise<OrganicSerpResult>;
+  /** Total provider attempts across all calls — DataForSEO requests are billable. */
+  providerAttempts?: number;
 }
 
 export interface CompetitiveLandscapeRequest {
@@ -177,6 +179,8 @@ export interface CompetitiveEvidenceSummary {
   qualification_ledger: DomainQualificationRecord[];
   /** Structurally zero: this module imports no LLM service. */
   ranking_llm_calls: 0;
+  /** Total DataForSEO provider attempts across all calls (requests are billable). */
+  provider_attempts: number;
 }
 
 export interface CompetitiveLandscapeResult {
@@ -311,6 +315,7 @@ export async function createCompetitiveLandscape(
     selected_donor_count: selection.selected.length,
     qualification_ledger: selection.ledger,
     ranking_llm_calls: 0,
+    provider_attempts: dataForSeo.providerAttempts ?? 0,
   };
 
   assertDonorCohort(selection, desiredDonorCount, evidence);

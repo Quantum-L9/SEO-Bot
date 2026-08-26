@@ -14,6 +14,7 @@ vi.mock("../../src/core/logger.js", () => ({
 vi.mock("../../src/core/config.js", () => ({
   getConfig: () => ({
     OPERATOR_API_KEY: "op-key",
+    SEO_BOT_API_KEY: "machine-key",
     TRUST_PROXY: false,
     DASHBOARD_ALLOWED_ORIGINS: undefined,
   }),
@@ -84,7 +85,7 @@ vi.mock("../../src/build-intelligence/competitive-landscape.js", async () => {
   };
 });
 vi.mock("../../src/build-intelligence/seo-content-blueprint.js", () => ({
-  createSEOContentBlueprint: vi.fn(),
+  createSEOContentBlueprintWithEvidence: vi.fn(),
   CompetitiveLandscapeInputInvalidError: class extends Error {
     code = "COMPETITIVE_LANDSCAPE_INVALID";
   },
@@ -99,7 +100,7 @@ vi.mock("../../src/build-intelligence/seo-content-blueprint.js", () => ({
   },
 }));
 vi.mock("../../src/build-intelligence/structured-content.js", () => ({
-  createStructuredContentPackage: vi.fn(),
+  createStructuredContentPackageWithEvidence: vi.fn(),
   ContentRequirementUnsatisfiedError: class extends Error {
     code = "CONTENT_REQUIREMENT_UNSATISFIED";
   },
@@ -156,10 +157,10 @@ afterEach(async () => {
   await app.close();
 });
 
-const AUTH = { authorization: "Bearer op-key" };
+const AUTH = { authorization: "Bearer machine-key" };
 
 describe("POST /api/build-intelligence/competitive-landscape", () => {
-  it("enforces operator authentication (401 without credentials)", async () => {
+  it("enforces machine authentication (401 without credentials)", async () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/build-intelligence/competitive-landscape",
@@ -314,5 +315,109 @@ describe("build-intelligence — producer failure never becomes a fake success",
     });
     expect(res.statusCode).toBe(201);
     expect(res.json().artifact_type).toBe("competitive_landscape");
+  });
+});
+
+describe("GET /api/build-intelligence/preflight", () => {
+  it("requires machine authentication (401 without credentials)", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/build-intelligence/preflight" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("returns non-secret readiness metadata for an authenticated machine call", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/build-intelligence/preflight",
+      headers: AUTH,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body).toMatchObject({
+      status: "ready",
+      service: "SEO-Bot",
+      capabilities: {
+        competitive_landscape: true,
+        seo_content_blueprint: true,
+        structured_content: true,
+      },
+    });
+    expect(typeof body.version).toBe("string");
+    expect(typeof body.bot_interop_version).toBe("string");
+    expect(typeof body.llm_router_version).toBe("string");
+    expect(typeof body.configuration.dataforseo_configured).toBe("boolean");
+    expect(typeof body.configuration.llm_provider_configured).toBe("boolean");
+  });
+
+  it("never returns key values in the preflight payload", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/build-intelligence/preflight",
+      headers: AUTH,
+    });
+    expect(res.statusCode).toBe(200);
+    const serialized = res.body;
+    expect(serialized).not.toContain("machine-key");
+    expect(serialized).not.toContain("op-key");
+  });
+});
+
+/**
+ * `run_ref` is the consumer's own id for the run. It is accepted at the
+ * request boundary, never influences routing, and is echoed into the exported
+ * audit so a consumer can correlate without recomputing SEO-Bot's derived id.
+ */
+describe("build-intelligence — consumer run_ref", () => {
+  it("accepts run_ref and echoes it as the audit's run_id", async () => {
+    const { _resetRunEvidenceStore, getRunLlmAuditFor } = await import(
+      "../../src/build-intelligence/run-evidence-store.js"
+    );
+    const { runIdFor } = await import("../../src/build-intelligence/run-llm-audit.js");
+    _resetRunEvidenceStore();
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/competitive-landscape",
+      headers: AUTH,
+      payload: { ...validBody, run_ref: "wb-run-abc" },
+    });
+    expect(res.statusCode).toBe(201);
+    // The response header stays the addressable derived id, not the ref.
+    expect(res.headers["x-l9-seo-run-id"]).toBe(runIdFor("client-1", "build-1"));
+
+    const audit = getRunLlmAuditFor("client-1", "build-1");
+    expect(audit?.run_id).toBe("wb-run-abc");
+    expect(audit?.seo_run_id).toBe(runIdFor("client-1", "build-1"));
+    expect(audit?.run_id_source).toBe("consumer_supplied");
+  });
+
+  it("derives the run id when no run_ref is supplied", async () => {
+    const { _resetRunEvidenceStore, getRunLlmAuditFor } = await import(
+      "../../src/build-intelligence/run-evidence-store.js"
+    );
+    const { runIdFor } = await import("../../src/build-intelligence/run-llm-audit.js");
+    _resetRunEvidenceStore();
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/competitive-landscape",
+      headers: AUTH,
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(201);
+    const audit = getRunLlmAuditFor("client-1", "build-1");
+    expect(audit?.run_id).toBe(runIdFor("client-1", "build-1"));
+    expect(audit?.run_id_source).toBe("derived");
+  });
+
+  it("rejects a run_ref that is not a usable identity", async () => {
+    for (const bad of ["", "x".repeat(257)]) {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/build-intelligence/competitive-landscape",
+        headers: AUTH,
+        payload: { ...validBody, run_ref: bad },
+      });
+      expect(res.statusCode, `run_ref ${bad.length} chars must be rejected`).toBe(400);
+    }
   });
 });
