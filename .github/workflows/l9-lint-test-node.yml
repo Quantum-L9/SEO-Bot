@@ -131,12 +131,16 @@ jobs:
           # matching lockfile is absent.
 
       - name: Install dependencies
+        # Lockfile-exact, lifecycle scripts disabled — the same install
+        # posture as this repo's ci.yml. This repo commits package-lock.json
+        # and PACKAGE_MANAGER is npm, so the multi-manager fallback matrix
+        # is intentionally not carried here.
         run: |
           set -euo pipefail
           case "${PACKAGE_MANAGER}" in
-            npm)  if [ -f package-lock.json ]; then npm ci; else npm install; fi ;;
-            pnpm) corepack enable && (if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; else pnpm install; fi) ;;
-            yarn) corepack enable && (if [ -f yarn.lock ]; then yarn install --frozen-lockfile; else yarn install; fi) ;;
+            npm)  npm ci --ignore-scripts ;;
+            pnpm) corepack enable && pnpm install --frozen-lockfile --ignore-scripts ;;
+            yarn) corepack enable && yarn install --frozen-lockfile --ignore-scripts ;;
             *) echo "::error::unknown PACKAGE_MANAGER ${PACKAGE_MANAGER}" && exit 1 ;;
           esac
         env:
@@ -147,7 +151,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -f tsconfig.json ]; then
-            npx --yes tsc --noEmit -p tsconfig.json
+            npx --no-install tsc --noEmit -p tsconfig.json
           else
             echo "::notice::no tsconfig.json found, skipping type check"
           fi
@@ -185,12 +189,16 @@ jobs:
           scope: '@quantum-l9'
 
       - name: Install dependencies
+        # Lockfile-exact, lifecycle scripts disabled — the same install
+        # posture as this repo's ci.yml. This repo commits package-lock.json
+        # and PACKAGE_MANAGER is npm, so the multi-manager fallback matrix
+        # is intentionally not carried here.
         run: |
           set -euo pipefail
           case "${PACKAGE_MANAGER}" in
-            npm)  if [ -f package-lock.json ]; then npm ci; else npm install; fi ;;
-            pnpm) corepack enable && (if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; else pnpm install; fi) ;;
-            yarn) corepack enable && (if [ -f yarn.lock ]; then yarn install --frozen-lockfile; else yarn install; fi) ;;
+            npm)  npm ci --ignore-scripts ;;
+            pnpm) corepack enable && pnpm install --frozen-lockfile --ignore-scripts ;;
+            yarn) corepack enable && yarn install --frozen-lockfile --ignore-scripts ;;
             *) echo "::error::unknown PACKAGE_MANAGER ${PACKAGE_MANAGER}" && exit 1 ;;
           esac
         env:
