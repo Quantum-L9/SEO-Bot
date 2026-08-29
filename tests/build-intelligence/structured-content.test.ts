@@ -703,7 +703,7 @@ describe("StructuredContentPackage — NC-11 shape discipline (content-alias →
     expect(artifact.payload.validation.failed_requirements).toEqual([]);
   });
 
-  it("proof-requirement echoes drive the repair but never veto the seal (golden run #50)", async () => {
+  it("proof-requirement echoes drive the repair but do not veto the seal when the section covers the proof (golden run #50)", async () => {
     const proofEcho: ContentValidationVerdict = {
       seo_blueprint_passed: true,
       contract_passed: false,
@@ -742,22 +742,50 @@ describe("StructuredContentPackage — NC-11 shape discipline (content-alias →
     expect(evidence.repair_attempts).toBe(1);
   });
 
-  it("requirement-id echoes drive the repair but never veto the seal (golden run #53)", async () => {
-    // The contract's hero section carries requirement_ids ["r1"]; a bare
-    // id echo is a subjective group-satisfaction judgment.
+  it("requirement-id echoes drive the repair and still veto the seal (golden run #53)", async () => {
+    // Bare ids are not assertable against prose. Dropping them must not flip
+    // contract_passed via allFailuresFiltered.
     const reqEcho: ContentValidationVerdict = {
       seo_blueprint_passed: true,
       contract_passed: false,
       unsupported_claims: [],
       failed_requirements: ["r1"],
     };
-    const { llm } = fakeLlm([reqEcho, reqEcho]);
-    const { artifact, evidence } = await createStructuredContentPackageWithEvidence(
-      { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
-      { llm },
-    );
-    expect(artifact.payload.validation.failed_requirements).toEqual([]);
-    expect(evidence.repair_attempts).toBe(1);
+    const { llm, counts } = fakeLlm([reqEcho, reqEcho]);
+    await expect(
+      createStructuredContentPackageWithEvidence(
+        { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+        { llm },
+      ),
+    ).rejects.toBeInstanceOf(ContentRequirementUnsatisfiedError);
+    expect(counts.gen).toBe(2);
+    expect(counts.val).toBeGreaterThanOrEqual(2);
+  });
+
+  it("proof-requirement echoes still veto the seal when the section lacks the proof tokens", async () => {
+    const payload = structuredClone(makeContract().payload);
+    payload.routes[0]!.sections[0]!.proof_requirements = ["bondedlicensure"];
+    const contract = sealIntelligenceArtifact({
+      artifact_type: "page_content_contract",
+      client_id: "client-1",
+      build_id: "build-1",
+      producer: { repo: "Website-Bot", version: "1.0.0" },
+      payload,
+    });
+    const proofEcho: ContentValidationVerdict = {
+      seo_blueprint_passed: true,
+      contract_passed: false,
+      unsupported_claims: [],
+      failed_requirements: ["Missing proof requirements: bondedlicensure"],
+    };
+    const { llm, counts } = fakeLlm([proofEcho, proofEcho]);
+    await expect(
+      createStructuredContentPackage(
+        { client_id: "client-1", build_id: "build-1", page_content_contract: contract },
+        { llm },
+      ),
+    ).rejects.toBeInstanceOf(ContentRequirementUnsatisfiedError);
+    expect(counts.gen).toBe(2);
   });
 
   it("non-acceptance semantic failures still veto the seal", async () => {
