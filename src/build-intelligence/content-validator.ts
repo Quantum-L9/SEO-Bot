@@ -199,7 +199,9 @@ export async function validateRoute(
   const verdict = await validateRouteSemantics(route, contractRoute, args);
   // Semantic validation is secondary authority: it may only ADD failures, never
   // clear a deterministic one (there are none left at this point) and never
-  // turn a failing verdict into a pass.
+  // turn a failing verdict into a pass. Unsupported-claim GROUNDING is applied
+  // by the caller at the pass/seal gates (groundedVerdict in
+  // structured-content.ts) so the semantic flags still reach the repair loop.
   return {
     route_id: contractRoute.route_id,
     contract_passed: verdict.contract_passed,

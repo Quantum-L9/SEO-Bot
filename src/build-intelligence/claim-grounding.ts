@@ -109,7 +109,7 @@ const QUANTIFIED_CLAIM_PATTERNS: ReadonlyArray<{ category: string; pattern: RegE
  * Magnitude phrases that assert scale without a number. They can never be
  * corroborated by a number, so the phrase itself must appear in the facts.
  */
-const MAGNITUDE_PHRASES: readonly string[] = [
+export const MAGNITUDE_PHRASES: readonly string[] = [
   "decades of experience",
   "decades of",
   "generations of",
@@ -124,7 +124,7 @@ const MAGNITUDE_PHRASES: readonly string[] = [
  * the verified facts containing the same token — these are precisely the
  * categories a model will otherwise invent.
  */
-const CREDENTIAL_CLAIM_TOKENS: readonly string[] = [
+export const CREDENTIAL_CLAIM_TOKENS: readonly string[] = [
   "licensed",
   "bonded",
   "insured",

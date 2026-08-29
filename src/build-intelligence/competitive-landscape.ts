@@ -336,6 +336,9 @@ export async function createCompetitiveLandscape(
     exclusions: selection.exclusions,
     // True only because the hard invariant above already passed.
     evidence_complete: true,
+    // Measured, not asserted: this module imports no LLM service (structural
+    // proof), and the evidence summary records the literal zero.
+    ranking_llm_calls: evidence.ranking_llm_calls,
   };
 
   assertPayloadInvariants(payload, desiredDonorCount);

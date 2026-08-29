@@ -144,7 +144,10 @@ describe("POST /api/clients/register canonical v3", () => {
       verified_commit_sha: commit,
     });
     expect(initClientMock).toHaveBeenCalledWith("11111111-1111-1111-1111-111111111111");
-    const inserted = valuesMock.mock.calls[0][0] as any;
+    const inserted = valuesMock.mock.calls[0][0] as unknown as {
+      config: { canonicalClientId?: string; site_deployment: { status?: string } };
+      active?: boolean;
+    };
     expect(inserted.config.canonicalClientId).toBe("canonical-client");
     expect(inserted.config.site_deployment.status).toBe("ready");
   });
@@ -159,7 +162,7 @@ describe("POST /api/clients/register canonical v3", () => {
     });
     expect(res.statusCode).toBe(202);
     expect(res.json().error).toBe("REPOSITORY_NOT_FOUND");
-    expect((valuesMock.mock.calls[0][0] as any).active).toBe(false);
+    expect((valuesMock.mock.calls[0][0] as unknown as { active?: boolean }).active).toBe(false);
     expect(initClientMock).not.toHaveBeenCalled();
   });
 

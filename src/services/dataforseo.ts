@@ -110,6 +110,45 @@ export interface DataForSeoAttemptRecord {
   retry: boolean;
 }
 
+/** Shape of one SERP / on-page result item from the DataForSEO task payload. */
+interface DataForSeoSerpItem {
+  type?: string;
+  url?: string;
+  rank_group?: number;
+  rank_absolute?: number;
+  title?: string;
+  description?: string;
+  meta?: {
+    content?: { plain_text_word_count?: number };
+    htags?: { h1?: unknown[]; h2?: unknown[]; h3?: unknown[] };
+    images_count?: number;
+    internal_links_count?: number;
+    external_links_count?: number;
+  };
+}
+
+interface DataForSeoTaskResult {
+  items?: DataForSeoSerpItem[];
+  item_types?: string[];
+  datetime?: string;
+  total_backlinks?: number;
+  referring_domains?: number;
+  rank?: number;
+}
+
+interface DataForSeoTaskContainer {
+  status_code?: number;
+  status_message?: string;
+  time?: string;
+  result?: DataForSeoTaskResult[];
+}
+
+interface DataForSeoResponse {
+  status_code?: number;
+  status_message?: string;
+  tasks?: DataForSeoTaskContainer[];
+}
+
 export function retryAfterDelayMs(error: unknown): number {
   if (!axios.isAxiosError(error)) return RETRY_DELAY_MS;
   const header = error.response?.headers?.["retry-after"];
@@ -138,6 +177,7 @@ export function isRetryableTransportFailure(error: unknown): boolean {
 export class DataForSeoClient {
   private readonly baseUrl = "https://api.dataforseo.com/v3";
   private readonly auth: string;
+  private readonly timeoutMs: number;
   private readonly attemptLog: DataForSeoAttemptRecord[] = [];
 
   constructor() {
@@ -145,6 +185,7 @@ export class DataForSeoClient {
     this.auth = Buffer.from(`${config.DATAFORSEO_LOGIN}:${config.DATAFORSEO_PASSWORD}`).toString(
       "base64",
     );
+    this.timeoutMs = config.DATAFORSEO_TIMEOUT_MS;
   }
 
   /** Total provider attempts across all calls — DataForSEO requests are billable. */
@@ -157,15 +198,20 @@ export class DataForSeoClient {
     return this.attemptLog;
   }
 
-  private async requestOnce(endpoint: string, data: any[]): Promise<any> {
-    let response: { data: any };
+  private async requestOnce(endpoint: string, data: unknown[]): Promise<DataForSeoResponse> {
+    let response: { data: DataForSeoResponse };
     try {
       response = await axios.post(`${this.baseUrl}${endpoint}`, data, {
         headers: {
           Authorization: `Basic ${this.auth}`,
           "Content-Type": "application/json",
         },
-        timeout: 30000,
+        // The live SERP endpoint (google/organic/live/advanced) routinely
+        // needs longer than 30s under load — golden runs #35/#36 timed out
+        // consecutively at exactly 30s. DATAFORSEO_TIMEOUT_MS is validated by
+        // the config schema (positive integer, 90s default), so an invalid
+        // deployment value fails at startup instead of reaching axios as NaN.
+        timeout: this.timeoutMs,
       });
     } catch (error) {
       // Re-thrown as the raw axios error so the retry loop can classify it.
@@ -181,7 +227,7 @@ export class DataForSeoClient {
     return response.data;
   }
 
-  private async request(endpoint: string, data: any[]): Promise<any> {
+  private async request(endpoint: string, data: unknown[]): Promise<DataForSeoResponse> {
     for (let attempt = 1; attempt <= MAX_DATAFORSEO_ATTEMPTS; attempt++) {
       try {
         const result = await this.requestOnce(endpoint, data);
@@ -294,7 +340,7 @@ export class DataForSeoClient {
         );
       }
       items.push({
-        rankAbsolute: item.rank_absolute,
+        rankAbsolute: item.rank_absolute ?? rank,
         rankGroup: rank,
         url: item.url,
         domain,
@@ -356,16 +402,20 @@ export class DataForSeoClient {
     for (const item of items) {
       if (item.type !== "organic") continue;
 
-      const itemDomain = new URL(item.url).hostname.replace("www.", "");
+      const itemUrl = item.url;
+      const itemRank = item.rank_absolute;
+      if (typeof itemUrl !== "string" || typeof itemRank !== "number") continue;
+
+      const itemDomain = new URL(itemUrl).hostname.replace("www.", "");
 
       if (itemDomain === domain.replace("www.", "")) {
-        position = item.rank_absolute;
-        url = item.url;
+        position = itemRank;
+        url = itemUrl;
       } else {
         competitors.push({
           domain: itemDomain,
-          position: item.rank_absolute,
-          url: item.url,
+          position: itemRank,
+          url: itemUrl,
           title: item.title || "",
           snippet: item.description || "",
         });

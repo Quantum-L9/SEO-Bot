@@ -27,8 +27,8 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path, { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertIntelligenceArtifactIntegrity,
@@ -47,6 +47,8 @@ import {
   CompetitiveLandscapeInvalidError,
   createCompetitiveLandscape,
 } from "../build-intelligence/competitive-landscape.js";
+import { projectLlmAudit } from "../build-intelligence/llm-audit.js";
+import { runPreflight } from "../build-intelligence/preflight.js";
 import {
   getRunLlmAudit,
   getRunLlmAuditFor,
@@ -76,6 +78,7 @@ import {
   createStructuredContentPackageWithEvidence,
   PageContentContractInvalidError,
   StructuredContentRouteMismatchError,
+  StructuredContentShapeError,
 } from "../build-intelligence/structured-content.js";
 import { createModuleLogger } from "../core/logger.js";
 import { LlmRunRecorder } from "../services/llm-run-recorder.js";
@@ -111,6 +114,7 @@ import {
   DataForSeoUnavailableError,
   SerpEvidenceInvalidError,
 } from "../services/dataforseo.js";
+import { getLlmService } from "../services/llm.js";
 
 const logger = createModuleLogger("api:build-intelligence");
 
@@ -276,27 +280,27 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
   //    DataForSEO paid call; never returns key values. Website-Bot's REDESIGN
   //    preflight consumes this before the expensive pipeline begins.
   app.get("/api/build-intelligence/preflight", async () => {
-    const dataforseoConfigured = Boolean(
-      process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD,
-    );
-    const llmConfigured = Boolean(process.env.OPENROUTER_API_KEY && process.env.PERPLEXITY_API_KEY);
-    return {
-      status: "ready",
-      service: "SEO-Bot",
-      version: SERVICE_VERSION,
-      bot_interop_version: BOT_INTEROP_VERSION,
-      llm_router_version: LLM_ROUTER_VERSION,
+    // Reaching this handler means the machine-auth hook admitted the request,
+    // which is the `contractSeen` input to the machine-auth check. Every other
+    // field below is a real probe result — nothing here is a hardcoded PASS.
+    const preflight = runPreflight(true);
+    const report = {
+      ...preflight,
+      version: preflight.version === "unknown" ? SERVICE_VERSION : preflight.version,
+      bot_interop_version: preflight.bot_interop_version ?? BOT_INTEROP_VERSION,
+      llm_router_version: preflight.llm_router_version ?? LLM_ROUTER_VERSION,
       capabilities: {
-        competitive_landscape: true,
-        seo_content_blueprint: true,
-        structured_content: true,
+        ...preflight.capabilities,
+        // Schema advertisement, not a probed capability: the audit projection
+        // ships with this build, so the consumer can always discover it.
         run_llm_audit: RUN_LLM_AUDIT_SCHEMA,
       },
-      configuration: {
-        dataforseo_configured: dataforseoConfigured,
-        llm_provider_configured: llmConfigured,
-      },
     };
+    // The golden oracle attaches disk evidence without changing the sealed
+    // artifact envelope; best-effort — a persistence failure never fails the
+    // response.
+    persistAuditEvidence("preflight", report);
+    return report;
   });
 
   // 1. CompetitiveLandscape — deterministic, zero-LLM SERP ranking truth.
@@ -448,7 +452,18 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
     }
   });
 
-  // 4. Run evidence — the deterministic `l9.seo-bot-run-llm-audit/v1` surface.
+  // 5. LLM router audit — per-call records for the three governed operations,
+  //    projected from the router's own call log (machine-authed by prefix).
+  app.get("/api/build-intelligence/llm-audit", async (request, reply) => {
+    const query = request.query as { client_id?: string };
+    const projection = projectLlmAudit(getLlmService(), {
+      clientId: query.client_id && query.client_id.trim() !== "" ? query.client_id : undefined,
+    });
+    persistAuditEvidence("llm-audit", projection);
+    return reply.status(200).send(projection);
+  });
+
+  // 6. Run evidence — the deterministic `l9.seo-bot-run-llm-audit/v1` surface.
   //    Same machine auth as the producers; no LLM call, no paid provider call.
   //    Production evidence retrieval goes through here, never through the
   //    offline seam-proof script.
@@ -469,8 +484,33 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
   });
 
   logger.info(
-    "Build-intelligence routes registered (competitive-landscape, seo-content-blueprint, structured-content, run-evidence)",
+    "Build-intelligence routes registered (competitive-landscape, seo-content-blueprint, structured-content, preflight, llm-audit, run-evidence)",
   );
+}
+
+/**
+/**
+ * Persist audit/preflight evidence under `.l9/build-intelligence/` (gitignored)
+ * so the golden oracle can attach disk evidence without changing the sealed
+ * artifact envelope that Website-Bot consumes. Best-effort: a persistence
+ * failure never fails the response.
+ */
+function persistAuditEvidence(kind: "preflight" | "llm-audit", value: unknown): void {
+  try {
+    const dir = path.join(process.cwd(), ".l9", "build-intelligence");
+    mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    writeFileSync(
+      path.join(dir, `${kind}-${stamp}.json`),
+      `${JSON.stringify(value, null, 2)}\n`,
+      "utf8",
+    );
+  } catch (error) {
+    logger.warn(
+      { kind, error: error instanceof Error ? error.message : String(error) },
+      "Failed to persist audit evidence to disk (best-effort)",
+    );
+  }
 }
 
 /**
@@ -550,6 +590,9 @@ function handleProducerError(reply: FastifyReply, error: unknown): FastifyReply 
       failed_requirements: error.failedRequirements,
       unsupported_claims: error.unsupportedClaims,
     });
+  }
+  if (error instanceof StructuredContentShapeError) {
+    return reply.status(422).send({ error: error.code, message: error.message });
   }
   if (error instanceof ArtifactDigestConflictError) {
     return reply.status(409).send({ error: error.code, message: error.message });

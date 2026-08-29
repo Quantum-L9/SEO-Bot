@@ -235,8 +235,11 @@ Respond in JSON format:
         aiRecommendation: recommendedOption?.label || options[0]?.label || "No recommendation",
         aiRationale: response.rationale,
       });
-    } catch (error: any) {
-      logger.error({ error: error.message, issue }, "Failed to generate recommendations");
+    } catch (error: unknown) {
+      logger.error(
+        { error: error instanceof Error ? error.message : String(error), issue },
+        "Failed to generate recommendations",
+      );
 
       // Fallback: generate static options based on metric type
       recommendations.push({

@@ -30,7 +30,7 @@ import type { Scheduler } from "../../core/scheduler.js";
 import { DataForSeoClient } from "../../services/dataforseo.js";
 import { getLlmService } from "../../services/llm.js";
 import { getNotificationService } from "../../services/notifications.js";
-import type { GapDimension, SurpassAction } from "../../types/index.js";
+import type { GapDimension, SurpassAction, TargetKeyword } from "../../types/index.js";
 
 const logger = createModuleLogger("serp-intelligence");
 
@@ -110,8 +110,11 @@ async function checkRankings(job: Job): Promise<void> {
 
       // Rate limit: 1 request per 2 seconds
       await new Promise((resolve) => setTimeout(resolve, 2000));
-    } catch (error: any) {
-      logger.error({ keyword: kw.keyword, error: error.message }, "Failed to check ranking");
+    } catch (error: unknown) {
+      logger.error(
+        { keyword: kw.keyword, error: error instanceof Error ? error.message : String(error) },
+        "Failed to check ranking",
+      );
     }
   }
 
@@ -129,7 +132,7 @@ async function analyzeCompetitors(job: Job): Promise<void> {
   const llm = getLlmService();
   const keywords =
     clientConfig?.targetKeywords?.filter(
-      (k: any) => k.priority === "critical" || k.priority === "high",
+      (k: TargetKeyword) => k.priority === "critical" || k.priority === "high",
     ) || [];
 
   logger.info({ clientDomain, keywordCount: keywords.length }, "Analyzing competitors");
@@ -167,7 +170,7 @@ async function analyzeCompetitors(job: Job): Promise<void> {
       };
 
       const gaps = await llm.extractJson<GapDimension[]>(
-        `Score the competitive gap between client and competitor across these 6 dimensions. 
+        `Score the competitive gap between client and competitor across these 6 dimensions.
 Return a JSON array of objects with: dimension, clientScore (0-100), competitorScore (0-100), delta, details.
 
 Dimensions: content_depth, schema, backlinks, speed, freshness, serp_features
@@ -175,8 +178,8 @@ Dimensions: content_depth, schema, backlinks, speed, freshness, serp_features
 Data:
 ${JSON.stringify(gapData, null, 2)}
 
-Score based on: content_depth (word count, headings, images), schema (structured data presence), 
-backlinks (referring domains, DR), speed (assume equal if no data), freshness (recent update signals), 
+Score based on: content_depth (word count, headings, images), schema (structured data presence),
+backlinks (referring domains, DR), speed (assume equal if no data), freshness (recent update signals),
 serp_features (featured snippets, PAA, etc.)`,
         clientId,
         "serp-intelligence",
@@ -194,8 +197,11 @@ serp_features (featured snippets, PAA, etc.)`,
       });
 
       await new Promise((resolve) => setTimeout(resolve, 3000));
-    } catch (error: any) {
-      logger.error({ keyword: kw.keyword, error: error.message }, "Competitor analysis failed");
+    } catch (error: unknown) {
+      logger.error(
+        { keyword: kw.keyword, error: error instanceof Error ? error.message : String(error) },
+        "Competitor analysis failed",
+      );
     }
   }
 }
@@ -271,9 +277,9 @@ Generate the surpass plan:`,
         { keyword: gap.keyword, actionCount: surpassPlan.length },
         "Surpass plan generated",
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
-        { keyword: gap.keyword, error: error.message },
+        { keyword: gap.keyword, error: error instanceof Error ? error.message : String(error) },
         "Surpass plan generation failed",
       );
     }

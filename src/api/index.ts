@@ -31,6 +31,13 @@ import { registerApiSecurity } from "./security.js";
 const logger = createModuleLogger("api");
 
 /**
+ * Maximum time the server waits to receive a complete inbound request, in ms.
+ * Matches Node's own default; stated explicitly so it is never set to 0 again
+ * (that disables slowloris protection without affecting handler duration).
+ */
+const INBOUND_REQUEST_TIMEOUT_MS = 300_000;
+
+/**
  * Build the fully-configured Fastify instance WITHOUT binding a port. Extracted
  * from startApiServer so the routes (security, projections, manual trigger) are
  * injectable in tests via `app.inject` — behavior is identical to the listening
@@ -39,7 +46,21 @@ const logger = createModuleLogger("api");
 export async function buildApiServer(): Promise<FastifyInstance> {
   // trustProxy so request.ip (and the per-IP rate limiter) use X-Forwarded-For
   // when deployed behind a reverse proxy / tunnel. Explicit + configurable.
-  const app = Fastify({ logger: false, trustProxy: getConfig().TRUST_PROXY });
+  const app = Fastify({
+    logger: false,
+    trustProxy: getConfig().TRUST_PROXY,
+  });
+  // Node's requestTimeout bounds how long the server waits to RECEIVE a
+  // complete request; it does not bound handler execution. (Measured on Node
+  // 22: requestTimeout=2s with a 4s handler still returns 200 after ~4s.) So
+  // disabling it never protected the long build-intelligence generations —
+  // it only removed the slowloris guard, letting any caller, including
+  // unauthenticated ones on /api/clients/register, hold an incomplete request
+  // body open forever. Keep a finite inbound deadline. Long generation is
+  // bounded per endpoint by the handler itself and by client timeouts.
+  // The Fastify factory option is not honored by the installed fastify 4.x,
+  // so set it on the underlying Node http.Server directly.
+  app.server.requestTimeout = INBOUND_REQUEST_TIMEOUT_MS;
 
   await app.register(helmet);
   await app.register(formBody);
@@ -265,7 +286,7 @@ export async function buildApiServer(): Promise<FastifyInstance> {
     "/api/clients/:clientId/trigger",
     async (request) => {
       const { clientId } = request.params;
-      const { module } = request.body as any;
+      const { module } = request.body as { module?: string };
       const scheduler = getScheduler();
       const validModules = [
         "serp:check-rankings",
@@ -279,7 +300,7 @@ export async function buildApiServer(): Promise<FastifyInstance> {
         "behavior:pull-engagement",
         "behavior:generate-insights",
       ];
-      if (!validModules.includes(module))
+      if (!module || !validModules.includes(module))
         return { error: `Invalid module. Valid: ${validModules.join(", ")}` };
       const db = getDb();
       const [client] = await db
@@ -321,8 +342,9 @@ export async function startApiServer(port: number = 3100): Promise<void> {
   try {
     await app.listen({ port, host: "0.0.0.0" });
     logger.info({ port }, "API server started (Fastify — sole HTTP server)");
-  } catch (error: any) {
-    logger.error({ error: error.message }, "API server failed to start");
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error({ error: message }, "API server failed to start");
     throw error;
   }
 }

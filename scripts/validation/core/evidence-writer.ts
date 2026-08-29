@@ -36,7 +36,7 @@ function redactValue<T>(value: T): T {
   return value;
 }
 export function canonicalJson(value: unknown): string {
-  return JSON.stringify(canonicalize(value), null, 2) + "\n";
+  return `${JSON.stringify(canonicalize(value), null, 2)}\n`;
 }
 export function sha256(content: string | Buffer): string {
   return createHash("sha256").update(content).digest("hex");
@@ -134,7 +134,7 @@ export class EvidenceWriter {
     };
     validateGateEvidence(evidence);
     await atomicWrite(path.join(this.runDir, `${evidence.gate_id}.json`), canonicalJson(evidence));
-    await appendFile(path.join(this.runDir, "evidence.jsonl"), JSON.stringify(evidence) + "\n", {
+    await appendFile(path.join(this.runDir, "evidence.jsonl"), `${JSON.stringify(evidence)}\n`, {
       encoding: "utf8",
       mode: 0o600,
     });

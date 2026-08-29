@@ -11,15 +11,20 @@ vi.mock("axios", () => ({
   default: {
     post,
     isAxiosError: (error: unknown) =>
-      typeof error === "object" && error !== null && (error as { isAxiosError?: boolean }).isAxiosError === true,
+      typeof error === "object" &&
+      error !== null &&
+      (error as { isAxiosError?: boolean }).isAxiosError === true,
   },
 }));
 const axiosError = (message: string, extras: Record<string, unknown> = {}) =>
   Object.assign(new Error(message), { isAxiosError: true, ...extras });
-vi.mock("../../src/core/config.js", () => ({
-  getConfig: () => ({ DATAFORSEO_LOGIN: "login", DATAFORSEO_PASSWORD: "pass" }),
+/** The validated env config the client reads; hoisted so assertions can cite it. */
+const config = vi.hoisted(() => ({
+  DATAFORSEO_LOGIN: "login",
+  DATAFORSEO_PASSWORD: "pass",
+  DATAFORSEO_TIMEOUT_MS: 90_000,
 }));
-
+vi.mock("../../src/core/config.js", () => ({ getConfig: () => config }));
 
 import {
   DataForSeoClient,
@@ -86,6 +91,16 @@ describe("DataForSeoClient.getOrganicSerp", () => {
     expect(result.serpFeatures).toContain("paid");
   });
 
+  it("sends the validated DATAFORSEO_TIMEOUT_MS to axios", async () => {
+    post.mockResolvedValue({ data: { status_code: 40000, status_message: "bad" } });
+    await expect(new DataForSeoClient().getOrganicSerp({ keyword: "x" })).rejects.toThrow();
+    expect(post).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.anything(),
+      expect.objectContaining({ timeout: config.DATAFORSEO_TIMEOUT_MS }),
+    );
+  });
+
   it("surfaces DataForSEO API errors", async () => {
     post.mockResolvedValue({ data: { status_code: 40000, status_message: "bad" } });
     await expect(new DataForSeoClient().getOrganicSerp({ keyword: "x" })).rejects.toThrow(
@@ -133,31 +148,60 @@ describe("normalizeSerpDatetime", () => {
 });
 
 describe("DataForSeoClient bounded retry", () => {
-  const call = (client: DataForSeoClient) =>
-    client.getOrganicSerp({ keyword: "roofing" });
+  const call = (client: DataForSeoClient) => client.getOrganicSerp({ keyword: "roofing" });
 
   it("retries exactly once on a transient 429 and succeeds on the second attempt", async () => {
     post
       .mockRejectedValueOnce(axiosError("rate limited", { response: { status: 429, headers: {} } }))
       .mockResolvedValueOnce({
-        data: { status_code: 20000, tasks: [{ status_code: 20000, time: "0.1 sec", result: [{ datetime: "2024-01-02 12:00:00 +00:00", item_types: ["organic"], items: [] }] }] },
+        data: {
+          status_code: 20000,
+          tasks: [
+            {
+              status_code: 20000,
+              time: "0.1 sec",
+              result: [
+                { datetime: "2024-01-02 12:00:00 +00:00", item_types: ["organic"], items: [] },
+              ],
+            },
+          ],
+        },
       });
     const client = new DataForSeoClient();
     await expect(call(client)).resolves.toBeTruthy();
     expect(post).toHaveBeenCalledTimes(2);
     expect(client.providerAttempts).toBe(2);
     expect(client.getProviderAttemptLog()).toEqual([
-      { endpoint: expect.stringContaining("live/advanced"), attempt: 1, status: "HTTP 429", retry: true },
-      { endpoint: expect.stringContaining("live/advanced"), attempt: 2, status: "ok", retry: false },
+      {
+        endpoint: expect.stringContaining("live/advanced"),
+        attempt: 1,
+        status: "HTTP 429",
+        retry: true,
+      },
+      {
+        endpoint: expect.stringContaining("live/advanced"),
+        attempt: 2,
+        status: "ok",
+        retry: false,
+      },
     ]);
   });
 
   it("retries a connection-reset transport failure once", async () => {
-    post
-      .mockRejectedValueOnce(axiosError("socket hang up"))
-      .mockResolvedValueOnce({
-        data: { status_code: 20000, tasks: [{ status_code: 20000, time: "0.1 sec", result: [{ datetime: "2024-01-02 12:00:00 +00:00", item_types: ["organic"], items: [] }] }] },
-      });
+    post.mockRejectedValueOnce(axiosError("socket hang up")).mockResolvedValueOnce({
+      data: {
+        status_code: 20000,
+        tasks: [
+          {
+            status_code: 20000,
+            time: "0.1 sec",
+            result: [
+              { datetime: "2024-01-02 12:00:00 +00:00", item_types: ["organic"], items: [] },
+            ],
+          },
+        ],
+      },
+    });
     const client = new DataForSeoClient();
     await expect(call(client)).resolves.toBeTruthy();
     expect(client.providerAttempts).toBe(2);
@@ -193,8 +237,12 @@ describe("DataForSeoClient bounded retry", () => {
 
   it("keeps the retry delay bounded and honors Retry-After up to the cap", () => {
     expect(retryAfterDelayMs({ isAxiosError: true, response: { headers: {} } })).toBe(500);
-    expect(retryAfterDelayMs({ isAxiosError: true, response: { headers: { "retry-after": "1" } } })).toBe(1000);
-    expect(retryAfterDelayMs({ isAxiosError: true, response: { headers: { "retry-after": "5" } } })).toBe(2000);
+    expect(
+      retryAfterDelayMs({ isAxiosError: true, response: { headers: { "retry-after": "1" } } }),
+    ).toBe(1000);
+    expect(
+      retryAfterDelayMs({ isAxiosError: true, response: { headers: { "retry-after": "5" } } }),
+    ).toBe(2000);
     expect(retryAfterDelayMs(new Error("x"))).toBe(500);
   });
 
@@ -202,7 +250,12 @@ describe("DataForSeoClient bounded retry", () => {
     const client = new DataForSeoClient();
     // The attempt log records endpoint/attempt/status/retry only — assert the
     // record shape directly so no credentials can ever appear in it.
-    const record = { endpoint: "/serp/google/organic/live/advanced", attempt: 1, status: "HTTP 429", retry: true };
+    const record = {
+      endpoint: "/serp/google/organic/live/advanced",
+      attempt: 1,
+      status: "HTTP 429",
+      retry: true,
+    };
     expect(JSON.stringify(record)).not.toContain("login");
     expect(JSON.stringify(record)).not.toContain("pass");
     expect(client.getProviderAttemptLog()).toEqual([]);

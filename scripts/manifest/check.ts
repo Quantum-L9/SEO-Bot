@@ -8,7 +8,7 @@ export async function checkManifest(root = process.cwd()): Promise<void> {
     readFile(path.join(root, "MANIFEST.md"), "utf8"),
   ]);
   const drift: string[] = [];
-  if (actualJson !== JSON.stringify(generated, null, 2) + "\n") drift.push("MANIFEST.json");
+  if (actualJson !== `${JSON.stringify(generated, null, 2)}\n`) drift.push("MANIFEST.json");
   if (actualMarkdown !== renderManifestMarkdown(generated)) drift.push("MANIFEST.md");
   if (drift.length > 0)
     throw new Error(

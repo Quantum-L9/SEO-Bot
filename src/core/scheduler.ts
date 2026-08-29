@@ -245,7 +245,8 @@ export class Scheduler {
         this.queues.set(queueName, queue);
       }
 
-      const queue = this.queues.get(queueName)!;
+      const queue = this.queues.get(queueName);
+      if (!queue) throw new Error(`queue ${queueName} is not registered`);
 
       await queue.add(
         jobDef.name,
@@ -325,7 +326,8 @@ export class Scheduler {
         const parentJobId = job.id ?? definition.name;
 
         for (const client of activeClients) {
-          const queue = this.queues.get(`l9-${definition.module}`)!;
+          const queue = this.queues.get(`l9-${definition.module}`);
+          if (!queue) continue;
           await queue.add(
             definition.name,
             {
@@ -357,11 +359,16 @@ export class Scheduler {
         .update(schema.jobExecutions)
         .set({ status: "completed", completedAt: new Date(), durationMs })
         .where(eq(schema.jobExecutions.id, execution.id));
-    } catch (error: any) {
+    } catch (error: unknown) {
       const durationMs = Date.now() - startTime;
       await db
         .update(schema.jobExecutions)
-        .set({ status: "failed", completedAt: new Date(), durationMs, error: error.message })
+        .set({
+          status: "failed",
+          completedAt: new Date(),
+          durationMs,
+          error: error instanceof Error ? error.message : String(error),
+        })
         .where(eq(schema.jobExecutions.id, execution.id));
 
       throw error;

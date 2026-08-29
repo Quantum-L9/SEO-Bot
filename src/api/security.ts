@@ -85,7 +85,7 @@ function pathname(url: string): string {
 }
 
 function isAuthExempt(path: string): boolean {
-  return AUTH_EXEMPT.some((p) => path === p || path.startsWith(p + "/"));
+  return AUTH_EXEMPT.some((p) => path === p || path.startsWith(`${p}/`));
 }
 
 export function registerApiSecurity(app: FastifyInstance): void {
@@ -143,9 +143,7 @@ export function registerApiSecurity(app: FastifyInstance): void {
     const presented = parseAuthSecret(request.headers.authorization);
     const machine = path.startsWith("/api/build-intelligence/");
 
-    const expectedKey = machine
-      ? getConfig().SEO_BOT_API_KEY
-      : getConfig().OPERATOR_API_KEY;
+    const expectedKey = machine ? getConfig().SEO_BOT_API_KEY : getConfig().OPERATOR_API_KEY;
     if (!expectedKey) {
       logger.error(
         { path },

@@ -416,6 +416,8 @@ export async function createSEOContentBlueprintWithEvidence(
   const payload: SEOContentBlueprintV1 = {
     schema: WEBSITE_INTELLIGENCE_SCHEMAS.seoContentBlueprint,
     competitive_landscape_ref: landscapeRef,
+    batch_size: SEO_BLUEPRINT_BATCH_SIZE,
+    batch_count: chunkRoutes(request.routes, SEO_BLUEPRINT_BATCH_SIZE).length,
     routes,
   };
 

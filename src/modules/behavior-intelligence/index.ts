@@ -55,7 +55,7 @@ class PostHogClient {
     this.apiKey = apiKey;
   }
 
-  async query(projectId: string, hogql: string): Promise<any[]> {
+  async query(projectId: string, hogql: string): Promise<unknown[]> {
     try {
       const response = await axios.post(
         `${this.baseUrl}/api/projects/${projectId}/query`,
@@ -69,8 +69,11 @@ class PostHogClient {
       );
 
       return response.data?.results || [];
-    } catch (error: any) {
-      logger.error({ error: error.message }, "PostHog query failed");
+    } catch (error: unknown) {
+      logger.error(
+        { error: error instanceof Error ? error.message : String(error) },
+        "PostHog query failed",
+      );
       return [];
     }
   }
@@ -78,8 +81,8 @@ class PostHogClient {
   async getInsight(
     projectId: string,
     insightType: string,
-    params: Record<string, any> = {},
-  ): Promise<any> {
+    params: Record<string, unknown> = {},
+  ): Promise<unknown> {
     try {
       const response = await axios.post(
         `${this.baseUrl}/api/projects/${projectId}/insights/trend`,
@@ -94,8 +97,11 @@ class PostHogClient {
       );
 
       return response.data;
-    } catch (error: any) {
-      logger.error({ insightType, error: error.message }, "PostHog insight fetch failed");
+    } catch (error: unknown) {
+      logger.error(
+        { insightType, error: error instanceof Error ? error.message : String(error) },
+        "PostHog insight fetch failed",
+      );
       return null;
     }
   }
@@ -194,7 +200,7 @@ async function pullEngagementData(job: Job): Promise<void> {
 
   // ─── Store aggregated data ─────────────────────────────────────────────
 
-  for (const row of pageMetrics) {
+  for (const row of pageMetrics as unknown as Array<[string, number, number, number, number]>) {
     const pagePath = extractPath(row[0]);
     const pageviews = row[1] || 0;
     const uniqueVisitors = row[2] || 0;
@@ -202,8 +208,12 @@ async function pullEngagementData(job: Job): Promise<void> {
     const avgScroll = row[4] || 0;
 
     // Find matching exit/bounce rates
-    const exitRow = exitRates.find((e: any) => extractPath(e[0]) === pagePath);
-    const bounceRow = bounceRates.find((b: any) => extractPath(b[0]) === pagePath);
+    const exitRow = (exitRates as unknown as Array<[string, number, number, number]>).find(
+      (e) => extractPath(e[0]) === pagePath,
+    );
+    const bounceRow = (bounceRates as unknown as Array<[string, number, number, number]>).find(
+      (b) => extractPath(b[0]) === pagePath,
+    );
 
     await db.insert(schema.pageEngagement).values({
       clientId,

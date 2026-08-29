@@ -277,7 +277,9 @@ function assembleRunLlmAudit(target: RunRecord): RunLlmAuditV1 {
     },
     structured_content: {
       executed: target.legs.structured_content,
-      route_results: (content?.route_results ?? []).map((route) => ({ ...route })),
+      route_results: (content?.route_results ?? []).map(
+        ({ schema_failure_count: _schemaFailures, ...route }) => route,
+      ),
     },
     operations: {
       SEO_CONTENT_BLUEPRINT: operationsFor("SEO_CONTENT_BLUEPRINT"),

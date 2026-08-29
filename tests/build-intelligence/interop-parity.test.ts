@@ -75,6 +75,7 @@ function landscape(): CompetitiveLandscapeV1 {
     ],
     exclusions: [],
     evidence_complete: true,
+    ranking_llm_calls: 0,
   };
 }
 

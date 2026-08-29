@@ -134,6 +134,7 @@ describe("run-evidence store — one run across three endpoints", () => {
           generation_calls: 1,
           repair_attempts: 0,
           semantic_validation_calls: 1,
+          schema_failure_count: 0,
         },
         {
           route_id: "services",
@@ -141,6 +142,7 @@ describe("run-evidence store — one run across three endpoints", () => {
           generation_calls: 2,
           repair_attempts: 1,
           semantic_validation_calls: 2,
+          schema_failure_count: 0,
         },
       ]),
       recorder: contentRecorder,
@@ -251,6 +253,7 @@ describe("run-evidence store — one run across three endpoints", () => {
           generation_calls: 1,
           repair_attempts: 0,
           semantic_validation_calls: 1,
+          schema_failure_count: 0,
         },
       ]),
     });
@@ -299,6 +302,7 @@ describe("run-evidence store — cross-repository consumer contract", () => {
           generation_calls: 1,
           repair_attempts: 0,
           semantic_validation_calls: 1,
+          schema_failure_count: 0,
         },
       ]),
       recorder,
