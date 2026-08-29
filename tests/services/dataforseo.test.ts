@@ -18,13 +18,13 @@ vi.mock("axios", () => ({
 }));
 const axiosError = (message: string, extras: Record<string, unknown> = {}) =>
   Object.assign(new Error(message), { isAxiosError: true, ...extras });
-vi.mock("../../src/core/config.js", () => ({
-  getConfig: () => ({
-    DATAFORSEO_LOGIN: "login",
-    DATAFORSEO_PASSWORD: "pass",
-    DATAFORSEO_TIMEOUT_MS: 90_000,
-  }),
+/** The validated env config the client reads; hoisted so assertions can cite it. */
+const config = vi.hoisted(() => ({
+  DATAFORSEO_LOGIN: "login",
+  DATAFORSEO_PASSWORD: "pass",
+  DATAFORSEO_TIMEOUT_MS: 90_000,
 }));
+vi.mock("../../src/core/config.js", () => ({ getConfig: () => config }));
 
 import {
   DataForSeoClient,
@@ -97,7 +97,7 @@ describe("DataForSeoClient.getOrganicSerp", () => {
     expect(post).toHaveBeenCalledWith(
       expect.any(String),
       expect.anything(),
-      expect.objectContaining({ timeout: 90_000 }),
+      expect.objectContaining({ timeout: config.DATAFORSEO_TIMEOUT_MS }),
     );
   });
 
