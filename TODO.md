@@ -3,10 +3,10 @@
 
 ## Issue unblock (session reference)
 
-**Cluster:** SEO-Bot#5 (router drift) — closed 2026-08-11 as aligned `@quantum-l9/llm-router@1.1.1` with Website-Bot + LLM-Router SSOT
-**Owning fix:** none (evidence close)
-**Next:** SEO-Bot#17 still needs `NODE_AUTH_TOKEN` / GitHub Packages auth for agent sandboxes
-**Pickup:** Graphiti PICKUP written 2026-08-11
+**Cluster:** Quantum-L9/Website-Bot#167 + Quantum-L9/SEO-Bot#73 (bot-interop 1.2.0)
+**Owning fix:** Website-Bot tag `bot-interop-v1.2.0` @ d670319 (published); this branch `package-lock.json` now resolves 1.2.0
+**Next:** hand SEO-Bot#72 to l9-pr-remediation for CI green after lockfile push
+**Pickup:** Graphiti PICKUP written 2026-08-29
 
 Tracked items that are intentionally **not** done yet because they depend on an
 operational or external precondition (not on more code). Each lists the exact
