@@ -19,7 +19,11 @@ vi.mock("axios", () => ({
 const axiosError = (message: string, extras: Record<string, unknown> = {}) =>
   Object.assign(new Error(message), { isAxiosError: true, ...extras });
 vi.mock("../../src/core/config.js", () => ({
-  getConfig: () => ({ DATAFORSEO_LOGIN: "login", DATAFORSEO_PASSWORD: "pass" }),
+  getConfig: () => ({
+    DATAFORSEO_LOGIN: "login",
+    DATAFORSEO_PASSWORD: "pass",
+    DATAFORSEO_TIMEOUT_MS: 90_000,
+  }),
 }));
 
 import {
@@ -85,6 +89,16 @@ describe("DataForSeoClient.getOrganicSerp", () => {
     expect(result.items[1]).toMatchObject({ rankGroup: 2, domain: "beta.com" });
     expect(result.observedAt).toBe("2024-01-02T12:00:00.000Z");
     expect(result.serpFeatures).toContain("paid");
+  });
+
+  it("sends the validated DATAFORSEO_TIMEOUT_MS to axios", async () => {
+    post.mockResolvedValue({ data: { status_code: 40000, status_message: "bad" } });
+    await expect(new DataForSeoClient().getOrganicSerp({ keyword: "x" })).rejects.toThrow();
+    expect(post).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.anything(),
+      expect.objectContaining({ timeout: 90_000 }),
+    );
   });
 
   it("surfaces DataForSEO API errors", async () => {

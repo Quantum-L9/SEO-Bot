@@ -31,6 +31,13 @@ import { registerApiSecurity } from "./security.js";
 const logger = createModuleLogger("api");
 
 /**
+ * Maximum time the server waits to receive a complete inbound request, in ms.
+ * Matches Node's own default; stated explicitly so it is never set to 0 again
+ * (that disables slowloris protection without affecting handler duration).
+ */
+const INBOUND_REQUEST_TIMEOUT_MS = 300_000;
+
+/**
  * Build the fully-configured Fastify instance WITHOUT binding a port. Extracted
  * from startApiServer so the routes (security, projections, manual trigger) are
  * injectable in tests via `app.inject` — behavior is identical to the listening
@@ -43,15 +50,17 @@ export async function buildApiServer(): Promise<FastifyInstance> {
     logger: false,
     trustProxy: getConfig().TRUST_PROXY,
   });
-  // Build-intelligence endpoints generate a whole contract in one request
-  // (8-batch blueprint, 29-route structured content). Node's default
-  // requestTimeout destroys the socket at 300s mid-generation ("fetch
-  // failed" on the client, golden runs #8/#10). The Fastify factory
-  // requestTimeout option is not honored by the installed fastify 4.x, so
-  // set it on the underlying Node http.Server directly. 0 disables the
-  // server-side kill; the client's per-endpoint timeouts remain the real
-  // bounds.
-  app.server.requestTimeout = 0;
+  // Node's requestTimeout bounds how long the server waits to RECEIVE a
+  // complete request; it does not bound handler execution. (Measured on Node
+  // 22: requestTimeout=2s with a 4s handler still returns 200 after ~4s.) So
+  // disabling it never protected the long build-intelligence generations —
+  // it only removed the slowloris guard, letting any caller, including
+  // unauthenticated ones on /api/clients/register, hold an incomplete request
+  // body open forever. Keep a finite inbound deadline. Long generation is
+  // bounded per endpoint by the handler itself and by client timeouts.
+  // The Fastify factory option is not honored by the installed fastify 4.x,
+  // so set it on the underlying Node http.Server directly.
+  app.server.requestTimeout = INBOUND_REQUEST_TIMEOUT_MS;
 
   await app.register(helmet);
   await app.register(formBody);

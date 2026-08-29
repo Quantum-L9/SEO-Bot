@@ -19,7 +19,11 @@ vi.mock("axios", () => ({
 const axiosError = (message: string, extras: Record<string, unknown> = {}) =>
   Object.assign(new Error(message), { isAxiosError: true, ...extras });
 vi.mock("../../src/core/config.js", () => ({
-  getConfig: () => ({ DATAFORSEO_LOGIN: "login", DATAFORSEO_PASSWORD: "password" }),
+  getConfig: () => ({
+    DATAFORSEO_LOGIN: "login",
+    DATAFORSEO_PASSWORD: "password",
+    DATAFORSEO_TIMEOUT_MS: 90_000,
+  }),
 }));
 
 import {

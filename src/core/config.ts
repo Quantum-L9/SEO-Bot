@@ -29,6 +29,12 @@ const envSchema = z.object({
   // DataForSEO
   DATAFORSEO_LOGIN: z.string().min(1),
   DATAFORSEO_PASSWORD: z.string().min(1),
+  // Per-request HTTP timeout for the DataForSEO client. The live SERP endpoint
+  // (google/organic/live/advanced) routinely needs longer than 30s under load —
+  // golden runs #35/#36 timed out consecutively at exactly 30s. Validated here
+  // so a blank, non-numeric, or non-positive deployment value fails at startup
+  // rather than reaching axios as NaN and failing every provider request.
+  DATAFORSEO_TIMEOUT_MS: z.coerce.number().int().positive().default(90_000),
 
   // Google APIs
   PAGESPEED_API_KEY: z.string().min(1),

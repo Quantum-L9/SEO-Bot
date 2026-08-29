@@ -97,12 +97,55 @@ export class LlmService {
   getRouter(): L9LLMRouter {
     return this.router;
   }
-  /** Counted executePolicyJson invocations per operation (audit input). */
-  private readonly policyCallCounts = new Map<string, number>();
+  /**
+   * Counted executePolicyJson invocations, keyed by operation AND client. The
+   * audit is queryable per tenant, so a process-wide total would report one
+   * client's calls as another client's expected count.
+   */
+  private readonly policyCallCounts = new Map<string, Map<string, number>>();
 
-  /** Measured executePolicyJson invocations per operation (audit input). */
-  getPolicyCallCounts(): Readonly<Record<string, number>> {
-    return Object.fromEntries(this.policyCallCounts);
+  /**
+   * Router decision ids produced by governed calls, keyed by operation and
+   * client. This — not the generic `TaskType` — is what identifies a governed
+   * call: the same task types are produced by ungoverned paths such as
+   * `generateContent()`, so classifying the router log by task type would sweep
+   * unrelated daemon work into the audit.
+   */
+  private readonly governedDecisionIds = new Map<string, Map<string, Set<string>>>();
+
+  /**
+   * Measured executePolicyJson invocations per operation. Scoped to `clientId`
+   * when supplied; otherwise summed across clients.
+   */
+  getPolicyCallCounts(clientId?: string): Readonly<Record<string, number>> {
+    const counts: Record<string, number> = {};
+    for (const [operation, byClient] of this.policyCallCounts) {
+      if (clientId === undefined) {
+        let total = 0;
+        for (const n of byClient.values()) total += n;
+        counts[operation] = total;
+      } else {
+        counts[operation] = byClient.get(clientId) ?? 0;
+      }
+    }
+    return counts;
+  }
+
+  /**
+   * Router decision ids attributed to governed calls per operation. Scoped to
+   * `clientId` when supplied; otherwise unioned across clients.
+   */
+  getGovernedDecisionIds(clientId?: string): ReadonlyMap<string, ReadonlySet<string>> {
+    const byOperation = new Map<string, Set<string>>();
+    for (const [operation, byClient] of this.governedDecisionIds) {
+      const ids = new Set<string>();
+      for (const [client, taskIds] of byClient) {
+        if (clientId !== undefined && client !== clientId) continue;
+        for (const id of taskIds) ids.add(id);
+      }
+      byOperation.set(operation, ids);
+    }
+    return byOperation;
   }
 
   recoverExpiredBudgetReservations(): Promise<number> {
@@ -320,7 +363,12 @@ export class LlmService {
     }
     const task = seoImproveTask(operation, args.clientId, `[${args.module}] ${args.purpose}`);
     const purpose = `[${args.module}] ${args.purpose}`;
-    this.policyCallCounts.set(operation, (this.policyCallCounts.get(operation) ?? 0) + 1);
+    let countsForOperation = this.policyCallCounts.get(operation);
+    if (!countsForOperation) {
+      countsForOperation = new Map<string, number>();
+      this.policyCallCounts.set(operation, countsForOperation);
+    }
+    countsForOperation.set(args.clientId, (countsForOperation.get(args.clientId) ?? 0) + 1);
     const first = await this.executeGoverned(operation, task, args, purpose, "initial");
     if (args.callCounter) args.callCounter.value += 1;
     try {
@@ -353,6 +401,31 @@ export class LlmService {
   }
 
   /**
+   * Attribute every router decision that appeared for `clientId` across the
+   * governed call to `operation`. Decisions already present beforehand are left
+   * alone, so a decision is attributed exactly once.
+   */
+  private recordGovernedDecisions(
+    operation: SeoImproveLlmOperation,
+    clientId: string,
+    seenBefore: ReadonlySet<string>,
+  ): void {
+    let byClient = this.governedDecisionIds.get(operation);
+    if (!byClient) {
+      byClient = new Map<string, Set<string>>();
+      this.governedDecisionIds.set(operation, byClient);
+    }
+    let ids = byClient.get(clientId);
+    if (!ids) {
+      ids = new Set<string>();
+      byClient.set(clientId, ids);
+    }
+    for (const decision of this.router.getCallLogByClient(clientId, Number.MAX_SAFE_INTEGER)) {
+      if (!seenBefore.has(decision.taskId)) ids.add(decision.taskId);
+    }
+  }
+
+  /**
    * Dispatch ONE actual governed call and record the router's own decision for
    * it.
    *
@@ -369,9 +442,19 @@ export class LlmService {
     purpose: string,
     attempt: OperationAttempt,
   ): Promise<LLMResponse> {
+    const clientId = task.clientId ?? "default";
+    // Identify the router decisions this governed call produces, so the audit
+    // never has to infer governance from the generic TaskType (which ungoverned
+    // paths such as generateContent() also emit). Build-intelligence governed
+    // calls are strictly sequential per client — no Promise.all anywhere in the
+    // producers — so the decisions that appear across this await belong to it.
+    const seenBefore = new Set(
+      this.router.getCallLogByClient(clientId, Number.MAX_SAFE_INTEGER).map((d) => d.taskId),
+    );
     const response = await this.execute(task, args.systemPrompt, args.userPrompt, undefined, {
       operation,
     });
+    this.recordGovernedDecisions(operation, clientId, seenBefore);
     args.recorder?.attributeOperationCall({
       operation,
       purpose,

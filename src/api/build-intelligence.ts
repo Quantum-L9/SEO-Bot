@@ -48,6 +48,7 @@ import {
   createCompetitiveLandscape,
 } from "../build-intelligence/competitive-landscape.js";
 import { projectLlmAudit } from "../build-intelligence/llm-audit.js";
+import { runPreflight } from "../build-intelligence/preflight.js";
 import {
   getRunLlmAudit,
   getRunLlmAuditFor,
@@ -279,25 +280,20 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
   //    DataForSEO paid call; never returns key values. Website-Bot's REDESIGN
   //    preflight consumes this before the expensive pipeline begins.
   app.get("/api/build-intelligence/preflight", async () => {
-    const dataforseoConfigured = Boolean(
-      process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD,
-    );
-    const llmConfigured = Boolean(process.env.OPENROUTER_API_KEY && process.env.PERPLEXITY_API_KEY);
+    // Reaching this handler means the machine-auth hook admitted the request,
+    // which is the `contractSeen` input to the machine-auth check. Every other
+    // field below is a real probe result — nothing here is a hardcoded PASS.
+    const preflight = runPreflight(true);
     const report = {
-      status: "ready",
-      service: "SEO-Bot",
-      version: SERVICE_VERSION,
-      bot_interop_version: BOT_INTEROP_VERSION,
-      llm_router_version: LLM_ROUTER_VERSION,
+      ...preflight,
+      version: preflight.version === "unknown" ? SERVICE_VERSION : preflight.version,
+      bot_interop_version: preflight.bot_interop_version ?? BOT_INTEROP_VERSION,
+      llm_router_version: preflight.llm_router_version ?? LLM_ROUTER_VERSION,
       capabilities: {
-        competitive_landscape: true,
-        seo_content_blueprint: true,
-        structured_content: true,
+        ...preflight.capabilities,
+        // Schema advertisement, not a probed capability: the audit projection
+        // ships with this build, so the consumer can always discover it.
         run_llm_audit: RUN_LLM_AUDIT_SCHEMA,
-      },
-      configuration: {
-        dataforseo_configured: dataforseoConfigured,
-        llm_provider_configured: llmConfigured,
       },
     };
     // The golden oracle attaches disk evidence without changing the sealed

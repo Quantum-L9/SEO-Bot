@@ -177,6 +177,7 @@ export function isRetryableTransportFailure(error: unknown): boolean {
 export class DataForSeoClient {
   private readonly baseUrl = "https://api.dataforseo.com/v3";
   private readonly auth: string;
+  private readonly timeoutMs: number;
   private readonly attemptLog: DataForSeoAttemptRecord[] = [];
 
   constructor() {
@@ -184,6 +185,7 @@ export class DataForSeoClient {
     this.auth = Buffer.from(`${config.DATAFORSEO_LOGIN}:${config.DATAFORSEO_PASSWORD}`).toString(
       "base64",
     );
+    this.timeoutMs = config.DATAFORSEO_TIMEOUT_MS;
   }
 
   /** Total provider attempts across all calls — DataForSEO requests are billable. */
@@ -206,8 +208,10 @@ export class DataForSeoClient {
         },
         // The live SERP endpoint (google/organic/live/advanced) routinely
         // needs longer than 30s under load — golden runs #35/#36 timed out
-        // consecutively at exactly 30s. Env-tunable with a 90s default.
-        timeout: Number(process.env.DATAFORSEO_TIMEOUT_MS ?? 90_000),
+        // consecutively at exactly 30s. DATAFORSEO_TIMEOUT_MS is validated by
+        // the config schema (positive integer, 90s default), so an invalid
+        // deployment value fails at startup instead of reaching axios as NaN.
+        timeout: this.timeoutMs,
       });
     } catch (error) {
       // Re-thrown as the raw axios error so the retry loop can classify it.

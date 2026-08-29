@@ -98,7 +98,7 @@ function textOf(route: StructuredContentRoute): string {
 
 describe("deterministic remediation scrub surface", () => {
   it("removes certification from every text surface", () => {
-    for (const [label, surface, blocks] of [
+    for (const [, surface, blocks] of [
       ["paragraph", {}, [{ kind: "paragraph", text: "We hold a certification for roofing." }]],
       [
         "quote",

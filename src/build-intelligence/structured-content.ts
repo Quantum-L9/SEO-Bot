@@ -787,7 +787,6 @@ export function applyDeterministicRemediation(
   const fillerYearsPhrase =
     Number.isFinite(years) && years > 0 ? ` with ${years} years of local roofing experience` : "";
   const hours = String(facts.get("hours") ?? "24/7");
-  const vertical = String(facts.get("vertical") ?? "roofing and renovation");
   // c. Substantive-content floor: scrubbing (or a lazy model) can leave a
   //    section under the 10-word threshold. Fill thin sections with a
   //    fact-derived paragraph so the deterministic check passes honestly.

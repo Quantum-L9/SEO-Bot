@@ -324,7 +324,17 @@ describe("GET /api/build-intelligence/preflight", () => {
     expect(res.statusCode).toBe(401);
   });
 
+  /** Every prerequisite the nine real preflight probes read from the env. */
+  const PREFLIGHT_ENV = {
+    SEO_BOT_API_KEY: "machine-key",
+    DATAFORSEO_LOGIN: "login",
+    DATAFORSEO_PASSWORD: "password",
+    OPENROUTER_API_KEY: "or-key",
+    PERPLEXITY_API_KEY: "pplx-key",
+  };
+
   it("returns non-secret readiness metadata for an authenticated machine call", async () => {
+    for (const [name, value] of Object.entries(PREFLIGHT_ENV)) vi.stubEnv(name, value);
     const res = await app.inject({
       method: "GET",
       url: "/api/build-intelligence/preflight",
@@ -341,11 +351,34 @@ describe("GET /api/build-intelligence/preflight", () => {
         structured_content: true,
       },
     });
+    // The projection is derived from the nine real checks, not hardcoded.
+    expect(body.checks).toHaveLength(9);
+    expect(typeof body.preflight_id).toBe("string");
     expect(typeof body.version).toBe("string");
     expect(typeof body.bot_interop_version).toBe("string");
     expect(typeof body.llm_router_version).toBe("string");
     expect(typeof body.configuration.dataforseo_configured).toBe("boolean");
     expect(typeof body.configuration.llm_provider_configured).toBe("boolean");
+    vi.unstubAllEnvs();
+  });
+
+  it("fails closed with not_ready when a real prerequisite is missing", async () => {
+    for (const [name, value] of Object.entries(PREFLIGHT_ENV)) vi.stubEnv(name, value);
+    // The one prerequisite the competitive-landscape capability derives from.
+    vi.stubEnv("DATAFORSEO_LOGIN", "");
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/build-intelligence/preflight",
+      headers: AUTH,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.status).toBe("not_ready");
+    expect(body.capabilities.competitive_landscape).toBe(false);
+    expect(body.configuration.dataforseo_configured).toBe(false);
+    // The advertised audit schema is a build fact, not a probed capability.
+    expect(body.capabilities.run_llm_audit).toBeTruthy();
+    vi.unstubAllEnvs();
   });
 
   it("never returns key values in the preflight payload", async () => {
