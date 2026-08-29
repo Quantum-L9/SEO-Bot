@@ -1,6 +1,10 @@
 import type { PageContentContractRoute, StructuredContentRoute } from "@quantum-l9/bot-interop";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { applyDeterministicRemediation } from "../../src/build-intelligence/structured-content.js";
+
+vi.mock("../../src/core/logger.js", () => ({
+  createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+}));
 
 function makeRoute(
   surface: Partial<Record<string, string>>,

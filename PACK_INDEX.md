@@ -27,4 +27,4 @@ This index provides a navigational map to all documentation and modules within t
 ## 4. Infrastructure & Integration
 - `docker-compose.yml` - The full deployment stack.
 - `client-snippets/posthog-tracking.html` - The tracking script to inject into client Astro sites.
-- 
+-

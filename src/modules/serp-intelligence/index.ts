@@ -170,7 +170,7 @@ async function analyzeCompetitors(job: Job): Promise<void> {
       };
 
       const gaps = await llm.extractJson<GapDimension[]>(
-        `Score the competitive gap between client and competitor across these 6 dimensions. 
+        `Score the competitive gap between client and competitor across these 6 dimensions.
 Return a JSON array of objects with: dimension, clientScore (0-100), competitorScore (0-100), delta, details.
 
 Dimensions: content_depth, schema, backlinks, speed, freshness, serp_features
@@ -178,8 +178,8 @@ Dimensions: content_depth, schema, backlinks, speed, freshness, serp_features
 Data:
 ${JSON.stringify(gapData, null, 2)}
 
-Score based on: content_depth (word count, headings, images), schema (structured data presence), 
-backlinks (referring domains, DR), speed (assume equal if no data), freshness (recent update signals), 
+Score based on: content_depth (word count, headings, images), schema (structured data presence),
+backlinks (referring domains, DR), speed (assume equal if no data), freshness (recent update signals),
 serp_features (featured snippets, PAA, etc.)`,
         clientId,
         "serp-intelligence",

@@ -333,7 +333,7 @@ function generateHtmlReport(data: WeeklyReportData): string {
 <html>
 <head><meta charset="utf-8"></head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; color: #333;">
-  
+
   <!-- Header -->
   <div style="background: linear-gradient(135deg, #1a237e, #283593); color: white; padding: 24px; border-radius: 12px; margin-bottom: 24px;">
     <h1 style="margin: 0; font-size: 24px;">Weekly SEO Report</h1>
