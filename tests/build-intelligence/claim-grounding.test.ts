@@ -10,7 +10,10 @@ import type {
   VerifiedBusinessFact,
 } from "@quantum-l9/bot-interop";
 import { describe, expect, it } from "vitest";
-import { checkRouteGrounding } from "../../src/build-intelligence/claim-grounding.js";
+import {
+  checkRouteGrounding,
+  unsatisfiedProofRequirements,
+} from "../../src/build-intelligence/claim-grounding.js";
 
 function fact(fact_id: string, key: string, value: VerifiedBusinessFact["value"]) {
   return { fact_id, key, value, verified: true as const, source_refs: ["crm:1"] };
@@ -218,5 +221,28 @@ describe("claim grounding — contract failures", () => {
     contract.sections[0]!.content_requirements.topics = ["metal replacement roofing"];
     const verdict = checkRouteGrounding(route(GROUNDED), contract);
     expect(verdict.failures).toEqual([]);
+  });
+});
+
+describe("unsatisfiedProofRequirements", () => {
+  it("is empty when the section prose contains the proof tokens", () => {
+    const contract = contractRoute();
+    const hero = contract.sections[0];
+    if (!hero) throw new Error("hero section missing");
+    hero.proof_requirements = ["warranty"];
+    const generated = route(
+      "Every system we install carries a 25 year manufacturer warranty for Dallas, Texas homes.",
+    );
+    expect([...unsatisfiedProofRequirements(generated, contract)]).toEqual([]);
+  });
+
+  it("names a proof whose tokens are absent from the matching section", () => {
+    const contract = contractRoute();
+    const hero = contract.sections[0];
+    if (!hero) throw new Error("hero section missing");
+    hero.proof_requirements = ["bondedlicensure"];
+    expect([...unsatisfiedProofRequirements(route(GROUNDED), contract)]).toEqual([
+      "bondedlicensure",
+    ]);
   });
 });

@@ -43,6 +43,7 @@ import {
   checkRouteGrounding,
   collectRouteText,
   MAGNITUDE_PHRASES,
+  unsatisfiedProofRequirements,
 } from "./claim-grounding.js";
 import { type RouteValidationVerdict, validateRoute } from "./content-validator.js";
 import { PRODUCER } from "./producer.js";
@@ -1220,6 +1221,19 @@ function groundedVerdict(
     if (lower.startsWith("missing proof requirements")) return true;
     return proofPhrases.some((phrase) => lower === phrase);
   };
+  const proofLabels = (failure: string): string[] => {
+    const lower = failure.trim().toLowerCase();
+    if (lower.startsWith("missing proof requirements")) {
+      const colon = failure.indexOf(":");
+      const list = colon >= 0 ? failure.slice(colon + 1) : "";
+      return list
+        .split(",")
+        .map((item) => item.trim().toLowerCase())
+        .filter(Boolean);
+    }
+    return [lower];
+  };
+  const unsatisfiedProofs = unsatisfiedProofRequirements(route, contractRoute);
   const requirementIdPhrases = [
     ...(contractRoute.sections ?? []).flatMap(
       (section) => section.content_requirements?.requirement_ids ?? [],
@@ -1232,20 +1246,31 @@ function groundedVerdict(
   const routeTextLower = collectRouteText(route).toLowerCase();
   const isRemediationSentenceQuote = (failure: string): boolean =>
     failure.trimStart().startsWith("Regarding ") && routeTextLower.includes(failure.toLowerCase());
+  // Acceptance tests are repair-only: they are prompt instructions ("mentions
+  // warranty"), not customer-facing phrases, so they cannot be token-checked
+  // against prose. Proof echoes intersect a deterministic checker. Requirement
+  // ids are not assertable against prose and still veto — dropping them must
+  // not flip contract_passed via allFailuresFiltered.
   const failedRequirements = verdict.failed_requirements.filter((failure) => {
     if (isCoverageShaped(failure)) {
       return coverageLabels(failure).some((label) => groundingFailurePhrases.has(label));
     }
     if (isRemediationSentenceQuote(failure)) return false;
     if (opts.enforceAcceptanceTests) return true;
-    return (
-      !isAcceptanceTestFailure(failure) && !isProofEcho(failure) && !isRequirementEcho(failure)
-    );
+    if (isProofEcho(failure)) {
+      return proofLabels(failure).some((label) => unsatisfiedProofs.has(label));
+    }
+    if (isAcceptanceTestFailure(failure)) return false;
+    return !isRequirementEcho(failure);
   });
+  const droppedRequirementEcho = verdict.failed_requirements.some(
+    (failure) => isRequirementEcho(failure) && !failedRequirements.includes(failure),
+  );
   const allFailuresFiltered =
     (verdict.failed_requirements.length > 0 || verdict.unsupported_claims.length > 0) &&
     unsupportedClaims.length === 0 &&
-    failedRequirements.length === 0;
+    failedRequirements.length === 0 &&
+    !droppedRequirementEcho;
   return {
     ...verdict,
     unsupported_claims: unsupportedClaims,

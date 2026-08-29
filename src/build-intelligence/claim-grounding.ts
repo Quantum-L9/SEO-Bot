@@ -17,6 +17,7 @@
  *   - Does it repeat a claim the contract explicitly forbids?
  *   - Does it still contain placeholder or empty filler content?
  *   - Are the contract's required topics and entities actually represented?
+ *   - Are section proof_requirements token-covered in that section's prose?
  *
  * The canonical regression this exists to stop: prose claiming "decades of
  * experience" when the verified fact says a different, smaller number of years.
@@ -30,21 +31,27 @@ import type {
   VerifiedBusinessFact,
 } from "@quantum-l9/bot-interop";
 
+function collectSectionProse(section: StructuredContentRoute["sections"][number]): string {
+  const parts: string[] = [];
+  if (section.eyebrow) parts.push(section.eyebrow);
+  if (section.heading) parts.push(section.heading);
+  if (section.subheading) parts.push(section.subheading);
+  if (section.cta) parts.push(section.cta.label, section.cta.action);
+  for (const block of section.blocks) {
+    if (block.kind === "paragraph") parts.push(block.text);
+    else if (block.kind === "quote") {
+      parts.push(block.text);
+      if (block.attribution) parts.push(block.attribution);
+    } else parts.push(...block.items);
+  }
+  return parts.join("\n");
+}
+
 /** Flatten every piece of author-visible prose in a generated route. */
 export function collectRouteText(route: StructuredContentRoute): string {
   const parts: string[] = [route.metadata.title, route.metadata.description];
   for (const section of route.sections) {
-    if (section.eyebrow) parts.push(section.eyebrow);
-    if (section.heading) parts.push(section.heading);
-    if (section.subheading) parts.push(section.subheading);
-    if (section.cta) parts.push(section.cta.label, section.cta.action);
-    for (const block of section.blocks) {
-      if (block.kind === "paragraph") parts.push(block.text);
-      else if (block.kind === "quote") {
-        parts.push(block.text);
-        if (block.attribution) parts.push(block.attribution);
-      } else parts.push(...block.items);
-    }
+    parts.push(collectSectionProse(section));
   }
   for (const faq of route.faqs) parts.push(faq.question, faq.answer);
   for (const link of route.internal_links) parts.push(link.anchor_text);
@@ -337,4 +344,33 @@ function checkRequiredCoverage(
     }
   }
   return failures;
+}
+
+/**
+ * Proof requirements that are not token-covered in the matching generated
+ * section. Same token rule as required topics: every significant token of
+ * the proof phrase must appear in that section's prose.
+ */
+export function unsatisfiedProofRequirements(
+  route: StructuredContentRoute,
+  contractRoute: PageContentContractRoute,
+): Set<string> {
+  const missing = new Set<string>();
+  for (const contractSection of contractRoute.sections ?? []) {
+    const generated = route.sections.find(
+      (section) => section.section_id === contractSection.section_id,
+    );
+    const haystack = normalize(generated ? collectSectionProse(generated) : "");
+    for (const proof of contractSection.proof_requirements ?? []) {
+      const normalized = normalize(proof);
+      if (!normalized) continue;
+      const tokens = significantTokens(proof);
+      const uncovered =
+        tokens.length === 0
+          ? !haystack.includes(normalized)
+          : tokens.some((token) => !haystack.includes(token));
+      if (uncovered) missing.add(normalized);
+    }
+  }
+  return missing;
 }
