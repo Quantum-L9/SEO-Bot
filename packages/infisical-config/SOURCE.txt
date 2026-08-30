@@ -1,0 +1,2 @@
+Quantum-L9/infisical-config
+commit: 331ef590a73dd208e705d99a1f5137fa094de910
