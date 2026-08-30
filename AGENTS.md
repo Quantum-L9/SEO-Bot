@@ -63,7 +63,7 @@ points at a `seed.ts` that does not exist. Follow the code; don't propagate the 
 
 | Purpose | Command | Notes |
 |---|---|---|
-| Install | `npm install --no-audit --no-fund` | No lockfile — never `npm ci`. Needs `NODE_AUTH_TOKEN` for `@quantum-l9/*`. |
+| Install | `npm ci --no-audit --no-fund` | Lockfile is committed. `@quantum-l9/*` is `file:` / public git — no `NODE_AUTH_TOKEN`. |
 | Build | `npm run build` | `tsc` → `dist/` |
 | Typecheck | `npx tsc --noEmit` | **Blocking CI gate.** `strict:true`. |
 | Test | `npx vitest run` | **Blocking CI gate.** Vitest; `NODE_ENV=test`. |
@@ -73,11 +73,8 @@ points at a `seed.ts` that does not exist. Follow the code; don't propagate the 
 | Lint | `npm run lint` | `biome check .` — JS/TS/JSON owner. `lint:fix` writes. |
 | Lint (CI) | `.github/workflows/l9-lint-test.yml` job `biome` | Advisory until `enforce-biome: true`. |
 
-- **Private-dep auth:** installing `@quantum-l9/*` needs `NODE_AUTH_TOKEN`. Prefer
-  `source scripts/ensure-npm-auth.sh` (resolves AWS `openclaw-igorbot/github#token` via
-  Cursor-Governance) or inject the same PAT in the environment panel. SessionStart hook loads
-  AWS when the panel is empty. Missing → deps don't install and CI stays the gate
-  (`GITHUB_TOKEN` + `packages: read` in Actions).
+- **Private-dep auth:** `@quantum-l9/*` is `file:` / public git. Do not paste
+  `NODE_AUTH_TOKEN`. `scripts/ensure-npm-auth.sh` is leftover Packages tooling.
 - **Lint/format:** Biome owns JS/TS/JSON (`biome.json`, `@biomejs/biome@2.5.8`).
   `npm run lint` is `biome check .`. Do not add ESLint or Prettier as a second
   owner. Finish plugin + blocking CI + ESLint removal via
