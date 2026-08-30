@@ -36,7 +36,7 @@
     "@quantum-l9/bot-interop": "file:packages/bot-interop",
     "@quantum-l9/graphiti-memory-client": "file:packages/graphiti-memory-client",
     "@quantum-l9/infisical-config": "git+https://github.com/Quantum-L9/infisical-config.git#331ef590a73dd208e705d99a1f5137fa094de910",
-    "@quantum-l9/llm-router": "git+https://github.com/Quantum-L9/LLM-Router.git#v1.3.0",
+    "@quantum-l9/llm-router": "file:packages/llm-router",
     "axios": "^1.7.0",
     "bullmq": "^5.0.0",
     "cheerio": "^1.0.0",

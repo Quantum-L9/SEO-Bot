@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.log
+*.tgz
+artifacts/
+coverage/
+
+# ── Bounded-autonomy durable state (per-workspace, never committed) ──
+# Agent runtime state: phase locks, memory receipts, L4 phase/release receipts,
+# and PR handoffs, written under L9_AUTONOMY_STATE_DIR (default .l9/). It is
+# machine- and session-local — it carries session IDs and absolute paths, and
+# is not source. Matches the convention in the rest of the constellation.
+.l9/

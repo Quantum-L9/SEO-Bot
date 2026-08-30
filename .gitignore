@@ -2,6 +2,8 @@ node_modules/
 dist/
 !packages/graphiti-memory-client/dist/
 !packages/graphiti-memory-client/dist/**
+!packages/llm-router/dist/
+!packages/llm-router/dist/**
 *.log
 *.rdb
 dump.rdb
