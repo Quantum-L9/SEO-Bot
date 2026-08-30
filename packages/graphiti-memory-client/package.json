@@ -1,0 +1,37 @@
+{
+  "name": "@quantum-l9/graphiti-memory-client",
+  "version": "2.0.0",
+  "description": "Typed HTTP MCP client for the governed L9 Graphiti Memory service",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "verify:all": "npm run typecheck && npm test"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "typescript": "^5.8.3"
+  },
+  "license": "PROPRIETARY",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Quantum-L9/l9-graphiti-memory.git",
+    "directory": "clients/typescript"
+  }
+}

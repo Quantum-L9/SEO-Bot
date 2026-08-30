@@ -1,5 +1,11 @@
 node_modules/
 dist/
+!packages/graphiti-memory-client/dist/
+!packages/graphiti-memory-client/dist/**
+!packages/llm-router/dist/
+!packages/llm-router/dist/**
+!packages/infisical-config/dist/
+!packages/infisical-config/dist/**
 *.log
 *.rdb
 dump.rdb
