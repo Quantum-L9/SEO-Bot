@@ -204,6 +204,76 @@ was never the right place to force.
 
 ---
 
+## 5. Harvest from the `seo-bot-final-phase` pack (not integrated)
+
+**Status:** open — ideas recorded, the pack's code deliberately NOT integrated.
+
+A git bundle (`claude/seo-bot-final-phase-k1ikva`, 3 commits from 2026-08-31
+17:44–23:10, based on `main@846fcc0`) arrived proposing a "staged-autonomy
+control loop". It is a **second implementation of the intelligence plane this
+repository already has**, built in parallel from `main` by an agent that could
+not see the plane, because the plane is not on `main` yet — it is in the open
+stack (#80, #81 and their parents).
+
+**Why it was not integrated.** It is not complementary work:
+
+| | Pack | This repo |
+|---|---|---|
+| Mode ladder | `off, observe, recommend, route_safe, route_llm, full` | identical |
+| Signal types | 4 | 8 (superset; the pack's are earlier names — `bad_lcp_high_exit` for `high_exit_bad_lcp`, `citation_loss` split into two) |
+| Opportunity types | 4 | 9 (superset) |
+| `ModuleName` | adds `"intelligence"` | adds the same member |
+| Migrations | claims `0002`, `0003` | already uses `0002`–`0005` |
+| Module root | `src/modules/intelligence/` | `src/intelligence/` |
+
+Eight files conflict textually, and the data layer is worse than a conflict:
+both create `intelligence_runs`, `intelligence_signals`,
+`intelligence_opportunities` and `intelligence_decisions` with **incompatible
+columns** under `CREATE TABLE IF NOT EXISTS` — the pack's `signals` has
+`subject`/`status`/`first_observed_at` and a nullable `run_id`, this repo's has
+`entity_type`/`entity_id`/`confidence`/`suppressed_until` and `run_id NOT NULL`.
+Run both against one database and the second silently no-ops; whichever ran
+first wins and the other plane's inserts fail at runtime on missing NOT NULL
+columns. Silent divergence, found in production.
+
+Its one genuinely good refactor is already here: `link-building/safety.ts`
+extracts the outreach caps to a pure leaf so the policy layer need not import a
+module that builds LLM and mail clients at load time — which is exactly what
+`src/modules/link-building/velocity.ts` already does, already consumed by
+`src/intelligence/policy-state.ts`.
+
+**Applied from it:** the `.gitignore` rule for `.claude/commands/` and
+`.claude/skills/` (see this repo's `.gitignore`). Those were hidden only by
+machine-local `.git/info/exclude`, so on any other checkout 76 generated files
+appear untracked.
+
+**Worth harvesting, each its own change against `src/intelligence/`:**
+
+1. **`@electric-sql/pglite` as a test harness.** The pack runs its suite against
+   an embedded Postgres in-process. That is a real alternative to gate 5's
+   Docker/CI-services approach (`docs/seo-sql/TESTING.md`): no service
+   containers, runnable in the default suite, at the cost of not being the same
+   Postgres build production runs. The two are complementary — pglite could
+   cover the SQL-shape assertions cheaply while gate 5 keeps the real-service
+   verdict.
+2. **`intelligence_action_links`.** The pack models the action→link relation as
+   its own table. This repo threads that through `action_outcomes`; whether a
+   dedicated link table is better is a schema question worth asking on its own.
+3. **The extra `SAFETY` constants** — `minDomainRating`, `followUpDelayDays`,
+   `maxFollowUps`, `circuitBreakerDropPct`. `LINK_VELOCITY` carries only the two
+   caps the governor enforces. If any of those four are duplicated as literals
+   elsewhere, they belong beside the caps.
+4. **Exporting the Core Web Vitals thresholds** from
+   `src/modules/web-vitals/index.ts`, where they are currently a private const.
+   The pack extracts them to a pure leaf. No consumer needs that here today —
+   the extractor reads `reporting.page_experience_risks` — so this is only worth
+   doing when one does.
+
+**Unblock trigger:** none — these are ordinary follow-ups. The pack itself needs
+no decision; it is superseded and should not be merged.
+
+---
+
 ## Related (other repo)
 
 - **P4b — Website-Bot `infisical run` wrap:** see `TODO.md` in `Quantum-L9/Website-Bot`.
