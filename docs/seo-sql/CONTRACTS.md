@@ -3,7 +3,7 @@
 
 Where work on the SEO SQL planes goes, and what has been built.
 
-**All four contracts C1–C4 are delivered.** What follows records what each one
+**All five contracts C1–C5 are delivered.** What follows records what each one
 did and the constraints that survive it, so a later change knows what it is
 allowed to renegotiate. The "where future work goes" table at the bottom is the
 live part.
@@ -78,6 +78,42 @@ panel degrades in place.
 directly, and every model-authored value (`rationale`, `hypothesis`,
 `learnings`, `title`) is escaped at the render site.
 
+### C5 — Rollout ladder and install hardening
+
+The plane could reason end-to-end and had no way to be enabled in stages, so
+turning it on was a deploy rather than a cutover. `INTELLIGENCE_MODE` is that
+staging: `off` → `observe` → `recommend` → `route_safe` → `route_llm` → `full`,
+each rung a superset of the one before, defaulting to `off`.
+
+**Two capabilities sit outside the ladder** behind their own flags —
+`INTELLIGENCE_ALLOW_OUTREACH_ROUTING` and `INTELLIGENCE_ALLOW_SITE_MUTATION`.
+Both are irreversible, and an operator raising the mode for better ranking must
+not thereby acquire the right to email a stranger. `full` grants neither.
+
+The gate is applied at registration (a disabled job cannot fire and then
+decline), on the execution **decision** before `logAction` (so `action_log` never
+records a withheld action as executed), and again at the queue itself.
+
+Three install defects closed alongside, each silent:
+
+- `cmd_update` never migrated — only `setup` did, so a release carrying a
+  migration booted new code against an old schema.
+- `deploy.sh` addressed Compose by `container_name`, which matches no service
+  and exits 0.
+- `addJob` had no deduplication key, so a retried follow-up enqueue sent the
+  same outreach twice.
+
+An unknown action from a composed origin now fails closed to
+critical/irreversible. Keyed on `triggeredBy`, **not** `module`: an intelligence
+proposal carries the module that will execute it, so a module-keyed check is
+dead code that looks like a control.
+
+**Do not renegotiate:** the ladder is monotonic (asserted across every mode);
+outreach and site mutation each need the routing rung AND their own flag;
+`INTELLIGENCE_LLM_PLANNING_ENABLED` stays decisive at every mode;
+`reporting:refresh-materialized` is never gated on the intelligence mode;
+rollback is one environment variable plus a restart.
+
 ---
 
 ## Working agreement
@@ -122,3 +158,6 @@ Add a migration with `npx drizzle-kit generate` or by hand following
 | Anything that spends tokens | Its own budgeted job | Add it to `BUDGETED` in `registration.test.ts` — the zero-token invariant is a named list, so a new spender has to be declared. |
 | A new operator panel | `src/api/dashboard.ts` via the reporting gateway | Not direct table queries. Escape every DB value; `rationale`, `hypothesis` and `learnings` are model-authored free text. |
 | Schema change | `drizzle/0006+` | Hand-written following `0004`/`0005`; register in `_journal.json` with a strictly increasing `when`. **Never edit an applied migration.** |
+| A new capability the plane may exercise | `src/intelligence/mode.ts` | Add it to the ladder or to an out-of-ladder flag — never both, and never as a bare `mode !== "off"` check at the call site. The monotonicity test covers every mode automatically. |
+| A new follow-up job the plane may queue | `src/intelligence/mode.ts` sets | Classify it as outreach or site-mutating if it is either, or it routes at `route_safe` — the one thing that rung promises it will not do. |
+| A new enqueue made from a durable row | its call site | Pass `addJob`'s `jobId`, derived from the row. BullMQ is at-least-once; without a key a retry duplicates the work. |
