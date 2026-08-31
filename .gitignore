@@ -25,3 +25,11 @@ validation/runs/
 # per run, so it is never shared branch content. Matches the constellation
 # convention (Website-Bot, l9-ci-core, l9-meta-injector, Cognitive.Engine.Graphs).
 .l9/
+
+# Governance command/skill adapters projected into the workspace by the
+# sessionStart wiring. They are generated copies of the Cursor-Governance SSOT,
+# not repository content: committing them would create a second governance tree
+# inside a consumer repo. The one hand-authored file here
+# (.claude/hooks/session-start.sh) stays tracked.
+.claude/commands/
+.claude/skills/
