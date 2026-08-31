@@ -145,42 +145,62 @@ and `route_safe`'s promise all guarded it.
 
 ---
 
-## 4. `gh-package-deps-preflight` cannot run in a consumer workspace
+## 4. `gh-package-deps-preflight` — CLOSED (2026-08-31)
 
-**Status:** open finding — the governance gate hook, not this repository's code.
-Surfaced while publishing the 4th SQL-SEO contract, because that change edits
-`package.json` (adding the test-group scripts) and the hook's `files:` guard
-matches `package.json`.
+**Status:** fixed in `Quantum-L9/Cursor-Governance`. Was an open finding: the
+governance gate hook, not this repository's code. Surfaced publishing the 4th
+SQL-SEO contract, because that change edits `package.json` (adding the
+test-group scripts) and the hook's `files:` guard matches `package.json`.
+
+Two independent failures. Fixing either alone leaves the hook broken.
+
+### It could not run here
 
 The hook is defined in the governance `.pre-commit-config.yaml` with
 `entry: python3 ops/scripts/validate_gh_package_deps.py` — a path relative to
-the **governance** tree. Run against a consumer workspace it resolves to
-`<consumer>/ops/scripts/validate_gh_package_deps.py`, which does not exist, and
-the hook dies on a missing file rather than on anything it checked:
+whichever tree pre-commit runs in. `run_pr_precommit.sh` names the **governance**
+config as its authority while running with the **consumer** workspace as cwd, so
+the entry resolved to `<consumer>/ops/scripts/validate_gh_package_deps.py`, which
+does not exist, and the hook died on a missing file rather than on anything it
+checked:
 
 ```
 can't open file '/home/user/seo-bot/ops/scripts/validate_gh_package_deps.py'
 ```
 
-`ops/scripts/run_pr_precommit.sh` already has the mechanism for exactly this
-class — `_GOV_ONLY_SKIP`, whose comment records the identical failure signature
-for `validate_commit_verification_contract.py` — but the list is currently
-empty, so this hook is not in it.
+`_GOV_ONLY_SKIP` was already the mechanism for exactly this class — its comment
+recorded the identical signature for `validate_commit_verification_contract.py`
+— and the list was empty. `gh-package-deps-preflight` is now in it, so the hook
+is skipped in a consumer checkout and still runs `--all-files` in governance.
+The `files:` guard is not a defence: it decides *whether* the hook runs, the
+entry path decides whether it *can*.
 
-**Run manually against the governance interpreter, it reports 8 findings**, all
-pre-existing and none caused by any change here: the four `@quantum-l9/*`
-packages resolve to `packages/<name>` with `"link": true`, because they are npm
-**workspace links** in this repo's layout, and the hook expects hash-suffixed
-GitHub Packages tarballs with sha512 integrity. `package-lock.json` is
-byte-identical to `main`; no change on this branch touches it.
+### It was also wrong about what it saw
 
-**Unblock trigger:** add `gh-package-deps-preflight` to `_GOV_ONLY_SKIP` in
-`Quantum-L9/Cursor-Governance` (`ops/scripts/run_pr_precommit.sh`), so the hook
-is skipped in a consumer checkout and still runs `--all-files` in the governance
-repo. Separately, decide whether the hook should recognise npm workspace links
-as legitimate, or whether these four packages are meant to be consumed from
-GitHub Packages here — the second question is the same one the Infisical items
-above are waiting on.
+Run manually against the governance interpreter it reported **8 findings**, two
+per `@quantum-l9/*` package. The original entry called these "npm **workspace**
+links"; they are not. This repo declares no `workspaces` key. All four are
+`file:` protocol dependencies — `"@quantum-l9/bot-interop":
+"file:packages/bot-interop"` — which npm records as `{"resolved":
+"packages/bot-interop", "link": true}`: no tarball URL and no integrity, **by
+construction**, not by omission. Every one of the hook's checks assumes a
+registry install, so it read four correctly-vendored packages as eight defects.
+
+`validate_gh_package_deps.py` now judges a `file:`/`link:` dep as a local dep.
+The exemption is verified, not a skip: the declaration, the lock entry and the
+directory on disk must agree, and that directory's `package.json` must name the
+package it claims to be. `file:packages/ghost` is still a finding. Registry deps
+are judged exactly as before — that is the PR #53 class the hook was written for.
+
+`package-lock.json` remains byte-identical to `main`; no change on this branch
+touched it, and none was needed.
+
+### The second question this raised, still open
+
+Whether these four packages are *meant* to be vendored, or consumed from GitHub
+Packages, is a separate decision — the same one items §2 and "Adding Infisical"
+below are waiting on. The hook no longer forces an answer by failing, which it
+was never the right place to force.
 
 ---
 
