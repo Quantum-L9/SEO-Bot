@@ -236,6 +236,26 @@ both are irreversible and neither should follow from a mode name:
 `INTELLIGENCE_LLM_PLANNING_ENABLED` remains decisive at every mode: unset or
 `false` stops all token spend, and raising the mode never re-enables it.
 
+### Network exposure
+
+Postgres, Redis and ClickHouse bind to `127.0.0.1` and are **not** reachable
+from outside the host. Containers talk to each other over the `l9-network`
+bridge and do not use the published ports, so nothing internal depends on this.
+
+Two consequences worth knowing before you need them:
+
+- **Remote `psql` needs a tunnel.** `ssh -L 5432:127.0.0.1:5432 <host>`, then
+  connect to `localhost:5432` as usual. The same pattern works for Redis (6379)
+  and ClickHouse (8123).
+- **Restoring a backup from your laptop** goes through that tunnel too, or run
+  the restore on the host.
+
+Ports `3100` (bot API and dashboard) and `8000` (PostHog) stay published: they
+are the operator-facing surfaces, they authenticate, and they belong behind your
+reverse proxy. `OPERATOR_API_KEY` and `DASHBOARD_ALLOWED_ORIGINS` are what guard
+them — loopback-binding them instead would take the product down rather than
+harden it.
+
 ### Deploying the substrate (mode stays off)
 
 The update path backs up, migrates, and only then starts the new bot, so a

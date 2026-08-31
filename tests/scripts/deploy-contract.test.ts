@@ -150,3 +150,79 @@ describe("deploy.sh — the update path migrates", () => {
     expect(deployScript).not.toMatch(/pnpm/);
   });
 });
+
+// ─── Network exposure (hardening contract C5) ────────────────────────────────
+
+describe("docker-compose.yml — internal services are not published to the world", () => {
+  /** Every published port mapping, as { service, mapping }. */
+  function publishedPorts(): { service: string; mapping: string }[] {
+    const out: { service: string; mapping: string }[] = [];
+    let service: string | null = null;
+    let inServices = false;
+    let inPorts = false;
+
+    for (const line of composeFile.split("\n")) {
+      if (/^services:\s*$/.test(line)) {
+        inServices = true;
+        continue;
+      }
+      if (inServices && /^\S/.test(line)) break;
+      if (!inServices) continue;
+
+      const svc = line.match(/^ {2}([A-Za-z0-9._-]+):\s*$/);
+      if (svc) {
+        service = svc[1];
+        inPorts = false;
+        continue;
+      }
+      if (/^ {4}ports:\s*$/.test(line)) {
+        inPorts = true;
+        continue;
+      }
+      // Any other 4-space key ends the ports block.
+      if (/^ {4}\S/.test(line)) {
+        inPorts = false;
+        continue;
+      }
+      const entry = inPorts ? line.match(/^ {6}- "([^"]+)"/) : null;
+      if (entry && service) out.push({ service, mapping: entry[1] });
+    }
+    return out;
+  }
+
+  // Datastores. Nothing outside this host has business reaching these directly,
+  // and two of them (redis, clickhouse) have no authentication configured here.
+  const INTERNAL_SERVICES = ["postgres", "redis", "clickhouse"];
+
+  it("binds every datastore port to loopback", () => {
+    const internal = publishedPorts().filter((p) => INTERNAL_SERVICES.includes(p.service));
+    // Guard the guard: if the services were renamed this must fail loudly rather
+    // than vacuously pass over an empty list.
+    expect(internal.length).toBeGreaterThan(0);
+
+    for (const { service, mapping } of internal) {
+      expect(mapping, `${service} publishes "${mapping}" to all interfaces`).toMatch(
+        /^127\.0\.0\.1:/,
+      );
+    }
+  });
+
+  it("still reaches every datastore service the compose file defines", () => {
+    // Catches a rename that would make the assertion above skip a service.
+    const services = composeServiceKeys();
+    for (const name of INTERNAL_SERVICES) {
+      expect(services, `compose no longer defines "${name}" — update INTERNAL_SERVICES`).toContain(
+        name,
+      );
+    }
+  });
+
+  it("leaves the operator-facing ports published", () => {
+    // 3100 (bot API/dashboard) and 8000 (PostHog) sit behind the reverse proxy
+    // and are authenticated; narrowing them here would take the product down
+    // rather than harden it.
+    const published = publishedPorts().map((p) => p.mapping);
+    expect(published).toContain("3100:3100");
+    expect(published).toContain("8000:8000");
+  });
+});
