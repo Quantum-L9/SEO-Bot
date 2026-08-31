@@ -404,6 +404,38 @@ INTELLIGENCE_ALLOW_SITE_MUTATION=false
 SITE_DEPLOY_DRY_RUN=true
 ```
 
+### After every phase — run the invariant pack
+
+Each phase above ends by verifying what the database actually holds, not what
+the logs said. The pack asks the questions a phase gate depends on: did every
+run finish, did anything auto-execute outside the plane's vocabulary, did the
+live-write job ever run, did any statistic get published below the anonymity
+floor.
+
+```bash
+DATABASE_URL=postgres://... npx tsx scripts/intelligence/verify-invariants.ts
+# or, from a checkout with the env already loaded:
+npm run verify:intelligence
+```
+
+Every invariant is phrased so that **rows mean a violation** — there is no
+expected count to interpret. Exit codes: `0` clean, `1` at least one violation,
+`2` the pack itself could not run. A query that ERRORS is reported as a finding,
+never as a pass: a check against a relation that does not exist must never read
+as "nothing wrong".
+
+The session is read-only twice over — every query is keyword-checked before it
+is sent, and the connection sets `default_transaction_read_only`. It is safe to
+run against production.
+
+Add `--json` for machine-readable output, or `--only=INTEL-04` to re-run one
+check after a fix. Each finding prints its id; `INTEL-04` and `INTEL-05` are the
+approval-boundary checks, `INTEL-06` is the live-write check, and `REPORT-01`
+and `REPORT-02` are the two levels of the k-anonymity floor.
+
+**Do not advance a phase with an open finding.** A violation at any rung means
+the rung below it was not doing what its gate claimed.
+
 ### Rolling back
 
 In order, and safe to stop after any step.
