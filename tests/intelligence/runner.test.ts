@@ -260,6 +260,52 @@ describe("runClientTriage — the durable record", () => {
   });
 });
 
+describe("runClientTriage — suppression must expire", () => {
+  it("bounds the duplicate-opportunity lookup by the cooldown window", async () => {
+    // `status` has no transition yet, so an UNBOUNDED `status = 'open'` lookup
+    // matches every opportunity ever recorded and suppression becomes permanent:
+    // a problem acted on once and not actually fixed is re-detected, re-grouped
+    // to the same fingerprint, and then silently dropped on every later run.
+    // The created_at bound is what makes a recurring problem come back.
+    seedCompoundCase();
+    await runClientTriage(CLIENT, "cron", scheduler);
+
+    // The opportunity did NOT get suppressed on this run (nothing prior existed),
+    // so it produced a decision that acted rather than one that suppressed.
+    const decisions = rowsFor("decisions");
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0].decision).not.toBe("suppress_duplicate");
+  });
+
+  it("suppresses an opportunity whose fingerprint is already open in-window", async () => {
+    seedCompoundCase();
+    const { buildOpportunities } = await import("../../src/intelligence/opportunity-scorer.js");
+    const { keywordDropExtractor, pageExperienceExtractor } = await import(
+      "../../src/intelligence/signal-extractor.js"
+    );
+    const signals = [
+      keywordDropExtractor.mapRow(
+        { keyword: "roofing austin", position_delta: "9", url: "https://client.example/roofing" },
+        CLIENT,
+      ),
+      pageExperienceExtractor.mapRow(
+        { page_path: "/roofing", risk_level: "critical", total_pageviews: "800" },
+        CLIENT,
+      ),
+    ].filter((signal) => signal !== null);
+    const fingerprint = buildOpportunities(signals).opportunities[0].fingerprint;
+
+    // A prior run's still-open opportunity, inside the window.
+    db.selectQueue[3] = [{ fingerprint }];
+
+    await runClientTriage(CLIENT, "cron", scheduler);
+
+    const decisions = rowsFor("decisions");
+    expect(decisions[0].decision).toBe("suppress_duplicate");
+    expect(addJob).not.toHaveBeenCalled();
+  });
+});
+
 describe("runClientTriage — the boundary it must not cross", () => {
   it("queues only the allow-listed follow-up job", async () => {
     seedCompoundCase();

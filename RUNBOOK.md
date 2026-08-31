@@ -135,9 +135,14 @@ ORDER BY d.created_at DESC
 LIMIT 20;
 
 -- What is it currently prioritizing?
-SELECT opportunity_type, title, score, status, target_url, target_keyword
+-- NOTE: `status` has no transition yet — nothing closes an opportunity, so every
+-- row is 'open' and this returns the full history, newest scores included. Bound
+-- it by created_at until the lifecycle contract lands (docs/seo-sql/CONTRACTS.md).
+SELECT opportunity_type, title, score, status, target_url, target_keyword, created_at
 FROM intelligence_opportunities
-WHERE client_id = '<client-id>' AND status = 'open'
+WHERE client_id = '<client-id>'
+  AND status = 'open'
+  AND created_at >= now() - interval '7 days'
 ORDER BY score DESC;
 
 -- Did the changes actually work?

@@ -222,7 +222,7 @@ async function executeCycle(
 
   // ── Plan / Act ────────────────────────────────────────────────────────────
   const policyState = await refreshPolicyState(clientId);
-  const openFingerprints = await loadOpenOpportunityFingerprints(clientId, runId);
+  const openFingerprints = await loadOpenOpportunityFingerprints(clientId, runId, cooldownStart);
 
   let actionsTaken = 0;
   let proposals = 0;
@@ -434,12 +434,23 @@ async function loadRecentFingerprints(
 }
 
 /**
- * Opportunity fingerprints already open for this client, excluding the ones this
- * run just wrote — otherwise every opportunity would suppress itself.
+ * Opportunity fingerprints recently raised for this client, excluding the ones
+ * this run just wrote — otherwise every opportunity would suppress itself.
+ *
+ * The `since` bound is load-bearing, not a performance tweak. `status` has no
+ * transition yet (nothing closes an opportunity — see ADR-0016, and the
+ * lifecycle contract in docs/seo-sql/CONTRACTS.md), so an unbounded
+ * `status = 'open'` filter matches every opportunity ever recorded. That would
+ * make suppression PERMANENT: a problem acted on once and not actually fixed
+ * would be re-detected by the extractors, re-grouped into the same fingerprint,
+ * and then silently discarded on every subsequent run, forever. Bounding the
+ * window to the same cooldown that governs signals means a recurring problem
+ * comes back after the cooldown instead of disappearing.
  */
 async function loadOpenOpportunityFingerprints(
   clientId: string,
   runId: string,
+  since: Date,
 ): Promise<Set<string>> {
   const db = getDb();
   const rows = await db
@@ -449,6 +460,7 @@ async function loadOpenOpportunityFingerprints(
       and(
         eq(schema.intelligenceOpportunities.clientId, clientId),
         eq(schema.intelligenceOpportunities.status, "open"),
+        gte(schema.intelligenceOpportunities.createdAt, since),
         sql`${schema.intelligenceOpportunities.runId} IS DISTINCT FROM ${runId}::uuid`,
       ),
     );

@@ -21,6 +21,7 @@ import {
   assertPackIsRedacted,
   buildEvidencePack,
   FORBIDDEN_ACTIONS,
+  FORBIDDEN_PACK_KEYS,
   redactEvidence,
 } from "../../src/intelligence/evidence-pack.js";
 import type { ScoredOpportunity } from "../../src/intelligence/types.js";
@@ -160,6 +161,37 @@ describe("buildEvidencePack", () => {
   it("carries an unknown market as null rather than inventing one", () => {
     const pack = buildEvidencePack(opportunity(), { industry: "legal", market: null });
     expect(pack.client.market).toBeNull();
+  });
+});
+
+describe("the forbidden-key set tracks the real schema", () => {
+  // The redaction list is only as good as its coverage of the columns that
+  // actually hold secrets. `clients.posthogApiKey` maps to `posthog_api_key` on
+  // the wire, so both spellings have to be covered — a rename in schema.ts that
+  // is not mirrored here would silently reopen the leak.
+  it("covers the credential columns the clients table actually has", () => {
+    const credentialColumns = [
+      "posthog_api_key",
+      "posthogApiKey",
+      "posthog_project_id",
+      "posthogProjectId",
+    ];
+    for (const column of credentialColumns) {
+      expect(FORBIDDEN_PACK_KEYS.has(column.toLowerCase()), column).toBe(true);
+    }
+  });
+
+  it("covers client identity and contact PII in both snake and camel spellings", () => {
+    for (const key of [
+      "client_name",
+      "clientName",
+      "domain",
+      "contact_email",
+      "contactEmail",
+      "config",
+    ]) {
+      expect(FORBIDDEN_PACK_KEYS.has(key.toLowerCase()), key).toBe(true);
+    }
   });
 });
 
