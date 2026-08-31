@@ -79,8 +79,8 @@ describe.skipIf(skip)("what the fakes promise, on real Postgres", () => {
     // row's identity.
     const one = await insertSignal("live-fresh-id-1");
     const two = await insertSignal("live-fresh-id-2");
-    expect(one.length).toBe(1);
-    expect(two.length).toBe(1);
+    expect(one).toHaveLength(1);
+    expect(two).toHaveLength(1);
     expect(two[0].id).not.toBe(one[0].id);
   });
 
@@ -120,7 +120,7 @@ describe.skipIf(skip)("what the fakes promise, on real Postgres", () => {
       ON CONFLICT (run_id, fingerprint) DO NOTHING
       RETURNING id
     `);
-    expect((inserted as unknown as { rows: unknown[] }).rows.length).toBe(1);
+    expect((inserted as unknown as { rows: unknown[] }).rows).toHaveLength(1);
   });
 
   it("scopes a tenant-filtered read to that tenant, with a second tenant present", async () => {
@@ -134,7 +134,7 @@ describe.skipIf(skip)("what the fakes promise, on real Postgres", () => {
     const rows = await ctx.db.execute(sql`
       SELECT client_id FROM aeo_citations WHERE client_id = ${clientId}::uuid
     `);
-    expect((rows as unknown as { rows: unknown[] }).rows.length).toBe(0);
+    expect((rows as unknown as { rows: unknown[] }).rows).toHaveLength(0);
 
     const unscoped = await ctx.db.execute(sql`
       SELECT client_id FROM aeo_citations WHERE query = 'roof repair austin'

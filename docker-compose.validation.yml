@@ -9,7 +9,9 @@ services:
       # Loopback only, same reasoning as docker-compose.yml: this password is a
       # literal in a tracked file. Non-default host port so starting the gate-5
       # services does not shadow a developer's real Postgres on 5432.
-      #   DATABASE_URL=postgres://l9bot:validation-only@127.0.0.1:55432/l9_seo_bot_validation
+      # The DATABASE_URL to export is in docs/seo-sql/TESTING.md; it is not
+      # repeated here, because restating the password above in a second place
+      # is a second place to find it.
       - "127.0.0.1:55432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U l9bot -d l9_seo_bot_validation"]
@@ -21,7 +23,6 @@ services:
     ports:
       # Loopback only — Redis has no auth configured here. Non-default host
       # port for the same reason as Postgres above.
-      #   REDIS_URL=redis://127.0.0.1:56379
       - "127.0.0.1:56379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]

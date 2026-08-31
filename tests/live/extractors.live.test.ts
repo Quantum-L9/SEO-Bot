@@ -93,7 +93,7 @@ describe.skipIf(skip)("extractor SQL against the migrated schema", () => {
       WHERE client_id = ${clientId}::uuid
     `);
     const list = (rows as unknown as { rows: { keyword: string; url: string }[] }).rows;
-    expect(list.length).toBe(1);
+    expect(list).toHaveLength(1);
     expect(list[0].keyword).toBe(KEYWORD);
     expect(list[0].url).toBe(RANKING_URL);
   });
