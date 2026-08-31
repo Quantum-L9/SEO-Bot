@@ -27,10 +27,10 @@ question the next one assumes.
 | 5 | Live services | `npm run test:live` | The fakes above told the truth: real Postgres semantics, real BullMQ dedup, real extractor SQL |
 | 6 | Post-run invariants | `npm run verify:intelligence` | The database afterwards contains what the gates above promised |
 
-Gates 1–4 need no services. Gate 5 needs a real Postgres and Redis. It has two
-halves: `npm run test:live`, which runs against disposable services in CI and
-locally, and `npm run verify:intelligence`, which is read-only and is the half
-that runs against staging and production.
+Gates 1–4 need no services. Gates 5 and 6 both need a real Postgres, and gate 5
+also needs Redis. They differ in where they may point: gate 5 writes, so it runs
+only against disposable services (CI, or `npm run live:up` locally); gate 6 is
+read-only twice over and is the one that runs against staging and production.
 
 ---
 

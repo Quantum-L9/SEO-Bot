@@ -309,8 +309,11 @@ npm run verify:intelligence          # post-run invariants, against a real DB
 `verify:intelligence` is read-only and safe against production. Every check is
 phrased so that returned rows mean a violation — exit `0` clean, `1` a
 violation, `2` the pack could not run. See
-[`docs/seo-sql/TESTING.md`](docs/seo-sql/TESTING.md) for the five gates, the
-per-mode behavior table, and the production-readiness checklist.
+[`docs/seo-sql/TESTING.md`](docs/seo-sql/TESTING.md) for the six gates, the
+per-mode behavior table, and the production-readiness checklist. Gate 5
+(`npm run test:live`) is the one that needs a real Postgres and Redis; it
+writes, so unlike `verify:intelligence` it runs only against disposable
+services.
 
 ---
 
