@@ -53,7 +53,13 @@ const logger = createModuleLogger("intelligence:runner");
 export type TriggerSource = "cron" | "manual" | "api";
 
 export interface RunSummary {
-  readonly runId: string;
+  /**
+   * The `intelligence_runs` row this cycle wrote, or null when the rollout mode
+   * is `off` and no row was written. Null is the honest value: reporting a run
+   * id for a cycle that recorded nothing would put a dangling reference in every
+   * caller's log, and `off` has to be distinguishable from "ran and found none".
+   */
+  readonly runId: string | null;
   readonly clientId: string;
   readonly signalsExtracted: number;
   readonly signalsSuppressed: number;
@@ -90,6 +96,44 @@ export async function runClientTriage(
   const config = getConfig();
   const startedAt = Date.now();
 
+  // The rollout gate's FIRST application, before any row is written.
+  //
+  // `off` is enforced at registration — a disabled job cannot fire — and that is
+  // the path that matters in steady state. It is not the only path here: a
+  // repeatable job already sitting in Redis when the operator lowered the mode
+  // fires once more against the new config, an in-flight retry re-enters this
+  // function after the restart, and a manual trigger calls it outright. In all
+  // three the handler runs with `mode = off`, and without this check it would
+  // write a run, its signals and its opportunities — which is what "rollback is
+  // one environment variable plus a restart" promises it will not do.
+  //
+  // `reason` was defined on the capability surface for exactly this and then
+  // never consulted: the plane's own warning about a gate that looks like a
+  // control and is dead code, applied to itself.
+  const capabilities = resolveCapabilities({
+    mode: config.INTELLIGENCE_MODE,
+    llmPlanningEnabled: config.INTELLIGENCE_LLM_PLANNING_ENABLED,
+    allowOutreachRouting: config.INTELLIGENCE_ALLOW_OUTREACH_ROUTING,
+    allowSiteMutation: config.INTELLIGENCE_ALLOW_SITE_MUTATION,
+  });
+
+  if (!capabilities.reason) {
+    logger.info({ clientId, mode: capabilities.mode }, "Rollout mode is off — triage did not run");
+    return {
+      runId: null,
+      clientId,
+      signalsExtracted: 0,
+      signalsSuppressed: 0,
+      opportunities: 0,
+      ungroupedSignals: 0,
+      proposals: 0,
+      autoExecuted: 0,
+      queuedForApproval: 0,
+      jobsQueued: 0,
+      extractorFailures: 0,
+    };
+  }
+
   const [runRow] = await db
     .insert(schema.intelligenceRuns)
     .values({
@@ -118,7 +162,7 @@ export async function runClientTriage(
 
     if (!client) throw new Error(`Client ${clientId} not found`);
 
-    const summary = await executeCycle(runId, client, config, scheduler);
+    const summary = await executeCycle(runId, client, config, scheduler, capabilities);
 
     await db
       .update(schema.intelligenceRuns)
@@ -154,6 +198,7 @@ async function executeCycle(
   client: ClientRow,
   config: ReturnType<typeof getConfig>,
   scheduler: Scheduler | undefined,
+  capabilities: IntelligenceCapabilities,
 ): Promise<RunSummary> {
   const db = getDb();
   const clientId = client.id;
@@ -234,13 +279,6 @@ async function executeCycle(
   // Returning early rather than looping-and-skipping is deliberate: it means an
   // observe-mode run cannot write an action_log row, a decision row or an
   // experiment even if a later edit adds a write inside that loop.
-  const capabilities = resolveCapabilities({
-    mode: config.INTELLIGENCE_MODE,
-    llmPlanningEnabled: config.INTELLIGENCE_LLM_PLANNING_ENABLED,
-    allowOutreachRouting: config.INTELLIGENCE_ALLOW_OUTREACH_ROUTING,
-    allowSiteMutation: config.INTELLIGENCE_ALLOW_SITE_MUTATION,
-  });
-
   if (!capabilities.propose) {
     logger.info(
       { clientId, mode: capabilities.mode, opportunities: opportunities.length },

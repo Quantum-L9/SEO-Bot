@@ -388,7 +388,20 @@ export const prospectReadyExtractor: SignalExtractor = {
     // Prospects nobody can reach are not an outreach opportunity.
     if (count < 3 || withContact < 1) return null;
 
-    const severity: SignalSeverity = count >= 20 ? "medium" : "low";
+    // Severity scales with the CONTACTABLE subset, not the raw count: a batch is
+    // only an outreach opportunity to the extent someone can be written to, and
+    // `count` alone would rate a list of 200 addressless domains above a list of
+    // 25 reachable ones.
+    //
+    // The `high` rung is what makes `link_outreach_batch` reachable at all. Its
+    // scoring weights (impact 5, effort 2, risk 3) put a `medium` signal at 18,
+    // below the shipped INTELLIGENCE_MIN_OPPORTUNITY_SCORE of 20 — so while
+    // `medium` was this extractor's ceiling, outreach could never be proposed,
+    // and the outreach flag, the velocity governor and the route_safe promise
+    // were all guarding a path no real signal could take.
+    // `calibration.test.ts` pins every actionable type against the threshold
+    // through its real extractor, so this cannot silently regress.
+    const severity: SignalSeverity = withContact >= 20 ? "high" : count >= 20 ? "medium" : "low";
     return build(
       clientId,
       "prospect_high_dr_ready",

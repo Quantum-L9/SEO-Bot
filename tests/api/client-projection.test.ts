@@ -92,13 +92,13 @@ vi.mock("../../src/core/config.js", () => ({
   }),
 }));
 
-import { buildApiServer } from "../../src/api/index.js";
 import {
   assertNoCredentialLeak,
   CLIENT_CONFIG_SECRET_KEYS,
   REDACTED,
   redactClientConfig,
 } from "../../src/api/client-projection.js";
+import { buildApiServer } from "../../src/api/index.js";
 
 const AUTH = { authorization: "Bearer op-key" };
 
@@ -127,8 +127,10 @@ const clientRow = {
 
 describe("redactClientConfig", () => {
   it("replaces a stored GitHub token and deploy hook with a marker", () => {
-    const out = redactClientConfig(clientRow.config) as Record<string, never>;
-    const sd = (out as { site_deployment: Record<string, unknown> }).site_deployment;
+    const out = redactClientConfig(clientRow.config) as {
+      site_deployment: Record<string, unknown>;
+    };
+    const sd = out.site_deployment;
     expect(sd.githubToken).toBe(REDACTED);
     expect(sd.vercelDeployHook).toBe(REDACTED);
   });

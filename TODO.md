@@ -57,6 +57,57 @@ No code changes remain on this repo's side.
 
 ---
 
+## 3. `serp_and_answer_engine_loss` is a diagnosis that can never fire
+
+**Status:** open finding — asserted in `tests/intelligence/calibration.test.ts`,
+not fixed. Found by the 4th SQL-SEO contract (testing) while checking every
+actionable opportunity type against the action threshold through its REAL
+extractors rather than through hand-built signals.
+
+**Where:** `src/intelligence/opportunity-scorer.ts` (`GROUPING_RULES`),
+`src/intelligence/signal-extractor.ts` (the three extractors' group keys).
+
+Both rules for this type require `keyword_drop` and a citation signal
+(`competitor_citation_gain` or `citation_rate_down`) **in one group**. Grouping
+is by `groupKey`, and the two sides key on disjoint dimensions by construction:
+
+| Signal | groupKey |
+|---|---|
+| `keyword_drop` | the ranking page path (`/roofing`), or `keyword:<kw>` when the URL is unknown |
+| `citation_rate_down` | `platform:<name>` |
+| `competitor_citation_gain` | `platform:<name>` |
+
+A `platform:` key can never equal a path or a `keyword:` key, so the compound
+rule has never matched and cannot. Today the same input yields the two
+single-symptom diagnoses (`keyword_recovery` + `answer_engine_gap`) instead —
+which is reasonable behavior, and is why nothing looked wrong.
+
+What makes it worth tracking is the surface built on top of it: a plan template,
+an evidence-pack action allow-list entry and two grouping rules all exist for a
+remedy that never fires. They read as working controls.
+
+**Why it is not fixed here.** Every candidate fix is a product decision, not a
+calibration one. Re-keying citation signals to a page would break the
+per-platform targeting `answer_engine_gap` depends on; making the classifier
+join across groups changes what "an opportunity" means; deleting the rules and
+the template removes a declared capability. The natural join is keyword ↔ the
+citation's sampled query, and `aeo_citations` is aggregated per platform per
+month, carrying no keyword or page dimension to join on.
+
+**Unblock trigger:** a decision on whether the compound diagnosis is wanted. If
+yes, it needs the citation aggregation to carry a keyword/page dimension, then
+move the type from `UNREACHABLE` into `WORST_CASE` in `calibration.test.ts`. If
+no, delete both grouping rules, the plan template and the allow-list entry — the
+runtime behavior is identical either way, since the rule never fires.
+
+**Related, and fixed:** `link_outreach_batch` had the same shape — its extractor
+capped severity at `medium`, worth 18 against a threshold of 20, so outreach
+could never be proposed while the outreach flag, the velocity governor and
+`route_safe`'s promise all guarded it. That one was a calibration oversight with
+a local fix (a `high` rung on a large contactable batch) and is closed.
+
+---
+
 ## Related (other repo)
 
 - **P4b — Website-Bot `infisical run` wrap:** see `TODO.md` in `Quantum-L9/Website-Bot`.

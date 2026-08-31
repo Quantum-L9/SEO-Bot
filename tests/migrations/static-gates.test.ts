@@ -40,9 +40,9 @@ interface JournalEntry {
   tag: string;
 }
 
-const journal = JSON.parse(
-  readFileSync(join(MIGRATIONS_DIR, "meta", "_journal.json"), "utf8"),
-) as { entries: JournalEntry[] };
+const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "meta", "_journal.json"), "utf8")) as {
+  entries: JournalEntry[];
+};
 
 const checksums = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "CHECKSUMS.json"), "utf8")) as {
   schema_version: string;
@@ -52,10 +52,6 @@ const checksums = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "CHECKSUMS.json")
 const migrationFiles = readdirSync(MIGRATIONS_DIR)
   .filter((name) => name.endsWith(".sql"))
   .sort();
-
-function sqlFor(tag: string): string {
-  return readFileSync(join(MIGRATIONS_DIR, `${tag}.sql`), "utf8");
-}
 
 describe("static gate — an applied migration is immutable", () => {
   // drizzle's journal records THAT a tag ran, never what it said. So an edit to
@@ -67,9 +63,9 @@ describe("static gate — an applied migration is immutable", () => {
       const tag = file.replace(/\.sql$/, "");
       const recorded = checksums.migrations[tag];
       expect(recorded, `${tag} has no checksum recorded in drizzle/CHECKSUMS.json`).toBeDefined();
-      const actual = createHash("sha256").update(readFileSync(join(MIGRATIONS_DIR, file))).digest(
-        "hex",
-      );
+      const actual = createHash("sha256")
+        .update(readFileSync(join(MIGRATIONS_DIR, file)))
+        .digest("hex");
       expect(
         actual,
         `${tag}.sql no longer matches its checksum. If this migration has already been applied ` +
