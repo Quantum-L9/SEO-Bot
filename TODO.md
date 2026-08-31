@@ -108,6 +108,45 @@ a local fix (a `high` rung on a large contactable batch) and is closed.
 
 ---
 
+## 4. `gh-package-deps-preflight` cannot run in a consumer workspace
+
+**Status:** open finding — the governance gate hook, not this repository's code.
+Surfaced while publishing the 4th SQL-SEO contract, because that change edits
+`package.json` (adding the test-group scripts) and the hook's `files:` guard
+matches `package.json`.
+
+The hook is defined in the governance `.pre-commit-config.yaml` with
+`entry: python3 ops/scripts/validate_gh_package_deps.py` — a path relative to
+the **governance** tree. Run against a consumer workspace it resolves to
+`<consumer>/ops/scripts/validate_gh_package_deps.py`, which does not exist, and
+the hook dies on a missing file rather than on anything it checked:
+
+```
+can't open file '/home/user/seo-bot/ops/scripts/validate_gh_package_deps.py'
+```
+
+`ops/scripts/run_pr_precommit.sh` already has the mechanism for exactly this
+class — `_GOV_ONLY_SKIP`, whose comment records the identical failure signature
+for `validate_commit_verification_contract.py` — but the list is currently
+empty, so this hook is not in it.
+
+**Run manually against the governance interpreter, it reports 8 findings**, all
+pre-existing and none caused by any change here: the four `@quantum-l9/*`
+packages resolve to `packages/<name>` with `"link": true`, because they are npm
+**workspace links** in this repo's layout, and the hook expects hash-suffixed
+GitHub Packages tarballs with sha512 integrity. `package-lock.json` is
+byte-identical to `main`; no change on this branch touches it.
+
+**Unblock trigger:** add `gh-package-deps-preflight` to `_GOV_ONLY_SKIP` in
+`Quantum-L9/Cursor-Governance` (`ops/scripts/run_pr_precommit.sh`), so the hook
+is skipped in a consumer checkout and still runs `--all-files` in the governance
+repo. Separately, decide whether the hook should recognise npm workspace links
+as legitimate, or whether these four packages are meant to be consumed from
+GitHub Packages here — the second question is the same one the Infisical items
+above are waiting on.
+
+---
+
 ## Related (other repo)
 
 - **P4b — Website-Bot `infisical run` wrap:** see `TODO.md` in `Quantum-L9/Website-Bot`.
