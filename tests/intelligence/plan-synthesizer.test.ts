@@ -91,7 +91,15 @@ vi.mock("../../src/services/llm.js", () => ({
 }));
 
 vi.mock("../../src/core/config.js", () => ({
-  getConfig: () => ({ INTELLIGENCE_LLM_PLANNING_ENABLED: config.enabled }),
+  getConfig: () => ({
+    INTELLIGENCE_LLM_PLANNING_ENABLED: config.enabled,
+    // Synthesis needs BOTH the flag above and the `route_llm` rung. Holding the
+    // mode fixed here keeps `config.enabled` as this suite's single variable, so
+    // a test that flips it still proves the flag alone is decisive.
+    INTELLIGENCE_MODE: "route_llm",
+    INTELLIGENCE_ALLOW_OUTREACH_ROUTING: false,
+    INTELLIGENCE_ALLOW_SITE_MUTATION: false,
+  }),
 }));
 
 vi.mock("../../src/core/logger.js", () => ({

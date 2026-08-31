@@ -52,6 +52,7 @@ import { getDb, schema } from "../core/database/index.js";
 import { createModuleLogger } from "../core/logger.js";
 import type { Scheduler } from "../core/scheduler.js";
 import { planTemplateFor } from "./action-planner.js";
+import { followUpJobBlockedReason, resolveCapabilities } from "./mode.js";
 import type { ExperimentVerdict } from "./outcome-attributor.js";
 import { openExperiment, type TargetMetric } from "./outcome-attributor.js";
 import type { OpportunityType } from "./types.js";
@@ -340,6 +341,12 @@ export async function sweepApprovedActions(
 ): Promise<ApprovedActionPickup[]> {
   const db = getDb();
   const config = getConfig();
+  const capabilities = resolveCapabilities({
+    mode: config.INTELLIGENCE_MODE,
+    llmPlanningEnabled: config.INTELLIGENCE_LLM_PLANNING_ENABLED,
+    allowOutreachRouting: config.INTELLIGENCE_ALLOW_OUTREACH_ROUTING,
+    allowSiteMutation: config.INTELLIGENCE_ALLOW_SITE_MUTATION,
+  });
   const rows = await loadApprovedActions(limit);
   const pickups: ApprovedActionPickup[] = [];
 
@@ -398,10 +405,29 @@ export async function sweepApprovedActions(
         );
       }
 
+      // The measurement above is unconditional: an operator approved this action,
+      // and C3 exists so an approved action is measured like an auto-executed
+      // one. The rollout gate applies only to the QUEUE — whether this
+      // environment may yet reach the outside world on the bot's behalf.
       let followUpJobQueued = false;
       if (template?.followUpJob && scheduler) {
-        await scheduler.addJob(template.followUpJob, { clientId: row.clientId });
-        followUpJobQueued = true;
+        const blocked = followUpJobBlockedReason(template.followUpJob, capabilities);
+        if (blocked) {
+          logger.info(
+            { job: template.followUpJob, reason: blocked, mode: capabilities.mode },
+            "Approved action's follow-up job withheld by rollout gate",
+          );
+        } else {
+          // Keyed on the outcome row, which the conditional `executed_at` claim
+          // above created exactly once for this approval. A retried sweep
+          // re-queues nothing.
+          await scheduler.addJob(
+            template.followUpJob,
+            { clientId: row.clientId },
+            { jobId: `intel:${row.clientId}:${outcome.id}:${template.followUpJob}` },
+          );
+          followUpJobQueued = true;
+        }
       }
 
       if (row.opportunityId) await markOpportunityActioned(row.opportunityId);

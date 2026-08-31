@@ -20,6 +20,11 @@
 import type { Job } from "bullmq";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const rollout = vi.hoisted(() => ({
+  mode: "full" as string,
+  llmPlanningEnabled: true,
+}));
+
 const hooks = vi.hoisted(() => ({
   refreshOutcomes: [] as { viewName: string; status: string; durationMs: number }[],
   measured: [] as { experimentId: string; verdict: string }[],
@@ -80,6 +85,12 @@ vi.mock("../../src/core/config.js", () => ({
     INTELLIGENCE_OPPORTUNITY_EXPIRY_DAYS: 30,
     INTELLIGENCE_SIGNAL_COOLDOWN_DAYS: 7,
     INTELLIGENCE_SYNTHESIS_BATCH_SIZE: 10,
+    // `full` + planning on, so the budget and cron assertions below see every
+    // definition. The rollout-gate suite at the bottom varies these deliberately.
+    INTELLIGENCE_MODE: rollout.mode,
+    INTELLIGENCE_LLM_PLANNING_ENABLED: rollout.llmPlanningEnabled,
+    INTELLIGENCE_ALLOW_OUTREACH_ROUTING: false,
+    INTELLIGENCE_ALLOW_SITE_MUTATION: false,
   }),
 }));
 vi.mock("../../src/intelligence/lifecycle.js", () => ({
@@ -130,6 +141,8 @@ beforeEach(() => {
   hooks.portfolioRuns = 0;
   hooks.synthesisLimits = [];
   hooks.synthesisOutcomes = [];
+  rollout.mode = "full";
+  rollout.llmPlanningEnabled = true;
   scheduler = fakeScheduler();
   registerIntelligenceHandlers(scheduler as unknown as never);
 });
@@ -281,5 +294,74 @@ describe("handlers", () => {
     await scheduler.handlers.get(INTELLIGENCE_JOBS.outcomeAttribution)?.({} as Job);
     await scheduler.handlers.get(INTELLIGENCE_JOBS.policyRefresh)?.({} as Job);
     expect(hooks.policyRefreshCount).toBe(1);
+  });
+});
+
+// ─── The rollout gate at registration (hardening contract C5) ────────────────
+
+describe("registration honours the rollout mode", () => {
+  /** Re-register against a fresh scheduler at the given rung. */
+  function registerAt(mode: string, llmPlanningEnabled = true): FakeScheduler {
+    rollout.mode = mode;
+    rollout.llmPlanningEnabled = llmPlanningEnabled;
+    const fresh = fakeScheduler();
+    registerIntelligenceHandlers(fresh as unknown as never);
+    return fresh;
+  }
+
+  function enabledNames(s: FakeScheduler): string[] {
+    return s.definitions.filter((d) => d.enabled).map((d) => d.name);
+  }
+
+  it("enables no intelligence job in off mode", () => {
+    // Registered-but-disabled, not absent: the scheduler skips creating the
+    // queue and the repeatable cron, so the job cannot fire and then decline.
+    const s = registerAt("off");
+    const intelligenceJobs = enabledNames(s).filter((n) => n.startsWith("intel:"));
+    expect(intelligenceJobs).toEqual([]);
+  });
+
+  it("keeps the reporting refresh enabled even in off mode", () => {
+    // The reporting plane stands on its own and serves the operator dashboard.
+    // Gating it on the intelligence mode would silently stale every report in
+    // the product the moment someone turned the bot's reasoning off.
+    const s = registerAt("off");
+    expect(enabledNames(s)).toContain(INTELLIGENCE_JOBS.reportingRefresh);
+  });
+
+  it("enables triage but not the lifecycle sweep in observe mode", () => {
+    const s = registerAt("observe");
+    const names = enabledNames(s);
+    expect(names).toContain(INTELLIGENCE_JOBS.dailyTriage);
+    // Nothing can be approved when nothing is proposed, so a sweep here would
+    // be a job that can only ever find zero rows.
+    expect(names).not.toContain(INTELLIGENCE_JOBS.lifecycleSweep);
+  });
+
+  it("never enables the one budgeted job below route_llm", () => {
+    // The token-spending job is the one whose accidental enablement costs money,
+    // so it is asserted against EVERY rung below its own rather than spot-checked.
+    for (const mode of ["off", "observe", "recommend", "route_safe"]) {
+      const s = registerAt(mode);
+      expect(enabledNames(s), `${mode} enabled the budgeted synthesis job`).not.toContain(
+        INTELLIGENCE_JOBS.planSynthesis,
+      );
+    }
+  });
+
+  it("enables the budgeted job at route_llm only when the flag is also set", () => {
+    expect(enabledNames(registerAt("route_llm", false))).not.toContain(
+      INTELLIGENCE_JOBS.planSynthesis,
+    );
+    expect(enabledNames(registerAt("route_llm", true))).toContain(INTELLIGENCE_JOBS.planSynthesis);
+  });
+
+  it("registers every definition at every rung, disabling rather than omitting", () => {
+    // A job that vanishes from the definition list cannot be inspected, and
+    // `status` would stop reporting it. Disabled is visible; absent is not.
+    const atFull = registerAt("full").definitions.length;
+    for (const mode of ["off", "observe", "recommend", "route_safe", "route_llm"]) {
+      expect(registerAt(mode).definitions.length, `${mode} omitted a definition`).toBe(atFull);
+    }
   });
 });

@@ -31,12 +31,17 @@
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { getConfig } from "../core/config.js";
 import { getDb, schema } from "../core/database/index.js";
-import { logAction } from "../core/execution-policy.js";
+import { type ExecutionDecision, logAction } from "../core/execution-policy.js";
 import { createModuleLogger } from "../core/logger.js";
 import type { Scheduler } from "../core/scheduler.js";
 import { type PlannedDecision, planOpportunity } from "./action-planner.js";
 import { buildEvidencePack } from "./evidence-pack.js";
 import { ACTIVE_OPPORTUNITY_STATUSES, markOpportunityActioned } from "./lifecycle.js";
+import {
+  followUpJobBlockedReason,
+  type IntelligenceCapabilities,
+  resolveCapabilities,
+} from "./mode.js";
 import { buildOpportunities } from "./opportunity-scorer.js";
 import { openExperiment } from "./outcome-attributor.js";
 import { loadPolicyState, refreshPolicyState } from "./policy-state.js";
@@ -222,6 +227,40 @@ async function executeCycle(
   const opportunityIds = await loadOpportunityIds(runId);
 
   // ── Plan / Act ────────────────────────────────────────────────────────────
+  // The rollout gate. In `observe` the plane has done its whole job by here:
+  // signals and opportunities are on record and an operator can read what the
+  // bot would have reasoned about, having proposed nothing and queued nothing.
+  //
+  // Returning early rather than looping-and-skipping is deliberate: it means an
+  // observe-mode run cannot write an action_log row, a decision row or an
+  // experiment even if a later edit adds a write inside that loop.
+  const capabilities = resolveCapabilities({
+    mode: config.INTELLIGENCE_MODE,
+    llmPlanningEnabled: config.INTELLIGENCE_LLM_PLANNING_ENABLED,
+    allowOutreachRouting: config.INTELLIGENCE_ALLOW_OUTREACH_ROUTING,
+    allowSiteMutation: config.INTELLIGENCE_ALLOW_SITE_MUTATION,
+  });
+
+  if (!capabilities.propose) {
+    logger.info(
+      { clientId, mode: capabilities.mode, opportunities: opportunities.length },
+      "Observe mode — opportunities recorded, no proposals made",
+    );
+    return {
+      runId,
+      clientId,
+      signalsExtracted: kept.length,
+      signalsSuppressed: suppressed.length,
+      opportunities: opportunities.length,
+      ungroupedSignals: ungrouped.length,
+      proposals: 0,
+      autoExecuted: 0,
+      queuedForApproval: 0,
+      jobsQueued: 0,
+      extractorFailures: failures.length,
+    };
+  }
+
   const policyState = await refreshPolicyState(clientId);
   const openFingerprints = await loadOpenOpportunityFingerprints(clientId, runId);
 
@@ -241,10 +280,17 @@ async function executeCycle(
       openFingerprints,
     });
 
+    // Apply the rollout gate BEFORE logging, not after. `action_log` is the
+    // operator's record of what the bot did; writing "auto-executed" there and
+    // then declining to execute would make a withheld action indistinguishable
+    // from a performed one — the same class of healthy-looking-but-false state
+    // the lifecycle contract (C3) exists to prevent.
+    const execution = gateExecution(planned, capabilities);
+
     const actionLogId = planned.proposal
       ? await logAction(
           planned.proposal,
-          planned.execution ?? { execute: false, reason: "", requiresApproval: true },
+          execution ?? { execute: false, reason: "", requiresApproval: true },
         )
       : null;
 
@@ -270,12 +316,12 @@ async function executeCycle(
           score: opportunity.score,
           min_score: config.INTELLIGENCE_MIN_OPPORTUNITY_SCORE,
           opportunity_fingerprint: opportunity.fingerprint,
-          execution_policy: planned.execution
-            ? { execute: planned.execution.execute, reason: planned.execution.reason }
+          execution_policy: execution
+            ? { execute: execution.execute, reason: execution.reason }
             : null,
         },
         evidenceSummary: evidencePack as unknown as Record<string, unknown>,
-        requiresApproval: planned.execution?.requiresApproval ?? false,
+        requiresApproval: execution?.requiresApproval ?? false,
         actionLogId,
       })
       .returning({ id: schema.intelligenceDecisions.id });
@@ -293,7 +339,7 @@ async function executeCycle(
     const opportunityId = opportunityIds.get(opportunity.fingerprint);
     if (opportunityId) await markOpportunityActioned(opportunityId);
 
-    if (planned.execution?.execute) {
+    if (execution?.execute) {
       autoExecuted += 1;
       jobsQueued += await onExecutedProposal(
         planned,
@@ -301,6 +347,7 @@ async function executeCycle(
         config,
         scheduler,
         decisionRow?.id ?? null,
+        capabilities,
       );
     } else {
       // Held for approval. No experiment window opens yet: measuring from a
@@ -325,6 +372,43 @@ async function executeCycle(
 }
 
 /**
+ * Apply the rollout gate to the execution policy's decision.
+ *
+ * The policy decides what is SAFE to do; the rollout mode decides how much of
+ * that the operator has switched on yet. They are separate questions, so this
+ * narrows the policy's answer rather than replacing it — a decision the policy
+ * already withheld stays withheld, with the policy's own reason intact.
+ *
+ * A gated action becomes `requiresApproval`, which is the honest destination:
+ * the bot still believes the action is right, and an operator can approve it by
+ * hand. The lifecycle sweep (C3) then measures it exactly as it measures any
+ * other approved action.
+ */
+function gateExecution(
+  planned: PlannedDecision,
+  capabilities: IntelligenceCapabilities,
+): ExecutionDecision | null {
+  const execution = planned.execution;
+  // Nothing to narrow: the policy already declined, or there is no proposal.
+  if (!execution?.execute) return execution;
+
+  const followUpJob = planned.template?.followUpJob ?? null;
+  const blocked = !capabilities.route
+    ? `rollout mode '${capabilities.mode}' records proposals but does not execute them`
+    : followUpJob
+      ? followUpJobBlockedReason(followUpJob, capabilities)
+      : null;
+
+  if (!blocked) return execution;
+
+  return {
+    execute: false,
+    reason: `Withheld by rollout gate: ${blocked}. Policy would have executed: ${execution.reason}`,
+    requiresApproval: true,
+  };
+}
+
+/**
  * Record the outcome row, open the attribution window, and queue the follow-up
  * job — in that order, so the experiment always references a real outcome row.
  */
@@ -334,6 +418,7 @@ async function onExecutedProposal(
   config: ReturnType<typeof getConfig>,
   scheduler: Scheduler | undefined,
   decisionId: string | null,
+  capabilities: IntelligenceCapabilities,
 ): Promise<number> {
   const db = getDb();
   const template = planned.template;
@@ -379,7 +464,27 @@ async function onExecutedProposal(
     return 0;
   }
 
-  await scheduler.addJob(template.followUpJob, { clientId: opportunity.clientId });
+  // Second check, after the gate that already ran in `gateExecution`. This one
+  // guards the queue itself rather than the decision, so a future caller that
+  // reaches this function by another path cannot route outreach without the flag.
+  const blocked = followUpJobBlockedReason(template.followUpJob, capabilities);
+  if (blocked) {
+    logger.info(
+      { job: template.followUpJob, reason: blocked, mode: capabilities.mode },
+      "Follow-up job withheld by rollout gate",
+    );
+    return 0;
+  }
+
+  // Deterministic job id: the outcome row is written once per executed proposal,
+  // so keying on it makes the enqueue idempotent. A BullMQ retry of this handler
+  // — or two concurrent runs racing the same opportunity — re-queues nothing
+  // rather than sending the same outreach twice.
+  await scheduler.addJob(
+    template.followUpJob,
+    { clientId: opportunity.clientId },
+    { jobId: `intel:${opportunity.clientId}:${outcome.id}:${template.followUpJob}` },
+  );
   return 1;
 }
 

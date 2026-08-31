@@ -58,6 +58,7 @@ import { type ActionOption, classifyAction } from "../core/execution-policy.js";
 import { createModuleLogger } from "../core/logger.js";
 import { getLlmService } from "../services/llm.js";
 import { type EvidencePack, FORBIDDEN_ACTIONS } from "./evidence-pack.js";
+import { resolveCapabilities } from "./mode.js";
 
 const logger = createModuleLogger("intelligence:synthesizer");
 
@@ -303,8 +304,21 @@ async function loadPendingProposals(limit: number): Promise<PendingRow[]> {
  */
 export async function synthesizePendingProposals(limit = 10): Promise<SynthesisOutcome[]> {
   const config = getConfig();
-  if (!config.INTELLIGENCE_LLM_PLANNING_ENABLED) {
-    logger.debug("LLM planning disabled — proposals keep their template action");
+  // Both locks, not just the flag. The job is registered `enabled: false` below
+  // `route_llm`, so cron cannot reach this — but a manual trigger can, and the
+  // whole point of the rollout ladder is that the mode bounds token spend even
+  // when someone presses the button by hand.
+  const capabilities = resolveCapabilities({
+    mode: config.INTELLIGENCE_MODE,
+    llmPlanningEnabled: config.INTELLIGENCE_LLM_PLANNING_ENABLED,
+    allowOutreachRouting: config.INTELLIGENCE_ALLOW_OUTREACH_ROUTING,
+    allowSiteMutation: config.INTELLIGENCE_ALLOW_SITE_MUTATION,
+  });
+  if (!capabilities.llmPlanning) {
+    logger.debug(
+      { mode: capabilities.mode },
+      "LLM planning disabled by mode or flag — proposals keep their template action",
+    );
     return [];
   }
 

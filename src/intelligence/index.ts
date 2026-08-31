@@ -35,6 +35,7 @@ import {
   expireStaleOpportunities,
   sweepApprovedActions,
 } from "./lifecycle.js";
+import { resolveCapabilities } from "./mode.js";
 import { measureDueExperiments } from "./outcome-attributor.js";
 import { synthesizePendingProposals } from "./plan-synthesizer.js";
 import { runPortfolioBenchmark } from "./portfolio.js";
@@ -59,6 +60,37 @@ const ZERO_TOKENS = {
 } as const;
 
 export function registerIntelligenceHandlers(scheduler: Scheduler): void {
+  // The rollout gate, applied at REGISTRATION rather than inside each handler.
+  // A job that must not run in this mode is registered `enabled: false`, so the
+  // scheduler never creates its queue or its repeatable cron — it cannot fire and
+  // then decline. The in-handler gates (runner, lifecycle) still exist for the
+  // manual-trigger path, which bypasses cron entirely.
+  //
+  // `reporting:refresh-materialized` is deliberately NOT gated: the reporting
+  // plane stands on its own, serves the operator dashboard, and must keep its
+  // snapshots current whether or not the bot is reasoning. Gating it on the
+  // intelligence mode would mean turning the plane off silently staled every
+  // report in the product.
+  const config = getConfig();
+  const capabilities = resolveCapabilities({
+    mode: config.INTELLIGENCE_MODE,
+    llmPlanningEnabled: config.INTELLIGENCE_LLM_PLANNING_ENABLED,
+    allowOutreachRouting: config.INTELLIGENCE_ALLOW_OUTREACH_ROUTING,
+    allowSiteMutation: config.INTELLIGENCE_ALLOW_SITE_MUTATION,
+  });
+
+  logger.info(
+    {
+      mode: capabilities.mode,
+      propose: capabilities.propose,
+      route: capabilities.route,
+      llmPlanning: capabilities.llmPlanning,
+      outreach: capabilities.outreach,
+      siteMutation: capabilities.siteMutation,
+    },
+    "Intelligence plane rollout capabilities resolved",
+  );
+
   // Runs after the overnight collection jobs (SERP 06:00, engagement 05:00,
   // vitals every 6h) so it reasons over the day's fresh facts rather than
   // yesterday's.
@@ -69,7 +101,7 @@ export function registerIntelligenceHandlers(scheduler: Scheduler): void {
     handler: "runDailyTriage",
     clientScoped: true,
     tokenBudget: { ...ZERO_TOKENS },
-    enabled: true,
+    enabled: capabilities.reason,
   });
 
   scheduler.registerDefinition({
@@ -79,7 +111,7 @@ export function registerIntelligenceHandlers(scheduler: Scheduler): void {
     handler: "measureOutcomes",
     clientScoped: false,
     tokenBudget: { ...ZERO_TOKENS },
-    enabled: true,
+    enabled: capabilities.reason,
   });
 
   scheduler.registerDefinition({
@@ -89,7 +121,7 @@ export function registerIntelligenceHandlers(scheduler: Scheduler): void {
     handler: "refreshPolicyState",
     clientScoped: false,
     tokenBudget: { ...ZERO_TOKENS },
-    enabled: true,
+    enabled: capabilities.reason,
   });
 
   // Hourly, not daily. An operator who approves a CRITICAL action at 09:00
@@ -103,7 +135,7 @@ export function registerIntelligenceHandlers(scheduler: Scheduler): void {
     handler: "sweepLifecycle",
     clientScoped: false,
     tokenBudget: { ...ZERO_TOKENS },
-    enabled: true,
+    enabled: capabilities.propose,
   });
 
   // Weekly, and after the 6-hourly materialized refresh has had a turn — the
@@ -116,7 +148,7 @@ export function registerIntelligenceHandlers(scheduler: Scheduler): void {
     handler: "runPortfolioBenchmark",
     clientScoped: false,
     tokenBudget: { ...ZERO_TOKENS },
-    enabled: true,
+    enabled: capabilities.reason,
   });
 
   // The plane's ONE token-spending job, and the only definition here with a
@@ -138,7 +170,7 @@ export function registerIntelligenceHandlers(scheduler: Scheduler): void {
       maxStrategicTokensPerRun: 12_000,
       cooldownMinutes: 60,
     },
-    enabled: true,
+    enabled: capabilities.llmPlanning,
   });
 
   scheduler.registerDefinition({
@@ -148,6 +180,7 @@ export function registerIntelligenceHandlers(scheduler: Scheduler): void {
     handler: "refreshMaterializedViews",
     clientScoped: false,
     tokenBudget: { ...ZERO_TOKENS },
+    // Not gated on INTELLIGENCE_MODE — the reporting plane is independent.
     enabled: true,
   });
 
