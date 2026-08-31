@@ -20,10 +20,18 @@ This directory contains the canonical Architecture Decision Records for the L9 S
 | [ADR-0012](ADR-0012-competitive-landscape-authority.md) | CompetitiveLandscape Ranking Authority | accepted | 2026-08-14 |
 | [ADR-0013](ADR-0013-seo-content-blueprint-and-content-compiler.md) | SEOContentBlueprint and Strategic Content Compiler | accepted | 2026-08-14 |
 | [ADR-0014](ADR-0014-answer-engine-observation.md) | Answer Engine Observation Measurement Adapter | accepted | 2026-08-14 |
+| [ADR-0015](ADR-0015-reporting-sql-plane.md) | Reporting SQL Plane (governed read contract) | accepted | 2026-08-31 |
+| [ADR-0016](ADR-0016-intelligence-plane.md) | Intelligence Plane (the bot consumes its own SQL) | accepted | 2026-08-31 |
 
 > ADR-0010–ADR-0014 form the `redesign-improve/v1` architecture pack
 > (accepted 2026-08-14). They amend ADR-0001 and ADR-0003; ADR-0001 through
 > ADR-0009 remain in force except where explicitly amended.
+
+> ADR-0015 and ADR-0016 form the `sql-planes/v1` pack (accepted 2026-08-31).
+> ADR-0015 defines the governed read contract; ADR-0016 makes the bot its
+> primary consumer. Neither amends an earlier ADR: the intelligence plane
+> proposes into the existing execution policy and approval flow rather than
+> widening it, and the gated site-deployment path (AGENTS §9) is untouched.
 
 ## Format
 
