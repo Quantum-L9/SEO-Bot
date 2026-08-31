@@ -16,6 +16,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
+# The Compose SERVICE KEY, not the container_name. `docker compose build|run|up|logs`
+# address services; `l9-seo-bot` is the container_name and is not a valid service
+# selector — passing it makes Compose act on NO service and exit 0, so a broken
+# update looked exactly like a successful one.
+BOT_SERVICE="${BOT_SERVICE:-seo-bot}"
 
 # Colors
 RED='\033[0;31m'
@@ -69,7 +74,7 @@ cmd_setup() {
 
   # Run database migrations
   log "Running database migrations..."
-  docker compose -f "$COMPOSE_FILE" run --rm l9-seo-bot pnpm migrate
+  docker compose -f "$COMPOSE_FILE" run --rm "$BOT_SERVICE" npm run migrate
 
   log "Setup complete! Run './scripts/deploy.sh start' to launch."
 }
@@ -95,7 +100,7 @@ cmd_restart() {
 }
 
 cmd_logs() {
-  local service="${2:-l9-seo-bot}"
+  local service="${2:-$BOT_SERVICE}"
   docker compose -f "$COMPOSE_FILE" logs -f --tail=100 "$service"
 }
 
@@ -112,10 +117,29 @@ cmd_status() {
 
 cmd_update() {
   log "Updating L9 SEO Bot..."
+
+  # Back up before anything else. An update that ships a migration is the one
+  # case where "restore the previous image" is not a complete rollback.
+  cmd_backup
+
   git pull origin main 2>/dev/null || true
-  docker compose -f "$COMPOSE_FILE" build l9-seo-bot
-  docker compose -f "$COMPOSE_FILE" up -d l9-seo-bot
-  log "Bot updated and restarted."
+
+  # Stateful dependencies first: the migration below needs a reachable database,
+  # and on a cold host Postgres may not be up yet.
+  docker compose -f "$COMPOSE_FILE" up -d postgres redis
+
+  docker compose -f "$COMPOSE_FILE" build "$BOT_SERVICE"
+
+  # Migrate BEFORE starting the new code. Without this the update path booted a
+  # new image against an unmigrated schema — only `setup` ever migrated, so every
+  # release carrying a migration failed at runtime rather than at deploy time.
+  # `run --rm` uses the new image but does not start the long-running bot, so a
+  # failed migration aborts here (set -e) with the old container still serving.
+  log "Running database migrations..."
+  docker compose -f "$COMPOSE_FILE" run --rm "$BOT_SERVICE" npm run migrate
+
+  docker compose -f "$COMPOSE_FILE" up -d "$BOT_SERVICE"
+  log "Bot updated, migrated, and restarted."
 }
 
 cmd_backup() {
@@ -153,9 +177,9 @@ case "${1:-help}" in
     echo "  start    - Start all services"
     echo "  stop     - Stop all services"
     echo "  restart  - Restart all services"
-    echo "  logs     - View logs (default: l9-seo-bot, or specify service)"
+    echo "  logs     - View logs (default: $BOT_SERVICE, or specify service)"
     echo "  status   - Show service status and health"
-    echo "  update   - Pull latest code and rebuild bot"
+    echo "  update   - Back up, pull, build, MIGRATE, then restart the bot"
     echo "  backup   - Backup PostgreSQL database"
     ;;
 esac
