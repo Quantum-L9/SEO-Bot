@@ -1,7 +1,7 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════════════════
 # L9 SEO Bot - Deployment Script for Hetzner CX32
-# 
+#
 # Prerequisites:
 # - Ubuntu 22.04+ VPS with Docker and Docker Compose installed
 # - SSH access configured
