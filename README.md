@@ -296,6 +296,22 @@ queues, under those jobs' existing budgets.
 ./scripts/deploy.sh restart
 ```
 
+### Verifying the intelligence plane
+
+```bash
+npx tsc --noEmit && npx vitest run   # the blocking gate
+npm run test:intelligence            # narrower loops while working
+npm run test:reporting
+npm run test:gates
+npm run verify:intelligence          # post-run invariants, against a real DB
+```
+
+`verify:intelligence` is read-only and safe against production. Every check is
+phrased so that returned rows mean a violation — exit `0` clean, `1` a
+violation, `2` the pack could not run. See
+[`docs/seo-sql/TESTING.md`](docs/seo-sql/TESTING.md) for the five gates, the
+per-mode behavior table, and the production-readiness checklist.
+
 ---
 
 ## Required API Keys

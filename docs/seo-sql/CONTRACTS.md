@@ -1,17 +1,17 @@
-<!-- L9_META: layer=documentation, role=seo_sql_contract_ledger, status=active, version=2.0.0 -->
+<!-- L9_META: layer=documentation, role=seo_sql_contract_ledger, status=active, version=3.0.0 -->
 # SEO SQL — contract ledger
 
 Where work on the SEO SQL planes goes, and what has been built.
 
-**All five contracts C1–C5 are delivered.** What follows records what each one
-did and the constraints that survive it, so a later change knows what it is
-allowed to renegotiate. The "where future work goes" table at the bottom is the
-live part.
+**Contracts C1–C6 are delivered.** What follows records what each one did and the
+constraints that survive it, so a later change knows what it is allowed to
+renegotiate. The "where future work goes" table at the bottom is the live part.
 
 | Plane | ADR | Code |
 |---|---|---|
 | Reporting SQL plane | [ADR-0015](../../adr/ADR-0015-reporting-sql-plane.md) | `drizzle/0002`, `0004`, `0005`, `src/reporting/`, `src/api/reporting.ts` |
 | Intelligence plane | [ADR-0016](../../adr/ADR-0016-intelligence-plane.md) | `drizzle/0003`, `src/intelligence/` |
+| Testing contract | [TESTING.md](TESTING.md) | `tests/migrations/`, `tests/intelligence/`, `scripts/intelligence/` |
 
 ---
 
@@ -37,6 +37,50 @@ follow-up job an auto-executed one gets, claiming each row with a conditional
 
 **Do not renegotiate:** expiry must outlast the signal cooldown
 (`assertLifecycleConfig`); only a measured improvement closes an opportunity.
+
+### C6 — Testing contract
+
+Full detail in [TESTING.md](TESTING.md); the gates, the mode table and the
+production-readiness checklist live there. What belongs in the ledger is what
+the testing pass found, because each finding is a shape the next contract can
+repeat.
+
+**Every control tested green while guarding nothing.** Three defects, one
+pattern: a control whose own logic was correct, protecting a path that either
+went nowhere or was not the path being taken.
+
+- `link_outreach_batch` could never be proposed. Its extractor capped severity
+  at `medium`, worth 18 against a threshold of 20 — so the outreach allow-flag,
+  the velocity governor, `OUTREACH_FOLLOW_UP_JOBS` and `route_safe`'s explicit
+  promise all guarded a road with nothing on it. Fixed with a `high` rung keyed
+  on the CONTACTABLE subset.
+- `off` was not off in the runner. Enforced at registration, which covers steady
+  state — but a repeatable job already in Redis, an in-flight retry, and a
+  manual trigger all re-enter `runClientTriage` directly, where the run and its
+  rows were written regardless of mode. `reason` was on the capability surface
+  for exactly this and never consulted.
+- The follow-up enqueue's dedup key was derived from the `action_outcomes` row,
+  inserted fresh on every pass, so it deduplicated nothing. Suppression already
+  covered the retry its comment claimed; nothing covered the concurrent-run race.
+  Now keyed on the opportunity fingerprint.
+
+Plus one outside the plane: `clients.config` was served whole by the client read
+routes, carrying `site_deployment.githubToken` and `vercelDeployHook`. The
+column allow-list that excluded `posthog_api_key` could not see inside a JSONB
+blob.
+
+**One finding is open, not fixed.** `serp_and_answer_engine_loss` is
+structurally unreachable — its grouping rules need `keyword_drop` and a citation
+signal in one group, and the extractors key on disjoint dimensions by
+construction. Every candidate fix is a product decision. It is asserted on its
+mechanism (not on a score, which a tweak could mask) and recorded in `TODO.md`
+§3 with the decision it waits on.
+
+**Do not renegotiate:** the static gates are gates, not advice — an applied
+migration's checksum, the env-var declaration rule, and the additive-migration
+marker each exist because the alternative was a reviewer noticing by eye. The
+verification pack stays read-only and stays phrased so rows mean a violation. A
+query that errors is a finding, never a pass.
 
 ### C1 — Portfolio benchmarking plane
 
@@ -139,7 +183,11 @@ change on the previous one's head (`PR_STACK=auto`; bottom-up merge order).
 **Gate.** `npx tsc --noEmit && npx vitest run`, both green with output shown.
 Add a migration with `npx drizzle-kit generate` or by hand following
 `0002`/`0003`; never edit an applied migration; register it in
-`drizzle/meta/_journal.json` with a strictly increasing `when`.
+`drizzle/meta/_journal.json` with a strictly increasing `when` **and in
+`drizzle/CHECKSUMS.json`** — the static gate fails on either being absent.
+Narrower loops while working: `npm run test:intelligence`,
+`npm run test:reporting`, `npm run test:gates`, `npm run test:api`. Against a
+real database, `npm run verify:intelligence`. Full gate map: [TESTING.md](TESTING.md).
 
 **Publish.** `python3 ops/autonomy/l4_local.py begin --contract-id "<id>"` →
 `authorize-release` → `PR_REMEDIATE=0 make pr`. Do not raw-push.
@@ -158,6 +206,10 @@ Add a migration with `npx drizzle-kit generate` or by hand following
 | Anything that spends tokens | Its own budgeted job | Add it to `BUDGETED` in `registration.test.ts` — the zero-token invariant is a named list, so a new spender has to be declared. |
 | A new operator panel | `src/api/dashboard.ts` via the reporting gateway | Not direct table queries. Escape every DB value; `rationale`, `hypothesis` and `learnings` are model-authored free text. |
 | Schema change | `drizzle/0006+` | Hand-written following `0004`/`0005`; register in `_journal.json` with a strictly increasing `when`. **Never edit an applied migration.** |
+| A new signal type or opportunity type | its extractor + `calibration.test.ts` | Add a worst-case fixture, or an entry in `UNREACHABLE` with the reason. A type with neither is a type nobody checked — which is how `link_outreach_batch` shipped unreachable. |
+| A new post-run invariant | `scripts/intelligence/verify-invariants.ts` | Phrase it so ROWS MEAN A VIOLATION, give it a `meaning` an operator can act on at 3am, and keep it read-only. The test checks it against the migrations. |
+| A new environment variable | `src/core/config.ts` **and** `.env.example` | Both, or the static gate fails. A `process.env` read outside config.ts needs a named exemption with its reason. |
+| Editing a migration that already applied | don't — add `drizzle/0006+` | `drizzle/CHECKSUMS.json` will fail the suite. If it genuinely never shipped, update the checksum in the same commit. |
 | A new capability the plane may exercise | `src/intelligence/mode.ts` | Add it to the ladder or to an out-of-ladder flag — never both, and never as a bare `mode !== "off"` check at the call site. The monotonicity test covers every mode automatically. |
 | A new follow-up job the plane may queue | `src/intelligence/mode.ts` sets | Classify it as outreach or site-mutating if it is either, or it routes at `route_safe` — the one thing that rung promises it will not do. |
 | A new enqueue made from a durable row | its call site | Pass `addJob`'s `jobId`, derived from the row. BullMQ is at-least-once; without a key a retry duplicates the work. |
