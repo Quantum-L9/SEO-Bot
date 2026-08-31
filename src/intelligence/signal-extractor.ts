@@ -112,7 +112,7 @@ export const keywordDropExtractor: SignalExtractor = {
     const delta = asNumber(row.position_delta);
     if (!keyword || delta === null || delta < 5) return null;
 
-    const severity: SignalSeverity = delta >= 10 ? "high" : delta >= 5 ? "medium" : "low";
+    const severity: SignalSeverity = delta >= 10 ? "high" : "medium";
     const url = asString(row.url);
     const pageKey = normalizePageKey(url);
 
