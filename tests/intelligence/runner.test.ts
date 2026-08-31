@@ -158,6 +158,7 @@ vi.mock("../../src/core/logger.js", () => ({
   createModuleLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }),
 }));
 
+import { isBullMqSafeJobId } from "../../src/core/job-id.js";
 import { attributionEntity, runClientTriage } from "../../src/intelligence/runner.js";
 import type { ScoredOpportunity } from "../../src/intelligence/types.js";
 
@@ -351,9 +352,16 @@ describe("runClientTriage — the boundary it must not cross", () => {
     expect(jobName).not.toBe("serp:execute-surpass-plans");
     expect(payload).toEqual({ clientId: CLIENT });
     // Enqueue carries a deterministic dedupe key, so a retried run re-queues
-    // nothing. Derived from the outcome row and the client, never from a clock.
+    // nothing. Derived from the opportunity fingerprint and the client, never
+    // from a clock or a row written during the run.
     expect(opts?.jobId).toContain(CLIENT);
-    expect(opts?.jobId).toContain("serp:generate-surpass-plan");
+    // The job name appears with its colon sanitized. A BullMQ custom id may not
+    // contain `:`, and this key used to be built by interpolating three of them
+    // — so `queue.add()` threw and the dedup key described above had never
+    // reached a queue. `addJob` here is a `vi.fn()` that accepts any id, which
+    // is why the assertion below is the one that matters.
+    expect(opts?.jobId).toContain("serp-generate-surpass-plan");
+    expect(isBullMqSafeJobId(opts?.jobId as string)).toBe(true);
   });
 
   it("still records the run when no scheduler is available, and queues nothing", async () => {

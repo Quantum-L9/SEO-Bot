@@ -122,6 +122,7 @@ vi.mock("../../src/core/logger.js", () => ({
   createModuleLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }),
 }));
 
+import { isBullMqSafeJobId } from "../../src/core/job-id.js";
 import {
   ACTIVE_OPPORTUNITY_STATUSES,
   applyVerdictToOpportunity,
@@ -348,10 +349,17 @@ describe("sweepApprovedActions", () => {
     expect(addJob).toHaveBeenCalledWith(
       "serp:generate-surpass-plan",
       { clientId: CLIENT },
-      { jobId: expect.stringContaining("serp:generate-surpass-plan") },
+      // The job name appears with its colon sanitized: a BullMQ custom id may
+      // not contain `:`, and the key used to be built by interpolating one in.
+      { jobId: expect.stringContaining("serp-generate-surpass-plan") },
     );
     const jobId = addJob.mock.calls[0][2]?.jobId as string;
     expect(jobId).toContain(CLIENT);
+    // `addJob` here is a `vi.fn()` that accepts anything, so the assertions
+    // above cannot tell a usable key from one BullMQ throws on. This is that
+    // check, against the same predicate `tests/live/queue.live.test.ts` pins to
+    // a real Redis.
+    expect(isBullMqSafeJobId(jobId)).toBe(true);
   });
 
   it("anchors the baseline to the approval, not to the sweep", async () => {
