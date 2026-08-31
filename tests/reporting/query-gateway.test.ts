@@ -82,6 +82,7 @@ import {
   type ReportingActor,
   toDrizzleSql,
 } from "../../src/reporting/query-gateway.js";
+import { REPORTING_VIEWS } from "../../src/reporting/views.js";
 
 const OPERATOR: ReportingActor = {
   id: "operator",
@@ -138,6 +139,21 @@ describe("toDrizzleSql", () => {
     const query = dialect.sqlToQuery(toDrizzleSql(compiled));
     expect(query.sql).toBe(compiled.text);
     expect(query.params).toEqual(["critical", "high", compiled.limit]);
+  });
+
+  it("round-trips every registry view for every audience it serves", () => {
+    // The `$n` split is the single join between the audited text and the
+    // executed statement. Proving it for one statement is not proving it for a
+    // view whose filters produce a different placeholder shape.
+    for (const view of REPORTING_VIEWS) {
+      for (const audience of ["operator", "agent"] as const) {
+        if (!view.projections[audience]) continue;
+        const compiled = compileReportingQuery({ view: view.name }, audience);
+        const query = dialect.sqlToQuery(toDrizzleSql(compiled));
+        expect(query.sql, view.name).toBe(compiled.text);
+        expect(query.params, view.name).toEqual(compiled.params);
+      }
+    }
   });
 
   it("refuses a compiled query whose placeholders outrun its parameters", () => {

@@ -94,9 +94,22 @@ export function isReportingSurface(pathname: string): boolean {
   return pathname === "/api/reporting" || pathname.startsWith("/api/reporting/");
 }
 
-/** True when the path is a rate-limited-stricter, expensive/abusable route. */
+/**
+ * True when the path is a rate-limited-stricter, expensive/abusable route.
+ *
+ * `/api/reporting/query` belongs here on cost, not on trust: each call is a
+ * portfolio-scale read holding a connection for up to its audience's statement
+ * timeout. At the default 120/min an automated caller could hold more database
+ * time per minute than there are minutes, so the cheap listing endpoints
+ * (`/views`, `/refresh-status`) stay on the default cap and only the read is
+ * capped hard.
+ */
 export function isStrictRateLimited(pathname: string): boolean {
-  return pathname === "/api/clients/register" || /^\/api\/clients\/[^/]+\/trigger$/.test(pathname);
+  return (
+    pathname === "/api/clients/register" ||
+    pathname === "/api/reporting/query" ||
+    /^\/api\/clients\/[^/]+\/trigger$/.test(pathname)
+  );
 }
 
 function pathname(url: string): string {

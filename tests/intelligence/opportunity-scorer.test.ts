@@ -21,8 +21,11 @@ import {
   computeScore,
   confidenceFromSignals,
   GROUPING_RULES,
+  opportunityShape,
+  SCORE_SCALE,
   urgencyFromSignals,
 } from "../../src/intelligence/opportunity-scorer.js";
+import type { OpportunityType } from "../../src/intelligence/types.js";
 import {
   normalizePageKey,
   opportunityFingerprint,
@@ -180,7 +183,7 @@ describe("computeScore", () => {
       risk: 0,
     });
     expect(Number.isFinite(score)).toBe(true);
-    expect(score).toBe(100);
+    expect(score).toBe(10 * SCORE_SCALE);
   });
 
   it("rounds to the precision the score column stores", () => {
@@ -193,6 +196,70 @@ describe("computeScore", () => {
       risk: 2,
     });
     expect(score).toBe(Number(score.toFixed(4)));
+  });
+});
+
+describe("score calibration against the action threshold", () => {
+  // The scale is the one number in this module that fails SILENTLY when wrong:
+  // set it too low and every actionable opportunity sits permanently under the
+  // default threshold, so the plane observes forever and proposes nothing —
+  // with no error, no failing test, and no log line saying so.
+  const DEFAULT_MIN_SCORE = 20; // src/core/config.ts INTELLIGENCE_MIN_OPPORTUNITY_SCORE
+
+  const ACTIONABLE: OpportunityType[] = [
+    "keyword_drop_plus_page_experience",
+    "serp_and_answer_engine_loss",
+    "keyword_recovery",
+    "page_experience_repair",
+    "performance_regression",
+    "answer_engine_gap",
+    "link_outreach_batch",
+  ];
+
+  it("lets every actionable type clear the default threshold at high severity", () => {
+    for (const opportunityType of ACTIONABLE) {
+      const shape = opportunityShape(opportunityType);
+      const score = computeScore({
+        expectedImpact: shape.impact,
+        effort: shape.effort,
+        risk: shape.risk,
+        // A high-severity finding an extractor is reasonably sure about — not a
+        // theoretical maximum.
+        urgency: 0.75,
+        confidence: 0.8,
+      });
+      expect(score, `${opportunityType} scored ${score}`).toBeGreaterThanOrEqual(DEFAULT_MIN_SCORE);
+    }
+  });
+
+  it("keeps a low-severity single finding below the threshold", () => {
+    // The threshold has to separate, not just admit. A low-severity keyword drop
+    // the extractor is unsure about should wait for the next cycle.
+    const shape = opportunityShape("keyword_recovery");
+    const score = computeScore({
+      expectedImpact: shape.impact,
+      effort: shape.effort,
+      risk: shape.risk,
+      urgency: 0.25,
+      confidence: 0.6,
+    });
+    expect(score).toBeLessThan(DEFAULT_MIN_SCORE);
+  });
+
+  it("ranks the compound diagnosis above either symptom alone", () => {
+    const compound = computeScore({
+      ...opportunityShape("keyword_drop_plus_page_experience"),
+      expectedImpact: opportunityShape("keyword_drop_plus_page_experience").impact,
+      urgency: 1,
+      confidence: 0.875,
+    });
+    const single = computeScore({
+      ...opportunityShape("keyword_recovery"),
+      expectedImpact: opportunityShape("keyword_recovery").impact,
+      urgency: 1,
+      confidence: 0.875,
+    });
+    expect(compound).toBeGreaterThan(single);
   });
 });
 

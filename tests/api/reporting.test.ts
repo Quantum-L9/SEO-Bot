@@ -77,7 +77,11 @@ vi.mock("../../src/core/logger.js", () => ({
 }));
 
 import { registerReportingRoutes } from "../../src/api/reporting.js";
-import { _resetRateLimiter, registerApiSecurity } from "../../src/api/security.js";
+import {
+  _resetRateLimiter,
+  isStrictRateLimited,
+  registerApiSecurity,
+} from "../../src/api/security.js";
 
 let app: FastifyInstance;
 
@@ -334,6 +338,30 @@ describe("POST /api/reporting/query", () => {
       surface: "api:reporting",
       audience: "operator",
     });
+  });
+});
+
+describe("rate limiting", () => {
+  it("caps the expensive query endpoint harder than the cheap listing ones", async () => {
+    // Each query holds a connection for up to the audience statement timeout;
+    // the default 120/min cap would let one caller outspend the wall clock.
+    expect(isStrictRateLimited("/api/reporting/query")).toBe(true);
+    expect(isStrictRateLimited("/api/reporting/views")).toBe(false);
+    expect(isStrictRateLimited("/api/reporting/refresh-status")).toBe(false);
+  });
+
+  it("returns 429 once the strict cap is exceeded", async () => {
+    let last = 0;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/reporting/query",
+        headers: bearer(OPERATOR_KEY),
+        payload: { view: "pending_approvals" },
+      });
+      last = res.statusCode;
+    }
+    expect(last).toBe(429);
   });
 });
 

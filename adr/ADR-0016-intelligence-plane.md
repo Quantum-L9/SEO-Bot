@@ -52,11 +52,19 @@ groups with an experience problem on that same page. The group is classified by
 an ordered rule table and scored:
 
 ```
-score = impact × confidence × urgency ÷ max(effort + risk, 1)
+score = impact × confidence × urgency ÷ max(effort + risk, 1)   (scaled ×40)
 ```
 
 with hand-set per-type constants. Deterministic, explicable, reproducible — an
 operator asking "why that first?" gets the same answer twice.
+
+The scale matters more than it looks. Unscaled, the band the shape constants
+produce is 0–2.5, and a threshold set anywhere in a 0–100 mental model would put
+every actionable type permanently below the bar — the plane would observe
+forever and propose nothing, with no error and no failing test to say so. The
+scale places a strong compound case near 55 and a low-severity single finding
+near 10, so the default threshold of 20 separates them. A test asserts that
+relationship directly rather than trusting the constants.
 
 **4. The governors become SQL-readable state.** `intelligence_policy_state`
 holds the pause switch, the ranking circuit breaker, outreach headroom, and
@@ -147,7 +155,12 @@ inline measurement records noise and labels it a learning.
 ## Validation / Evidence
 - `tests/intelligence/opportunity-scorer.test.ts` — grouping merges signals on a
   shared target, keeps tenants apart, and ranks reproducibly; every signal type
-  has a grouping rule.
+  has a grouping rule; every actionable opportunity type can clear the default
+  action threshold at a plausible severity, and a low-severity one cannot.
+- `tests/intelligence/runner.test.ts` — each decision links to its opportunity
+  and each experiment to its decision (an unlinked foreign key is the failure
+  that produces a healthy-looking database of orphan rows); only allow-listed
+  jobs are queued; a run with no scheduler still reasons and still records.
 - `tests/intelligence/policy-engine.test.ts` — refusal precedence; unknown
   budget defers rather than spends; diagnostics are never silenced by a pause.
 - `tests/intelligence/evidence-pack.test.ts` — hostile evidence containing a

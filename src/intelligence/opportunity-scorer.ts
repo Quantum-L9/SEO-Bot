@@ -191,10 +191,26 @@ export function confidenceFromSignals(signals: readonly SignalCandidate[]): numb
 }
 
 /**
- * score = impact × confidence × urgency ÷ max(effort + risk, 1)
+ * Multiplier that places scores on a legible 0..100 band.
  *
- * Scaled ×10 so scores land on a readable 0..100-ish band rather than 0..9, and
- * rounded to four decimals to match the column's numeric(10,4) precision — a
+ * The formula's raw output is small: with `impact` at most 10 and a real
+ * `effort + risk` of 4..7, a strong opportunity lands near 1.5 and the whole
+ * band is 0..2.5. That is not a number to set a threshold against, and getting
+ * the scale wrong is not a cosmetic mistake — with a default threshold of 20 and
+ * an unscaled band, EVERY actionable opportunity type sits permanently below the
+ * bar and the plane observes forever without ever proposing anything. Nothing
+ * fails; it just silently does nothing.
+ *
+ * 40 puts a strong compound case near 55, a moderate single-signal case near 25,
+ * and a low-severity one near 10, so the default threshold of 20 separates them
+ * as intended. `scoreCalibration` in the tests pins that relationship.
+ */
+export const SCORE_SCALE = 40;
+
+/**
+ * score = impact × confidence × urgency ÷ max(effort + risk, 1), scaled.
+ *
+ * Rounded to four decimals to match the column's numeric(10,4) precision — a
  * score that changes when it round-trips through the database is not a ranking.
  */
 export function computeScore(input: {
@@ -205,8 +221,22 @@ export function computeScore(input: {
   risk: number;
 }): number {
   const denominator = Math.max(input.effort + input.risk, 1);
-  const raw = (input.expectedImpact * input.confidence * input.urgency * 10) / denominator;
+  const raw = (input.expectedImpact * input.confidence * input.urgency * SCORE_SCALE) / denominator;
   return Math.round(raw * 10_000) / 10_000;
+}
+
+/**
+ * The cost/benefit shape of one opportunity type, for calibration checks.
+ * Exported so a test can prove every actionable type can actually clear the
+ * default threshold at a plausible severity and confidence.
+ */
+export function opportunityShape(opportunityType: OpportunityType): {
+  impact: number;
+  effort: number;
+  risk: number;
+} {
+  const shape = OPPORTUNITY_SHAPES[opportunityType];
+  return { impact: shape.impact, effort: shape.effort, risk: shape.risk };
 }
 
 /**

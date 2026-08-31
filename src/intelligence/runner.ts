@@ -120,7 +120,7 @@ export async function runClientTriage(
         status: "completed",
         completedAt: new Date(),
         durationMs: Date.now() - startedAt,
-        metadata: { ...summary, runId: undefined, clientId: undefined },
+        metadata: runMetadata(summary),
       })
       .where(eq(schema.intelligenceRuns.id, runId));
 
@@ -214,6 +214,12 @@ async function executeCycle(
       .onConflictDoNothing();
   }
 
+  // Resolve each opportunity's row id AFTER the insert rather than from
+  // `.returning()`: ON CONFLICT DO NOTHING omits skipped rows from RETURNING, so
+  // on a retried run the returned set would be empty and every decision would
+  // record a null opportunity_id — exactly the orphaned link this lookup avoids.
+  const opportunityIds = await loadOpportunityIds(runId);
+
   // ── Plan / Act ────────────────────────────────────────────────────────────
   const policyState = await refreshPolicyState(clientId);
   const openFingerprints = await loadOpenOpportunityFingerprints(clientId, runId);
@@ -249,26 +255,29 @@ async function executeCycle(
       market: client.state,
     });
 
-    await db.insert(schema.intelligenceDecisions).values({
-      runId,
-      clientId,
-      opportunityId: null,
-      decisionType: opportunity.opportunityType,
-      decision: planned.verdict.decision,
-      rationale: planned.verdict.rationale,
-      policyBasis: {
-        blockers: planned.verdict.blockers,
-        score: opportunity.score,
-        min_score: config.INTELLIGENCE_MIN_OPPORTUNITY_SCORE,
-        opportunity_fingerprint: opportunity.fingerprint,
-        execution_policy: planned.execution
-          ? { execute: planned.execution.execute, reason: planned.execution.reason }
-          : null,
-      },
-      evidenceSummary: evidencePack as unknown as Record<string, unknown>,
-      requiresApproval: planned.execution?.requiresApproval ?? false,
-      actionLogId,
-    });
+    const [decisionRow] = await db
+      .insert(schema.intelligenceDecisions)
+      .values({
+        runId,
+        clientId,
+        opportunityId: opportunityIds.get(opportunity.fingerprint) ?? null,
+        decisionType: opportunity.opportunityType,
+        decision: planned.verdict.decision,
+        rationale: planned.verdict.rationale,
+        policyBasis: {
+          blockers: planned.verdict.blockers,
+          score: opportunity.score,
+          min_score: config.INTELLIGENCE_MIN_OPPORTUNITY_SCORE,
+          opportunity_fingerprint: opportunity.fingerprint,
+          execution_policy: planned.execution
+            ? { execute: planned.execution.execute, reason: planned.execution.reason }
+            : null,
+        },
+        evidenceSummary: evidencePack as unknown as Record<string, unknown>,
+        requiresApproval: planned.execution?.requiresApproval ?? false,
+        actionLogId,
+      })
+      .returning({ id: schema.intelligenceDecisions.id });
 
     if (!planned.proposal || !planned.template) continue;
 
@@ -277,7 +286,13 @@ async function executeCycle(
 
     if (planned.execution?.execute) {
       autoExecuted += 1;
-      jobsQueued += await onExecutedProposal(planned, opportunity, config, scheduler);
+      jobsQueued += await onExecutedProposal(
+        planned,
+        opportunity,
+        config,
+        scheduler,
+        decisionRow?.id ?? null,
+      );
     } else {
       // Held for approval. No experiment window opens yet: measuring from a
       // moment nothing happened would attribute the world's noise to the bot.
@@ -309,6 +324,7 @@ async function onExecutedProposal(
   opportunity: ScoredOpportunity,
   config: ReturnType<typeof getConfig>,
   scheduler: Scheduler | undefined,
+  decisionId: string | null,
 ): Promise<number> {
   const db = getDb();
   const template = planned.template;
@@ -331,7 +347,7 @@ async function onExecutedProposal(
   if (entityId) {
     await openExperiment({
       clientId: opportunity.clientId,
-      decisionId: null,
+      decisionId,
       actionOutcomeId: outcome.id,
       hypothesis: template.hypothesis,
       targetMetric: template.targetMetric,
@@ -370,6 +386,28 @@ export function attributionEntity(
     (signal) => signal.entityType === "platform" && typeof signal.evidence.platform === "string",
   );
   return platformSignal ? String(platformSignal.evidence.platform) : null;
+}
+
+/**
+ * Counters only — `runId` and `clientId` are already columns on the run row, and
+ * duplicating them inside its own metadata invites the two to disagree.
+ */
+function runMetadata(summary: RunSummary): Record<string, unknown> {
+  const { runId: _runId, clientId: _clientId, ...counters } = summary;
+  return counters;
+}
+
+/** This run's opportunity row ids, keyed by fingerprint. */
+async function loadOpportunityIds(runId: string): Promise<Map<string, string>> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      id: schema.intelligenceOpportunities.id,
+      fingerprint: schema.intelligenceOpportunities.fingerprint,
+    })
+    .from(schema.intelligenceOpportunities)
+    .where(eq(schema.intelligenceOpportunities.runId, runId));
+  return new Map(rows.map((row) => [row.fingerprint, row.id]));
 }
 
 /** Fingerprints seen inside the cooldown window, for suppression. */
