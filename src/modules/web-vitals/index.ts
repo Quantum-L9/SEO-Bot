@@ -33,7 +33,12 @@ const logger = createModuleLogger("web-vitals");
 
 // ─── Thresholds (Google's Core Web Vitals standards) ─────────────────────────
 
-const THRESHOLDS = {
+/**
+ * Exported so the intelligence signal extractor calls a page "slow" by the same
+ * Core Web Vitals boundary this module rates against, rather than a second
+ * hardcoded number that can drift.
+ */
+export const THRESHOLDS = {
   lcp: { good: 2500, poor: 4000 }, // ms
   inp: { good: 200, poor: 500 }, // ms
   cls: { good: 0.1, poor: 0.25 }, // score

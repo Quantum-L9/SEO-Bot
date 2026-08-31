@@ -317,7 +317,11 @@ export type ModuleName =
   | "link-building"
   | "behavior-intelligence"
   | "memory"
-  | "build-intelligence";
+  | "build-intelligence"
+  // The intelligence control loop. Present here so its LLM spend is attributed
+  // to `intelligence` in llm_usage and can be capped and audited separately
+  // from the producer modules it routes work to.
+  | "intelligence";
 
 export interface TokenBudget {
   maxFastTokensPerRun: number;

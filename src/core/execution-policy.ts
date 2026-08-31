@@ -138,6 +138,55 @@ const ACTION_CLASSIFICATION: Record<string, { riskLevel: RiskLevel; reversible: 
 };
 
 // ═══════════════════════════════════════════════════════════════
+// INTELLIGENCE ACTION VOCABULARY — closed set, fail-closed
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * The module whose proposals are classified against a CLOSED vocabulary.
+ */
+export const INTELLIGENCE_MODULE = "intelligence";
+
+/**
+ * Every action the intelligence control loop is permitted to propose.
+ *
+ * This is deliberately a separate, closed table rather than entries in
+ * ACTION_CLASSIFICATION. The intelligence loop is the one caller whose action
+ * strings can originate from an LLM, so it must not be able to reach into the
+ * general taxonomy and name `page_deletion` or `content_rewrite` directly —
+ * it routes work to the modules that own those actions instead.
+ *
+ * Anything not listed here — a typo, a new action nobody classified, or a
+ * string an LLM invented — classifies CRITICAL and is held for approval.
+ */
+const INTELLIGENCE_ACTION_CLASSIFICATION: Record<
+  string,
+  { riskLevel: RiskLevel; reversible: boolean }
+> = {
+  // Observation only — records a signal, changes nothing.
+  intelligence_signal_only: { riskLevel: "low", reversible: true },
+  intelligence_generate_recommendation: { riskLevel: "low", reversible: true },
+  // Safe analysis routing — enqueues a read-only analysis job.
+  intelligence_run_competitor_analysis: { riskLevel: "low", reversible: true },
+  intelligence_optimize_faq_draft: { riskLevel: "low", reversible: true },
+  // Produces a plan; executing that plan is a separate, separately-gated step.
+  intelligence_generate_surpass_plan: { riskLevel: "medium", reversible: true },
+  intelligence_request_site_fix: { riskLevel: "medium", reversible: true },
+  // Irreversible outward action. Classified high rather than critical because
+  // reaching it already requires mode=full AND the outreach flag AND the link
+  // velocity governor — the policy gate, not this table, is its real brake.
+  intelligence_queue_outreach: { riskLevel: "high", reversible: false },
+  // Mutates a live site. Always held for a human, in every mode.
+  intelligence_execute_site_change: { riskLevel: "critical", reversible: false },
+};
+
+/**
+ * The action names the intelligence loop may propose, for planner validation.
+ */
+export const INTELLIGENCE_ACTIONS = Object.freeze(
+  Object.keys(INTELLIGENCE_ACTION_CLASSIFICATION),
+) as readonly string[];
+
+// ═══════════════════════════════════════════════════════════════
 // DECISION ENGINE — MAXIMUM AUTONOMY
 // ═══════════════════════════════════════════════════════════════
 
@@ -182,9 +231,40 @@ export function evaluateExecution(proposal: ActionProposal): ExecutionDecision {
 
 /**
  * Classifies an action string into risk level and reversibility.
- * Falls back to medium/reversible for unknown actions (safe for max autonomy).
+ *
+ * Two fallbacks, deliberately different:
+ *
+ * - For the intelligence module the vocabulary is CLOSED and the fallback is
+ *   CRITICAL. Intelligence action strings can originate from an LLM, and an
+ *   action nobody classified is an action nobody reasoned about, so it is held
+ *   for a human rather than auto-executed. This is the seam that stops a
+ *   planner from inventing its way into an unreviewed mutation.
+ *
+ * - For every other module the fallback stays medium/reversible. Those action
+ *   strings are authored in code, not generated, so an unrecognised one is a
+ *   naming drift rather than an injection, and the maximum-autonomy policy
+ *   (operator holds daily backups) still applies.
+ *
+ * @param actionType the action string being classified
+ * @param module     the proposing module; pass it to get the closed-vocabulary
+ *                   treatment for intelligence proposals
  */
-export function classifyAction(actionType: string): { riskLevel: RiskLevel; reversible: boolean } {
+export function classifyAction(
+  actionType: string,
+  module?: string,
+): { riskLevel: RiskLevel; reversible: boolean } {
+  if (module === INTELLIGENCE_MODULE) {
+    const intelClassification = INTELLIGENCE_ACTION_CLASSIFICATION[actionType];
+    if (intelClassification) return intelClassification;
+
+    // Fail closed. An unrecognised intelligence action is never auto-executed.
+    logger.warn(
+      { actionType, module },
+      "Unknown INTELLIGENCE action type — failing closed to critical (requires approval)",
+    );
+    return { riskLevel: "critical", reversible: false };
+  }
+
   const classification = ACTION_CLASSIFICATION[actionType];
   if (classification) return classification;
 
@@ -212,7 +292,10 @@ export function createProposal(params: {
   aiConfidence?: number;
   metadata?: Record<string, unknown>;
 }): ActionProposal {
-  const { riskLevel, reversible } = classifyAction(params.action);
+  // The module is part of the classification, not decoration: intelligence
+  // proposals are classified against their own closed vocabulary and fail
+  // closed on anything outside it.
+  const { riskLevel, reversible } = classifyAction(params.action, params.module);
 
   return {
     ...params,

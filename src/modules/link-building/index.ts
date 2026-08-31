@@ -45,7 +45,11 @@ const logger = createModuleLogger("link-building");
 
 // ─── Safety Controls ─────────────────────────────────────────────────────────
 
-const SAFETY = {
+/**
+ * Exported so the intelligence policy gate enforces the SAME numbers this
+ * module enforces, rather than a second copy that can drift out of step.
+ */
+export const SAFETY = {
   maxLinksPerWeek: 5, // Conservative velocity
   minDomainRating: 20, // Minimum DR for prospects
   maxEmailsPerDay: 10, // Daily outreach cap

@@ -26,6 +26,7 @@ import { getLlmService } from "../services/llm.js";
 import { registerBuildIntelligenceRoutes } from "./build-intelligence.js";
 import { registerClientRoutes } from "./clients/register.js";
 import { registerDashboard } from "./dashboard.js";
+import { registerIntelligenceRoutes } from "./intelligence.js";
 import { registerApiSecurity } from "./security.js";
 
 const logger = createModuleLogger("api");
@@ -90,6 +91,7 @@ export async function buildApiServer(): Promise<FastifyInstance> {
   await registerDashboard(app);
   await registerClientRoutes(app);
   await registerBuildIntelligenceRoutes(app);
+  registerIntelligenceRoutes(app);
 
   app.get("/health", async () => {
     const db = getDb();
@@ -299,6 +301,16 @@ export async function buildApiServer(): Promise<FastifyInstance> {
         "links:process-outreach",
         "behavior:pull-engagement",
         "behavior:generate-insights",
+        // Intelligence loop. Present in the allow-list unconditionally, but a
+        // manual trigger is not a way around the mode: each handler re-checks
+        // its capability, so triggering these at INTELLIGENCE_MODE=off runs a
+        // job that immediately declines. `serp:execute-surpass-plans` remains
+        // absent from this list — the one job that writes to a live site is
+        // not manually triggerable over HTTP.
+        "intelligence:extract-signals",
+        "intelligence:score-opportunities",
+        "intelligence:plan-actions",
+        "intelligence:attribute-outcomes",
       ];
       if (!module || !validModules.includes(module))
         return { error: `Invalid module. Valid: ${validModules.join(", ")}` };

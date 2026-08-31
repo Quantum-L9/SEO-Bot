@@ -207,7 +207,20 @@ export class Scheduler {
     logger.debug({ jobName }, "Handler registered");
   }
 
-  async addJob(jobName: string, data: Record<string, unknown>): Promise<void> {
+  /**
+   * Enqueue one job.
+   *
+   * `opts.jobId` makes the enqueue idempotent: BullMQ ignores an add whose id
+   * already exists, so a caller that derives the id deterministically from what
+   * the job is FOR (rather than from the clock) can retry safely. The
+   * intelligence router relies on this — routing the same opportunity twice
+   * must produce one queued job, not two.
+   */
+  async addJob(
+    jobName: string,
+    data: Record<string, unknown>,
+    opts: { jobId?: string } = {},
+  ): Promise<void> {
     const jobDef = JOB_DEFINITIONS.find((j) => j.name === jobName);
     if (!jobDef) {
       throw new Error(`Unknown job: ${jobName}`);
@@ -224,12 +237,13 @@ export class Scheduler {
       jobName,
       { definition: jobDef, ...data },
       {
+        ...(opts.jobId ? { jobId: opts.jobId } : {}),
         removeOnComplete: { count: 100 },
         removeOnFail: { count: 50 },
       },
     );
     // Log only jobName — data contains clientConfig and may include secrets/PII
-    logger.info({ jobName }, "Manual job queued");
+    logger.info({ jobName, jobId: opts.jobId }, "Manual job queued");
   }
 
   async start(): Promise<void> {

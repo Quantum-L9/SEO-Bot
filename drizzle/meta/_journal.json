@@ -15,6 +15,20 @@
       "when": 1786838400000,
       "tag": "0001_build_intelligence_artifacts",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788134400000,
+      "tag": "0002_intelligence_control_loop",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788134401000,
+      "tag": "0003_action_outcomes_memory_columns",
+      "breakpoints": true
     }
   ]
 }

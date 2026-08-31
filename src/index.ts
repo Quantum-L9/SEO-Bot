@@ -13,6 +13,7 @@ import { getScheduler } from "./core/scheduler.js";
 import { hydrateSecretsIfConfigured } from "./core/secrets.js";
 import { registerAeoHandlers } from "./modules/aeo-geo/index.js";
 import { registerBehaviorHandlers } from "./modules/behavior-intelligence/index.js";
+import { registerIntelligenceJobs } from "./modules/intelligence/index.js";
 import { registerLinkHandlers } from "./modules/link-building/index.js";
 import { registerSerpHandlers } from "./modules/serp-intelligence/index.js";
 import { registerVitalsHandlers } from "./modules/web-vitals/index.js";
@@ -54,6 +55,9 @@ async function main() {
   registerBehaviorHandlers(scheduler);
   registerPlanExecutorHandlers(scheduler);
   registerMemoryHandlers(scheduler);
+  // Registers nothing at INTELLIGENCE_MODE=off — the loop's jobs do not exist
+  // in an unconfigured deployment rather than existing and declining to run.
+  registerIntelligenceJobs(scheduler);
   await scheduler.start();
   logger.info("All modules registered and scheduler started");
 

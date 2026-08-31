@@ -116,6 +116,52 @@ const envSchema = z.object({
   AUTO_EXECUTE_THRESHOLD: z.enum(["low", "medium", "high"]).default("high"),
   REQUIRE_APPROVAL_ONLY_FOR: z.string().default("critical"),
 
+  // Intelligence Control Loop (INTEL) — staged autonomy ladder.
+  //
+  // The mode is the outer gate; the four booleans are inner gates. A capability
+  // is available only when BOTH the mode permits it AND its flag is on, so
+  // turning a flag on can never by itself widen what the loop may do. Default
+  // is `off`: an unconfigured deployment schedules no intelligence jobs and
+  // writes no intelligence rows.
+  //
+  //   off        no jobs scheduled, no intelligence tables written
+  //   observe    writes runs/signals/opportunities; no decisions, no LLM
+  //   recommend  additionally writes decisions + action_log proposals
+  //   route_safe additionally enqueues safe analysis jobs (never outreach or
+  //              site mutation)
+  //   route_llm  additionally allows the structured LLM planner
+  //   full       additionally allows outreach + site-mutation routing, each
+  //              still behind its own flag and behind site-deployment dry-run
+  INTELLIGENCE_MODE: z
+    .enum(["off", "observe", "recommend", "route_safe", "route_llm", "full"])
+    .default("off"),
+  INTELLIGENCE_LLM_PLANNING_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+  INTELLIGENCE_ALLOW_SAFE_JOB_ROUTING: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+  INTELLIGENCE_ALLOW_OUTREACH_ROUTING: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+  INTELLIGENCE_ALLOW_SITE_MUTATION: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+  // Gates the cross-client portfolio projection. Off by default: the security
+  // policy forbids cross-tenant queries unless explicitly authorized for
+  // anonymized benchmarking, and this flag IS that authorization.
+  INTELLIGENCE_PORTFOLIO_BENCHMARK: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+  // Signals older than this are stale: they stop scoring into new
+  // opportunities rather than driving action on data that no longer holds.
+  INTELLIGENCE_SIGNAL_TTL_HOURS: z.coerce.number().int().positive().default(72),
+
   // Site Deployment Transport (C-01 / GAP-08) — only used when the
   // serp:execute-surpass-plans job is enabled. All optional so startup never
   // fails when the feature is off; validated here so typos surface clearly.
