@@ -11,11 +11,17 @@
  * Job definitions and handlers for the reasoning loop and the reporting plane's
  * materialized refresh.
  *
- * Token budgets are all zero, deliberately. Extraction, grouping, scoring, and
- * the policy gate are deterministic SQL and arithmetic; the plane spends nothing
- * to decide. Tokens are spent later, by the module jobs it queues, under those
- * jobs' own budgets — which is what keeps a continuously-reasoning bot from
- * being a continuously-billing one.
+ * Token budgets are zero on every job but one. Extraction, grouping, scoring,
+ * the policy gate, attribution and the lifecycle are deterministic SQL and
+ * arithmetic; the plane spends nothing to REASON. Tokens are spent later, by the
+ * module jobs it queues, under those jobs\' own budgets — which is what keeps a
+ * continuously-reasoning bot from being a continuously-billing one.
+ *
+ * The exception is `intel:synthesize-plans` (contract C2), which ranks the
+ * remedies for proposals awaiting an operator\'s approval. It carries a real
+ * budget because it genuinely spends, and it is the only definition here that
+ * does — `registration.test.ts` pins that as a list of one rather than as a
+ * blanket rule, so a second budgeted job cannot appear unnoticed.
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -30,6 +36,7 @@ import {
   sweepApprovedActions,
 } from "./lifecycle.js";
 import { measureDueExperiments } from "./outcome-attributor.js";
+import { synthesizePendingProposals } from "./plan-synthesizer.js";
 import { runPortfolioBenchmark } from "./portfolio.js";
 import { refreshAllPolicyState, runClientTriage } from "./runner.js";
 
@@ -41,6 +48,7 @@ export const INTELLIGENCE_JOBS = {
   policyRefresh: "intel:refresh-policy-state",
   lifecycleSweep: "intel:lifecycle-sweep",
   portfolioBenchmark: "intel:weekly-portfolio",
+  planSynthesis: "intel:synthesize-plans",
   reportingRefresh: "reporting:refresh-materialized",
 } as const;
 
@@ -111,6 +119,28 @@ export function registerIntelligenceHandlers(scheduler: Scheduler): void {
     enabled: true,
   });
 
+  // The plane's ONE token-spending job, and the only definition here with a
+  // non-zero budget. It ranks the remedies for proposals a human is about to
+  // decide on; everything else in this module is deterministic arithmetic.
+  //
+  // 08:15 — after the 07:30 triage has produced the day's proposals, so a
+  // decision waits minutes for its options rather than a day. The cooldown
+  // bounds how often the sweep may reach a model at all, on top of the
+  // per-sweep batch size.
+  scheduler.registerDefinition({
+    name: INTELLIGENCE_JOBS.planSynthesis,
+    module: "intelligence",
+    cron: "15 8 * * *",
+    handler: "synthesizePlans",
+    clientScoped: false,
+    tokenBudget: {
+      maxFastTokensPerRun: 0,
+      maxStrategicTokensPerRun: 12_000,
+      cooldownMinutes: 60,
+    },
+    enabled: true,
+  });
+
   scheduler.registerDefinition({
     name: INTELLIGENCE_JOBS.reportingRefresh,
     module: "reporting",
@@ -160,6 +190,19 @@ export function registerIntelligenceHandlers(scheduler: Scheduler): void {
   scheduler.registerHandler(INTELLIGENCE_JOBS.portfolioBenchmark, async () => {
     const summary = await runPortfolioBenchmark("cron");
     logger.info(summary, "Portfolio benchmark recorded");
+  });
+
+  scheduler.registerHandler(INTELLIGENCE_JOBS.planSynthesis, async () => {
+    const outcomes = await synthesizePendingProposals(
+      getConfig().INTELLIGENCE_SYNTHESIS_BATCH_SIZE,
+    );
+    logger.info(
+      {
+        considered: outcomes.length,
+        ranked: outcomes.filter((outcome) => outcome.optionCount > 0).length,
+      },
+      "Plan synthesis completed",
+    );
   });
 
   scheduler.registerHandler(INTELLIGENCE_JOBS.reportingRefresh, async () => {

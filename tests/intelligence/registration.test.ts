@@ -29,6 +29,8 @@ const hooks = vi.hoisted(() => ({
   expiredCount: 0,
   lifecycleConfigChecked: [] as unknown[],
   portfolioRuns: 0,
+  synthesisLimits: [] as number[],
+  synthesisOutcomes: [] as { actionLogId: string; clientId: string; optionCount: number }[],
 }));
 
 vi.mock("../../src/reporting/refresh.js", () => ({
@@ -36,6 +38,12 @@ vi.mock("../../src/reporting/refresh.js", () => ({
 }));
 vi.mock("../../src/intelligence/outcome-attributor.js", () => ({
   measureDueExperiments: async () => hooks.measured,
+}));
+vi.mock("../../src/intelligence/plan-synthesizer.js", () => ({
+  synthesizePendingProposals: async (limit: number) => {
+    hooks.synthesisLimits.push(limit);
+    return hooks.synthesisOutcomes;
+  },
 }));
 vi.mock("../../src/intelligence/portfolio.js", () => ({
   runPortfolioBenchmark: async () => {
@@ -71,6 +79,7 @@ vi.mock("../../src/core/config.js", () => ({
   getConfig: () => ({
     INTELLIGENCE_OPPORTUNITY_EXPIRY_DAYS: 30,
     INTELLIGENCE_SIGNAL_COOLDOWN_DAYS: 7,
+    INTELLIGENCE_SYNTHESIS_BATCH_SIZE: 10,
   }),
 }));
 vi.mock("../../src/intelligence/lifecycle.js", () => ({
@@ -119,6 +128,8 @@ beforeEach(() => {
   hooks.expiredCount = 0;
   hooks.lifecycleConfigChecked = [];
   hooks.portfolioRuns = 0;
+  hooks.synthesisLimits = [];
+  hooks.synthesisOutcomes = [];
   scheduler = fakeScheduler();
   registerIntelligenceHandlers(scheduler as unknown as never);
 });
@@ -131,16 +142,43 @@ describe("job definitions", () => {
     expect(declared).toEqual([...Object.values(INTELLIGENCE_JOBS)].sort());
   });
 
-  it("declares a zero token budget on every job", () => {
-    // Reasoning is deterministic. A non-zero budget here would mean the plane
-    // itself started spending on every client, every day, forever.
+  it("declares a zero token budget on every job but the one that is allowed to spend", () => {
+    // Reasoning is deterministic. A non-zero budget on a REASONING job would
+    // mean the plane started spending on every client, every day, forever.
+    //
+    // Plan synthesis (contract C2) genuinely spends, so the invariant is pinned
+    // as a named list of one rather than relaxed to "most jobs": a second
+    // budgeted job then has to be added HERE to pass, which is the point.
+    const BUDGETED = [INTELLIGENCE_JOBS.planSynthesis];
+
     for (const definition of scheduler.definitions) {
+      if (BUDGETED.includes(definition.name)) continue;
       expect(definition.tokenBudget, definition.name).toEqual({
         maxFastTokensPerRun: 0,
         maxStrategicTokensPerRun: 0,
         cooldownMinutes: 0,
       });
     }
+  });
+
+  it("bounds the one budgeted job rather than leaving it open-ended", () => {
+    const synthesis = scheduler.definitions.find(
+      (definition) => definition.name === INTELLIGENCE_JOBS.planSynthesis,
+    );
+    expect(synthesis?.tokenBudget.maxStrategicTokensPerRun).toBeGreaterThan(0);
+    // A cooldown is what stops a retried or manually-triggered job from
+    // reaching a model back-to-back.
+    expect(synthesis?.tokenBudget.cooldownMinutes).toBeGreaterThan(0);
+  });
+
+  it("synthesizes after triage has produced the day's proposals", () => {
+    // Before it, the sweep would rank yesterday's leftovers and today's
+    // proposals would wait a full day for their options.
+    const byName = new Map(scheduler.definitions.map((d) => [d.name, d]));
+    const hourOf = (name: string) => Number(byName.get(name)?.cron.split(" ")[1]);
+    expect(hourOf(INTELLIGENCE_JOBS.planSynthesis)).toBeGreaterThan(
+      hourOf(INTELLIGENCE_JOBS.dailyTriage),
+    );
   });
 
   it("scopes triage per client and leaves the sweeps global", () => {
@@ -222,6 +260,14 @@ describe("handlers", () => {
     hooks.expiredCount = 2;
     const handler = scheduler.handlers.get(INTELLIGENCE_JOBS.lifecycleSweep);
     await expect(handler?.({} as Job)).resolves.toBeUndefined();
+  });
+
+  it("passes the configured batch size to the synthesis sweep", async () => {
+    // The sweep is the plane's only token-spending step; an unbounded one after
+    // an unusual day is where a deterministic system produces a surprising bill.
+    const handler = scheduler.handlers.get(INTELLIGENCE_JOBS.planSynthesis);
+    await expect(handler?.({} as Job)).resolves.toBeUndefined();
+    expect(hooks.synthesisLimits).toEqual([10]);
   });
 
   it("records a portfolio benchmark run", async () => {

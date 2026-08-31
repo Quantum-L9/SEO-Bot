@@ -182,6 +182,8 @@ ON CONFLICT (client_id) DO UPDATE
 
 While paused, the bot keeps observing and measuring, and keeps surfacing repeated job failures and budget pressure — those are never silenced, because they are the conditions under which the rest of its data stops being trustworthy. Set `autonomous_actions_paused = false` to resume.
 
+To stop the plane spending tokens entirely, unset `INTELLIGENCE_LLM_PLANNING_ENABLED`. Every other job is deterministic, so the bot keeps observing, deciding, and measuring; proposals simply keep the action their static template chose.
+
 To slow the plane globally instead, lower `INTELLIGENCE_MAX_ACTIONS_PER_RUN` (0 stops proposals entirely, leaving observation and measurement running) or raise `INTELLIGENCE_MIN_OPPORTUNITY_SCORE`.
 
 ### The approval queue is filling up
@@ -265,6 +267,9 @@ not from committed files. Names below match `src/core/config.ts` and `.env.examp
 | `INTELLIGENCE_SIGNAL_COOLDOWN_DAYS` | No | Default `7`. Fingerprint suppression window (CRITICAL findings are never suppressed) |
 | `INTELLIGENCE_BASELINE_DAYS` | No | Default `14`. Attribution baseline window |
 | `INTELLIGENCE_MEASUREMENT_DAYS` | No | Default `28`. Attribution measurement window |
+| `INTELLIGENCE_OPPORTUNITY_EXPIRY_DAYS` | No | Default `30`. Age at which a non-recurring opportunity is marked `expired`. MUST exceed `INTELLIGENCE_SIGNAL_COOLDOWN_DAYS` — registration fails if it does not |
+| `INTELLIGENCE_LLM_PLANNING_ENABLED` | No | Default off (`true`/`1` to enable). The plane's only token-spending step: ranks remedies for proposals awaiting approval. Off, every proposal keeps its deterministic template action |
+| `INTELLIGENCE_SYNTHESIS_BATCH_SIZE` | No | Default `10`. Proposals per synthesis sweep sent for model ranking |
 
 ### Secrets model (PostHog + packages)
 

@@ -180,9 +180,48 @@ inline measurement records noise and labels it a learning.
 - ADR-0015 (reporting plane), ADR-0003 (token efficiency), ADR-0004 (BullMQ),
   ADR-0006 (competitor kill-chain), AGENTS §9 (safety boundaries)
 
+## Amendment — contract C2: where judgment enters (2026-08-31)
+
+The plane shipped reasoning deterministically end to end: `buildEvidencePack`
+produced a redacted pack with `allowed_actions`, proved it leaked nothing, stored
+it on the decision row, and nothing read it. That was ordering, not oversight —
+the deterministic path had to be correct and testable before a model influenced
+it.
+
+`intel:synthesize-plans` now reads those packs. What the model may do is
+**rank actions the pack already permits**; it may not author one. Every allowed
+action is a key in the execution policy's taxonomy, so choosing among them cannot
+change a proposal's risk band, whereas an invented action would fall through
+`classifyAction`'s unknown-action default to medium/reversible and silently
+acquire auto-execute rights. A response naming anything outside the pack's own
+allow-list is rejected whole, not repaired and not partially kept.
+
+**Where it runs, and the limit that implies.** Triage is zero-token by contract,
+and by the time it has logged an auto-executed proposal and queued the follow-up
+job, revising the action would be too late. So synthesis runs over proposals
+PENDING AN OPERATOR'S APPROVAL — the plane's highest-risk work, about to be
+decided by a person, on a dashboard that already renders `action_log.options` as
+one approve button per option. Tokens are spent only on decisions someone will
+actually read, and C3's approved-action sweep then measures what they picked,
+which is what makes "did the model-chosen remedy beat the template-chosen one?"
+answerable at all.
+
+The consequence, stated rather than glossed: **the auto-executed path remains
+template-chosen.** Making it model-chosen needs either a token budget inside
+triage — which would undo the property that keeps a continuously-reasoning bot
+from being a continuously-billing one — or a pre-computed selection cache the
+runner consumes deterministically. The second is the better answer and is a
+larger change than this contract.
+
+Availability of a model is not a dependency of the loop. Disabled, unavailable,
+over budget, malformed, out-of-allow-list: every path returns null and leaves the
+deterministic proposal exactly as it was.
+
 ## Open Questions
 - Whether the scoring constants should become per-industry once enough measured
   experiments exist to justify differentiating them.
+- Whether the auto-executed path should consume a pre-computed model selection
+  (see the C2 amendment), and what staleness bound such a cache would need.
 - **Resolved — a portfolio-wide run type belongs here.** `weekly_portfolio_benchmark`
   (contract C1) records a snapshot of the benchmark plane on `intelligence_runs`
   with a null `client_id`. It is deterministic and zero-token like every other
