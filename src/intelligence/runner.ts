@@ -514,14 +514,27 @@ async function onExecutedProposal(
     return 0;
   }
 
-  // Deterministic job id: the outcome row is written once per executed proposal,
-  // so keying on it makes the enqueue idempotent. A BullMQ retry of this handler
-  // — or two concurrent runs racing the same opportunity — re-queues nothing
-  // rather than sending the same outreach twice.
+  // Deterministic job id, keyed on the OPPORTUNITY's fingerprint rather than on
+  // the outcome row.
+  //
+  // The outcome row is inserted fresh on every pass, so keying on its id gave a
+  // different key each time and deduplicated nothing — which is the one thing a
+  // dedup key exists to do. The fingerprint is stable across runs by
+  // construction (client + type + target), so a BullMQ retry of this handler and
+  // two runs racing the same opportunity both produce the same key and BullMQ
+  // collapses them. That second case is the one status suppression does not
+  // cover: two concurrent runs each load the open fingerprints before either
+  // marks the opportunity actioned, so both propose, and without a stable key
+  // both would send the same outreach.
+  //
+  // It does not block a legitimate recurrence later: the queue retains only the
+  // last 100 completed jobs, so the key is forgotten long before an expired
+  // opportunity could come back — and while it IS remembered, suppression means
+  // a second enqueue would be a duplicate by definition.
   await scheduler.addJob(
     template.followUpJob,
     { clientId: opportunity.clientId },
-    { jobId: `intel:${opportunity.clientId}:${outcome.id}:${template.followUpJob}` },
+    { jobId: `intel:${opportunity.clientId}:${opportunity.fingerprint}:${template.followUpJob}` },
   );
   return 1;
 }
