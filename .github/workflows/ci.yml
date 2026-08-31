@@ -74,8 +74,11 @@ jobs:
         image: postgres:16-alpine
         env:
           POSTGRES_USER: l9bot
-          POSTGRES_PASSWORD: ci-only
           POSTGRES_DB: l9_seo_bot_ci
+          # No password, rather than a hardcoded one. This container is
+          # reachable only on the runner's loopback for the life of the job, so
+          # a literal here bought nothing and was a credential in the diff.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U l9bot -d l9_seo_bot_ci"
@@ -87,7 +90,7 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 2s --health-timeout 5s --health-retries 30
     env:
-      DATABASE_URL: postgres://l9bot:ci-only@127.0.0.1:5432/l9_seo_bot_ci
+      DATABASE_URL: postgres://l9bot@127.0.0.1:5432/l9_seo_bot_ci
       REDIS_URL: redis://127.0.0.1:6379
       NODE_ENV: test
       # `getConfig()` validates the WHOLE env schema on first use, so every step
