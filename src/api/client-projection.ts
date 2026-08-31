@@ -98,10 +98,16 @@ export function projectClientForApi<T extends { config?: unknown }>(row: T): T {
 /**
  * Throw if a serialized payload still contains a credential value.
  *
- * The deny-list above is the control; this is the assertion that the control
- * held. It searches for the VALUE rather than the key, so it catches a leak
- * through a path the deny-list never saw — a token copied into a differently
- * named field, or a config shape nobody anticipated.
+ * TEST-FACING, deliberately. `redactClientConfig` is the control on the request
+ * path; this is how a test asserts the control held, and it is not wired into a
+ * route. Running it per response would mean re-serializing every payload and
+ * throwing a 500 at a client over a check that is better made once, in CI,
+ * against a fixture whose secrets are known.
+ *
+ * It searches for the VALUE rather than the key, which is what makes it worth
+ * having separately from the deny-list: it catches a leak through a path the
+ * deny-list never saw — a token copied into a differently named field, or a
+ * config shape nobody anticipated.
  *
  * Blank and marker values are ignored: neither is a secret, and treating the
  * empty string as one would make every unconfigured client a failure.
