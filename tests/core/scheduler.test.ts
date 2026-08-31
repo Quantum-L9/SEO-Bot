@@ -221,3 +221,55 @@ describe("Scheduler.stop — releases resources and resets the singleton (GAP-00
     expect(getScheduler()).not.toBe(scheduler);
   });
 });
+
+// ─── addJob idempotency (hardening contract C5) ──────────────────────────────
+
+describe("Scheduler.addJob — deduplication key", () => {
+  const definition = {
+    name: "intel:test-job",
+    module: "intelligence",
+    cron: "0 0 * * *",
+    handler: "h",
+    clientScoped: false,
+    tokenBudget: { maxFastTokensPerRun: 0, maxStrategicTokensPerRun: 0, cooldownMinutes: 0 },
+    enabled: true,
+  };
+
+  it("passes a caller-supplied jobId through to BullMQ", async () => {
+    // BullMQ treats a job id as a dedupe key, so this is the whole of the retry
+    // protection for consequence-of-a-row enqueues: without it a retried
+    // handler sends the same outreach twice.
+    const scheduler = new Scheduler();
+    scheduler.registerDefinition(definition as never);
+
+    await scheduler.addJob("intel:test-job", { clientId: "c1" }, { jobId: "intel:c1:o1:job" });
+
+    const add = bull.queueAdds.at(-1);
+    expect(add?.opts?.jobId).toBe("intel:c1:o1:job");
+  });
+
+  it("leaves jobId undefined when the caller supplies none", async () => {
+    // An operator pressing a button twice on purpose should get two jobs; only
+    // enqueues derived from a durable row need the key.
+    const scheduler = new Scheduler();
+    scheduler.registerDefinition(definition as never);
+
+    await scheduler.addJob("intel:test-job", { clientId: "c1" });
+
+    const add = bull.queueAdds.at(-1);
+    expect(add?.opts?.jobId).toBeUndefined();
+  });
+
+  it("keeps the retention bounds it always had", async () => {
+    // Adding the dedupe key must not displace removeOnComplete/removeOnFail —
+    // dropping those would grow the queue without bound.
+    const scheduler = new Scheduler();
+    scheduler.registerDefinition(definition as never);
+
+    await scheduler.addJob("intel:test-job", {}, { jobId: "k" });
+
+    const add = bull.queueAdds.at(-1);
+    expect(add?.opts?.removeOnComplete).toEqual({ count: 100 });
+    expect(add?.opts?.removeOnFail).toEqual({ count: 50 });
+  });
+});

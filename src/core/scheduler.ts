@@ -207,7 +207,25 @@ export class Scheduler {
     logger.debug({ jobName }, "Handler registered");
   }
 
-  async addJob(jobName: string, data: Record<string, unknown>): Promise<void> {
+  /**
+   * Queue a job outside its cron schedule.
+   *
+   * `opts.jobId` makes the enqueue IDEMPOTENT: BullMQ treats a job id as a
+   * deduplication key, so a retried caller re-queues nothing rather than
+   * producing a second copy of the same work. Callers that enqueue as a
+   * consequence of a durable database row — the intelligence plane's follow-up
+   * jobs, which are queued after a proposal is logged — MUST pass one derived
+   * from that row, because their own retry is exactly the case that would
+   * otherwise duplicate an outreach send or a plan.
+   *
+   * Omitting it keeps BullMQ's default of a fresh id per call, which is right
+   * for an operator pressing a button twice on purpose.
+   */
+  async addJob(
+    jobName: string,
+    data: Record<string, unknown>,
+    opts: { jobId?: string } = {},
+  ): Promise<void> {
     const jobDef = JOB_DEFINITIONS.find((j) => j.name === jobName);
     if (!jobDef) {
       throw new Error(`Unknown job: ${jobName}`);
@@ -224,12 +242,15 @@ export class Scheduler {
       jobName,
       { definition: jobDef, ...data },
       {
+        // Undefined leaves BullMQ's default (a generated id per call) in place.
+        jobId: opts.jobId,
         removeOnComplete: { count: 100 },
         removeOnFail: { count: 50 },
       },
     );
-    // Log only jobName — data contains clientConfig and may include secrets/PII
-    logger.info({ jobName }, "Manual job queued");
+    // Log only jobName and the dedupe key — data contains clientConfig and may
+    // include secrets/PII. The jobId is derived from row ids, never from payload.
+    logger.info({ jobName, jobId: opts.jobId }, "Manual job queued");
   }
 
   async start(): Promise<void> {
