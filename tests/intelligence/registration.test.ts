@@ -162,7 +162,7 @@ describe("job definitions", () => {
     // Plan synthesis (contract C2) genuinely spends, so the invariant is pinned
     // as a named list of one rather than relaxed to "most jobs": a second
     // budgeted job then has to be added HERE to pass, which is the point.
-    const BUDGETED = [INTELLIGENCE_JOBS.planSynthesis];
+    const BUDGETED: readonly string[] = [INTELLIGENCE_JOBS.planSynthesis];
 
     for (const definition of scheduler.definitions) {
       if (BUDGETED.includes(definition.name)) continue;
