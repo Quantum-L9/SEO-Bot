@@ -174,12 +174,7 @@ describe("statusForVerdict", () => {
   });
 
   it("keeps the status vocabulary closed and the terminal set disjoint from the live set", () => {
-    expect([...OPPORTUNITY_STATUSES].sort()).toEqual([
-      "actioned",
-      "expired",
-      "open",
-      "resolved",
-    ]);
+    expect([...OPPORTUNITY_STATUSES].sort()).toEqual(["actioned", "expired", "open", "resolved"]);
     for (const status of TERMINAL_OPPORTUNITY_STATUSES) {
       expect(ACTIVE_OPPORTUNITY_STATUSES).not.toContain(status);
     }

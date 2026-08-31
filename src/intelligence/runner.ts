@@ -36,10 +36,7 @@ import { createModuleLogger } from "../core/logger.js";
 import type { Scheduler } from "../core/scheduler.js";
 import { type PlannedDecision, planOpportunity } from "./action-planner.js";
 import { buildEvidencePack } from "./evidence-pack.js";
-import {
-  ACTIVE_OPPORTUNITY_STATUSES,
-  markOpportunityActioned,
-} from "./lifecycle.js";
+import { ACTIVE_OPPORTUNITY_STATUSES, markOpportunityActioned } from "./lifecycle.js";
 import { buildOpportunities } from "./opportunity-scorer.js";
 import { openExperiment } from "./outcome-attributor.js";
 import { loadPolicyState, refreshPolicyState } from "./policy-state.js";

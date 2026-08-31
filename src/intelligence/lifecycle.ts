@@ -52,8 +52,8 @@ import { getDb, schema } from "../core/database/index.js";
 import { createModuleLogger } from "../core/logger.js";
 import type { Scheduler } from "../core/scheduler.js";
 import { planTemplateFor } from "./action-planner.js";
-import { openExperiment, type TargetMetric } from "./outcome-attributor.js";
 import type { ExperimentVerdict } from "./outcome-attributor.js";
+import { openExperiment, type TargetMetric } from "./outcome-attributor.js";
 import type { OpportunityType } from "./types.js";
 
 const logger = createModuleLogger("intelligence:lifecycle");
