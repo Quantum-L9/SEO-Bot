@@ -241,6 +241,61 @@ describe("competitorCitationExtractor", () => {
       ),
     ).toBeNull();
   });
+
+  it("emits the platform scope when a row carries the scope column explicitly", () => {
+    // Production rows always carry `scope`; the tests above omit it and take the
+    // same branch by default. Assert the explicit form too, so the default is a
+    // convenience rather than the only path anything exercises.
+    const signal = competitorCitationExtractor.mapRow(
+      {
+        scope: "platform",
+        platform: "perplexity",
+        competitor_cited: "rival.example",
+        occurrences: "6",
+        sample_queries: ["roof repair austin", "roofer austin"],
+      },
+      CLIENT,
+    );
+    expect(signal?.groupKey).toBe("platform:perplexity");
+    expect(signal?.entityId).toBe("perplexity:rival.example");
+    expect(signal?.evidence.scope).toBe("platform");
+    expect(signal?.evidence.sample_queries).toEqual(["roof repair austin", "roofer austin"]);
+  });
+
+  it("emits the keyword scope onto the ranking page, carrying the drop it was joined to", () => {
+    const signal = competitorCitationExtractor.mapRow(
+      {
+        scope: "keyword",
+        keyword: "roof repair austin",
+        platform: "perplexity",
+        competitor_cited: "rival.example",
+        occurrences: "6",
+        position_delta: "12",
+        url: "https://client.example/roofing?utm=x",
+        sample_queries: ["roof repair austin"],
+      },
+      CLIENT,
+    );
+    expect(signal?.groupKey).toBe("/roofing");
+    expect(signal?.entityType).toBe("keyword");
+    expect(signal?.evidence.position_delta).toBe(12);
+    expect(signal?.evidence.keyword).toBe("roof repair austin");
+  });
+
+  it("falls back to the platform scope when a keyword row has no keyword", () => {
+    // Defensive: a `scope='keyword'` row with a null keyword would otherwise
+    // build a groupKey of `keyword:null` and quietly invent a group.
+    const signal = competitorCitationExtractor.mapRow(
+      {
+        scope: "keyword",
+        platform: "perplexity",
+        competitor_cited: "rival.example",
+        occurrences: "6",
+      },
+      CLIENT,
+    );
+    expect(signal?.groupKey).toBe("platform:perplexity");
+  });
 });
 
 describe("prospectReadyExtractor", () => {

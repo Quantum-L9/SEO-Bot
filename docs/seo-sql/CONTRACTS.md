@@ -69,12 +69,17 @@ routes, carrying `site_deployment.githubToken` and `vercelDeployHook`. The
 column allow-list that excluded `posthog_api_key` could not see inside a JSONB
 blob.
 
-**One finding is open, not fixed.** `serp_and_answer_engine_loss` is
-structurally unreachable — its grouping rules need `keyword_drop` and a citation
-signal in one group, and the extractors key on disjoint dimensions by
-construction. Every candidate fix is a product decision. It is asserted on its
-mechanism (not on a score, which a tweak could mask) and recorded in `TODO.md`
-§3 with the decision it waits on.
+**That finding is now closed.** `serp_and_answer_engine_loss` was structurally
+unreachable — its grouping rules need `keyword_drop` and a citation signal in
+one group, and every citation signal keyed on `platform:<name>` while
+`keyword_drop` keyed on a page or `keyword:<kw>`. It was recorded as a product
+decision waiting on new data. That was the wrong read: `aeo_citations` has
+always carried a per-row `query`, and only the per-platform rollup discarded it.
+`competitorCitationExtractor` now emits a second, keyword-scoped signal for
+queries that match a tracked keyword's ranking drop, keyed exactly as
+`keywordDropExtractor` keys — so the compound rule forms. No migration, and the
+platform scope is unchanged, so `answer_engine_gap` keeps its per-platform
+targeting. Still asserted on the mechanism rather than on a score.
 
 **Do not renegotiate:** the static gates are gates, not advice — an applied
 migration's checksum, the env-var declaration rule, and the additive-migration

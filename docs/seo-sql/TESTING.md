@@ -102,10 +102,28 @@ governor and `route_safe`'s promise all guarded it. Every one of those controls
 tested green, because each tested its own logic rather than whether the road it
 blocked went anywhere.
 
-One type is **still unreachable** and is recorded rather than hidden:
-`serp_and_answer_engine_loss` needs `keyword_drop` and a citation signal in one
-group, and the extractors key on disjoint dimensions by construction. See
-`TODO.md` §3 for the decision it is waiting on.
+`serp_and_answer_engine_loss` was the second type this file caught, and it is
+now reachable. It needs `keyword_drop` and a citation signal in one group, and
+every citation signal keyed on `platform:<name>` while `keyword_drop` keyed on a
+page or `keyword:<kw>` — dimensions that cannot meet. It was recorded as waiting
+on a product decision about new data, which was wrong: `aeo_citations` has
+always carried a per-row `query`, and only the per-platform rollup discarded it.
+`competitorCitationExtractor` now emits a keyword-scoped signal alongside its
+platform-scoped one, for queries that match a tracked keyword's ranking drop,
+keyed exactly as `keywordDropExtractor` keys. The platform scope is byte-
+identical to before, so `answer_engine_gap` keeps its per-platform targeting.
+
+The tests assert the **mechanism** — that the two group keys are equal, that the
+two scopes get distinct fingerprints, and that the keyword scope respects the
+same 5-position bar — not a score, which a weights tweak could mask. Reversing
+any one of the three makes them fail.
+
+Worth knowing when reading a portfolio: the compound scores **27.43** where the
+single-symptom `keyword_recovery` on the same drop scores **30.60**. That is the
+ROI formula working as written (dividing by `effort + risk`, which is 7 for the
+compound and 5 for the recovery), not a defect — a harder remedy for a worse
+problem can rank below a cheap one. It clears the threshold either way, so the
+plane acts on it; it just does not automatically sort to the top.
 
 ---
 
@@ -180,7 +198,9 @@ Stated plainly, because a gap named is a gap someone can close.
 - **No live site-deployment matrix beyond the config layer** (contract §9).
   `tests/services/site-deployment-config.test.ts` covers the dry-run forcing
   rules; nothing exercises a real GitHub or Vercel call, by design.
-- **`serp_and_answer_engine_loss` is unreachable** — `TODO.md` §3.
+- **No live answer-engine or SERP vendor call.** Every vendor response in the
+  suite is a fixture, including the `aeo_citations` rows the keyword-scoped
+  citation signal joins on.
 
 ---
 

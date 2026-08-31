@@ -57,19 +57,21 @@ No code changes remain on this repo's side.
 
 ---
 
-## 3. `serp_and_answer_engine_loss` is a diagnosis that can never fire
+## 3. `serp_and_answer_engine_loss` — CLOSED (2026-08-31)
 
-**Status:** open finding — asserted in `tests/intelligence/calibration.test.ts`,
-not fixed. Found by the 4th SQL-SEO contract (testing) while checking every
-actionable opportunity type against the action threshold through its REAL
-extractors rather than through hand-built signals.
+**Status:** fixed. Was an open finding: a diagnosis that could never fire, with
+a plan template, an evidence-pack allow-list entry and two grouping rules all
+built on top of it, reading as working controls.
 
-**Where:** `src/intelligence/opportunity-scorer.ts` (`GROUPING_RULES`),
-`src/intelligence/signal-extractor.ts` (the three extractors' group keys).
+**Where:** `src/intelligence/signal-extractor.ts`
+(`competitorCitationExtractor`), asserted in
+`tests/intelligence/calibration.test.ts`.
+
+### The finding
 
 Both rules for this type require `keyword_drop` and a citation signal
 (`competitor_citation_gain` or `citation_rate_down`) **in one group**. Grouping
-is by `groupKey`, and the two sides key on disjoint dimensions by construction:
+is by `groupKey`, and the two sides keyed on disjoint dimensions:
 
 | Signal | groupKey |
 |---|---|
@@ -78,33 +80,68 @@ is by `groupKey`, and the two sides key on disjoint dimensions by construction:
 | `competitor_citation_gain` | `platform:<name>` |
 
 A `platform:` key can never equal a path or a `keyword:` key, so the compound
-rule has never matched and cannot. Today the same input yields the two
+rule had never matched and could not. The same input yielded the two
 single-symptom diagnoses (`keyword_recovery` + `answer_engine_gap`) instead —
-which is reasonable behavior, and is why nothing looked wrong.
+reasonable behavior, and why nothing looked wrong.
 
-What makes it worth tracking is the surface built on top of it: a plan template,
-an evidence-pack action allow-list entry and two grouping rules all exist for a
-remedy that never fires. They read as working controls.
+### What the original entry got wrong
 
-**Why it is not fixed here.** Every candidate fix is a product decision, not a
-calibration one. Re-keying citation signals to a page would break the
-per-platform targeting `answer_engine_gap` depends on; making the classifier
-join across groups changes what "an opportunity" means; deleting the rules and
-the template removes a declared capability. The natural join is keyword ↔ the
-citation's sampled query, and `aeo_citations` is aggregated per platform per
-month, carrying no keyword or page dimension to join on.
+It recorded this as a product decision blocked on data that did not exist:
+"`aeo_citations` is aggregated per platform per month, carrying no keyword or
+page dimension to join on." That describes the **extractor's rollup**, not the
+table. `aeo_citations` has carried a per-row `query text NOT NULL` since
+`drizzle/0000_steady_morlun.sql`; the per-platform aggregation is what discarded
+it. The join the entry called for already existed in the schema.
 
-**Unblock trigger:** a decision on whether the compound diagnosis is wanted. If
-yes, it needs the citation aggregation to carry a keyword/page dimension, then
-move the type from `UNREACHABLE` into `WORST_CASE` in `calibration.test.ts`. If
-no, delete both grouping rules, the plan template and the allow-list entry — the
-runtime behavior is identical either way, since the rule never fires.
+### The fix
 
-**Related, and fixed:** `link_outreach_batch` had the same shape — its extractor
-capped severity at `medium`, worth 18 against a threshold of 20, so outreach
-could never be proposed while the outreach flag, the velocity governor and
-`route_safe`'s promise all guarded it. That one was a calibration oversight with
-a local fix (a `high` rung on a large contactable batch) and is closed.
+`competitorCitationExtractor` now emits at two scopes from one pass:
+
+- **`platform`** — byte-identical to what shipped: `platform:<name>`, feeding
+  `answer_engine_gap`. Per-platform targeting is untouched, which was the
+  objection to re-keying citation signals onto a page.
+- **`keyword`** — for queries that match a tracked keyword with a ranking drop
+  in `reporting.keyword_drops_7d`, keyed exactly as `keywordDropExtractor` keys
+  (the ranking page, else `keyword:<kw>`). This is what lets the compound rule
+  form.
+
+It stayed one extractor rather than becoming two because the registry test
+asserts every signal type has exactly **one** producer — an invariant worth more
+than the convenience of a second extractor.
+
+Three properties make it work, and each is asserted on its mechanism rather than
+on a score (a weights tweak would mask a score-based assertion):
+
+1. the keyword scope's `groupKey` equals `keywordDropExtractor`'s, asserted
+   against that extractor's own output so the two cannot drift apart;
+2. the two scopes get **distinct** `entityId`s, so their fingerprints differ —
+   a collision would make the signal cooldown treat them as one observation and
+   blind whichever arrived second, restoring the bug with every other test green;
+3. the keyword scope holds the same 5-position bar `keyword_drop` applies, so it
+   cannot outlive the drop it pairs with.
+
+Reversing any one of the three fails the suite. Verified by doing exactly that.
+
+The scopes deliberately **overlap**: a citation lost on a dropping keyword still
+counts toward its platform's aggregate. Excluding it would have silently
+weakened `answer_engine_gap` — a real signal about overall answer-engine
+presence — to make a bookkeeping property true.
+
+### One thing this made visible, and did not change
+
+The compound scores **27.43** where the single-symptom `keyword_recovery` on the
+same drop scores **30.60**, so a compound diagnosis can sort below its own
+component. That is the ROI formula working as written — it divides by
+`effort + risk`, which is 7 for the compound and 5 for the recovery — not a
+defect. Nobody could see it before, because the type never fired. Both clear the
+threshold of 20, so the plane acts on either; changing `OPPORTUNITY_SHAPES`
+weights to reorder them would reorder the whole portfolio and is a calibration
+decision, not part of this fix.
+
+**Related, and fixed earlier:** `link_outreach_batch` had the same shape — its
+extractor capped severity at `medium`, worth 18 against a threshold of 20, so
+outreach could never be proposed while the outreach flag, the velocity governor
+and `route_safe`'s promise all guarded it.
 
 ---
 

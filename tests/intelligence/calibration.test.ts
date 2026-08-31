@@ -136,6 +136,33 @@ const WORST_CASE: Record<string, () => (SignalCandidate | null)[]> = {
       CLIENT,
     ),
   ],
+  serp_and_answer_engine_loss: () => [
+    keywordDropExtractor.mapRow(
+      {
+        keyword: "roof repair austin",
+        previous_position: "3",
+        current_position: "63",
+        position_delta: "60",
+        url: "https://client.example/roofing",
+      },
+      CLIENT,
+    ),
+    // The keyword-scoped citation row: the SAME query, losing citations to a
+    // competitor, carrying the ranking URL so it groups with the drop above.
+    competitorCitationExtractor.mapRow(
+      {
+        scope: "keyword",
+        keyword: "roof repair austin",
+        platform: "perplexity",
+        competitor_cited: "rival.example",
+        occurrences: "500",
+        position_delta: "60",
+        url: "https://client.example/roofing",
+        sample_queries: ["roof repair austin"],
+      },
+      CLIENT,
+    ),
+  ],
 };
 
 /**
@@ -146,12 +173,16 @@ const WORST_CASE: Record<string, () => (SignalCandidate | null)[]> = {
  * loop, so the gap is a fact the suite states rather than a fixture nobody wrote.
  */
 const UNREACHABLE: Record<string, string> = {
-  serp_and_answer_engine_loss:
-    "Its grouping rules need keyword_drop and a citation signal in ONE group, and the two " +
-    "extractors key their groups on disjoint dimensions by construction: keyword_drop on a page " +
-    "path or `keyword:<kw>`, citation signals on `platform:<name>`. Reaching it needs the " +
-    "aeo_citations aggregation to carry a keyword or page dimension it does not have — a schema " +
-    "and extractor change, not a calibration one.",
+  // Empty, and kept rather than deleted. `serp_and_answer_engine_loss` was the
+  // one entry: its rules need `keyword_drop` and a citation signal in ONE
+  // group, and every citation signal keyed on `platform:<name>` while
+  // `keyword_drop` keyed on a page or `keyword:<kw>` — dimensions that cannot
+  // meet. It is now reachable through the keyword scope of
+  // `competitorCitationExtractor`, and has a WORST_CASE fixture above.
+  //
+  // The record stays because the accounting test below is what makes a gap
+  // visible at all: a type with neither a fixture nor a reason here is a type
+  // nobody checked.
 };
 
 /** Every opportunity type the plane declares a remedy for. */
@@ -202,28 +233,52 @@ describe("every actionable opportunity type is reachable through its real extrac
   }
 });
 
-describe("the unreachable type is unreachable for the reason recorded", () => {
-  // This is a FINDING held open, not a behavior being blessed. The assertion is
-  // on the mechanism — disjoint group keys — so that the day someone gives
-  // citation signals a page or keyword dimension, this test fails and says to
-  // move the type into WORST_CASE rather than quietly leaving it excluded.
+describe("the compound diagnosis, and the join that makes it reachable", () => {
+  // This block replaces one that recorded `serp_and_answer_engine_loss` as
+  // permanently unreachable. The finding was real: every citation signal keyed
+  // on `platform:<name>`, `keyword_drop` keyed on a page or `keyword:<kw>`, and
+  // the two rules requiring them together could never match. What the old note
+  // got wrong was the cost of fixing it — it said reaching the type "needs the
+  // aeo_citations aggregation to carry a keyword or page dimension it does not
+  // have". `aeo_citations` has always had a per-row `query`; only the
+  // per-platform rollup discarded it. The join needed no migration.
   //
-  // Asserting the mechanism rather than "score < 20" matters: a scoring tweak
-  // would make a score-based version of this test pass while the type stayed
-  // just as unreachable.
-  it("keys keyword_drop and the citation signals on dimensions that cannot meet", () => {
-    const keywordDrop = keywordDropExtractor.mapRow(
+  // The assertions below are on the MECHANISM, not on a score, for the same
+  // reason the old ones were: a scoring tweak could make a score-based version
+  // of this pass while the two signals still failed to meet.
+
+  const keywordScopedCitation = (over: Record<string, unknown> = {}) =>
+    competitorCitationExtractor.mapRow(
       {
+        scope: "keyword",
         keyword: "roof repair austin",
+        platform: "perplexity",
+        competitor_cited: "rival.example",
+        occurrences: "500",
         position_delta: "60",
         url: "https://client.example/roofing",
+        sample_queries: ["roof repair austin"],
+        ...over,
       },
       CLIENT,
     );
-    const keywordDropNoUrl = keywordDropExtractor.mapRow(
-      { keyword: "roof repair austin", position_delta: "60" },
+
+  const platformScopedCitation = () =>
+    competitorCitationExtractor.mapRow(
+      {
+        scope: "platform",
+        platform: "perplexity",
+        competitor_cited: "rival.example",
+        occurrences: "500",
+        sample_queries: ["roof repair austin"],
+      },
       CLIENT,
     );
+
+  it("still keys the PLATFORM scope where it always did, which is why the keyword scope exists", () => {
+    // Unchanged behavior, asserted so a future edit cannot quietly re-key the
+    // platform signal onto a page and take `answer_engine_gap`'s per-platform
+    // targeting with it. This is the disjointness the old finding named.
     const citationDrop = citationRateExtractor.mapRow(
       {
         platform: "perplexity",
@@ -233,31 +288,80 @@ describe("the unreachable type is unreachable for the reason recorded", () => {
       },
       CLIENT,
     );
-    const competitorGain = competitorCitationExtractor.mapRow(
+    const keywordDrop = keywordDropExtractor.mapRow(
       {
-        platform: "perplexity",
-        competitor_cited: "rival.example",
-        occurrences: "500",
-        sample_queries: ["roof repair austin"],
+        keyword: "roof repair austin",
+        position_delta: "60",
+        url: "https://client.example/roofing",
       },
       CLIENT,
     );
 
-    // Both citation extractors group per platform...
     expect(citationDrop?.groupKey).toBe("platform:perplexity");
-    expect(competitorGain?.groupKey).toBe("platform:perplexity");
-    // ...and keyword_drop groups per page, or per keyword when the ranking URL
-    // is unknown. Neither form can equal a `platform:` key.
+    expect(platformScopedCitation()?.groupKey).toBe("platform:perplexity");
     expect(keywordDrop?.groupKey).toBe("/roofing");
-    expect(keywordDropNoUrl?.groupKey).toBe("keyword:roof repair austin");
-
-    for (const citation of [citationDrop, competitorGain]) {
+    for (const citation of [citationDrop, platformScopedCitation()]) {
       expect(citation?.groupKey).not.toBe(keywordDrop?.groupKey);
-      expect(citation?.groupKey).not.toBe(keywordDropNoUrl?.groupKey);
     }
   });
 
-  it("therefore produces the two single-symptom diagnoses instead of the compound one", () => {
+  it("keys the KEYWORD scope exactly as keyword_drop does, in both its forms", () => {
+    // The whole join is this equality. Asserted against `keywordDropExtractor`'s
+    // own output rather than against a literal, so the two cannot drift apart.
+    const withUrl = keywordDropExtractor.mapRow(
+      {
+        keyword: "roof repair austin",
+        position_delta: "60",
+        url: "https://client.example/roofing",
+      },
+      CLIENT,
+    );
+    const withoutUrl = keywordDropExtractor.mapRow(
+      { keyword: "roof repair austin", position_delta: "60" },
+      CLIENT,
+    );
+
+    expect(keywordScopedCitation()?.groupKey).toBe(withUrl?.groupKey);
+    expect(keywordScopedCitation({ url: null })?.groupKey).toBe(withoutUrl?.groupKey);
+    expect(keywordScopedCitation({ url: null })?.groupKey).toBe("keyword:roof repair austin");
+  });
+
+  it("gives the two scopes distinct fingerprints, so neither suppresses the other", () => {
+    // The fingerprint is (client, signalType, entityId). Both scopes carry the
+    // signal type `competitor_citation_gain`, so a shared entityId would make
+    // the cooldown treat them as one observation and silently blind whichever
+    // arrived second — the compound diagnosis would go back to never firing,
+    // with every test above still green.
+    expect(keywordScopedCitation()?.fingerprint).not.toBe(platformScopedCitation()?.fingerprint);
+    expect(keywordScopedCitation()?.entityType).toBe("keyword");
+    expect(platformScopedCitation()?.entityType).toBe("platform");
+  });
+
+  it("forms the compound diagnosis from a ranking drop and a citation loss on one keyword", () => {
+    const signals = [
+      keywordDropExtractor.mapRow(
+        {
+          keyword: "roof repair austin",
+          position_delta: "60",
+          url: "https://client.example/roofing",
+        },
+        CLIENT,
+      ),
+      keywordScopedCitation(),
+    ].filter((signal): signal is SignalCandidate => Boolean(signal));
+
+    const { opportunities } = buildOpportunities(signals);
+    expect(opportunities.map((o) => o.opportunityType)).toEqual(["serp_and_answer_engine_loss"]);
+    // And it clears the bar, which the WORST_CASE loop also proves. Repeated
+    // here because "classified correctly but scored 18" is the exact shape of
+    // the failure this whole file exists to catch.
+    expect(opportunities[0]?.score).toBeGreaterThanOrEqual(DEFAULT_MIN_SCORE);
+  });
+
+  it("still produces the two single-symptom diagnoses when the citation loss is platform-wide", () => {
+    // Nothing about the join changes what a platform-scoped citation loss means.
+    // An operator who had `answer_engine_gap` + `keyword_recovery` before still
+    // gets exactly that when the losses are not on the same query.
     const signals = [
       keywordDropExtractor.mapRow(
         { keyword: "roof repair austin", position_delta: "60", url: "https://c.example/roofing" },
@@ -274,21 +378,26 @@ describe("the unreachable type is unreachable for the reason recorded", () => {
       ),
     ].filter((signal): signal is SignalCandidate => Boolean(signal));
 
-    const types = buildOpportunities(signals)
-      .opportunities.map((o) => o.opportunityType)
-      .sort();
-    // What production actually does today with the exact input the compound
-    // diagnosis was written for. Recorded so the gap is visible in the suite,
-    // not only in TODO.md.
-    expect(types).toEqual(["answer_engine_gap", "keyword_recovery"]);
-    expect(types).not.toContain("serp_and_answer_engine_loss");
+    expect(
+      buildOpportunities(signals)
+        .opportunities.map((o) => o.opportunityType)
+        .sort(),
+    ).toEqual(["answer_engine_gap", "keyword_recovery"]);
   });
 
-  it("still declares a remedy for it, which is what makes this worth tracking", () => {
-    // A template, an evidence-pack allow-list entry and two grouping rules all
-    // exist for a diagnosis that never fires. They read as working controls.
+  it("holds the keyword scope to the same 5-position bar keyword_drop applies", () => {
+    // Below that bar there is no `keyword_drop` signal to pair with, so a
+    // keyword-scoped citation row would land alone on the page group and be
+    // classified `answer_engine_gap` — the same diagnosis the platform row
+    // already carries, on a key that hides it from the platform view.
+    expect(keywordScopedCitation({ position_delta: "2" })).toBeNull();
+    expect(keywordScopedCitation({ position_delta: null })).toBeNull();
+    expect(keywordScopedCitation({ position_delta: "5" })).not.toBeNull();
+  });
+
+  it("still declares the remedy the diagnosis routes to", () => {
     expect(PLAN_TEMPLATES.serp_and_answer_engine_loss).toBeDefined();
-    expect(Object.keys(UNREACHABLE)).toContain("serp_and_answer_engine_loss");
+    expect(Object.keys(UNREACHABLE)).not.toContain("serp_and_answer_engine_loss");
   });
 });
 
