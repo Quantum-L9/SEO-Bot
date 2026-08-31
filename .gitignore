@@ -25,3 +25,25 @@ validation/runs/
 # per run, so it is never shared branch content. Matches the constellation
 # convention (Website-Bot, l9-ci-core, l9-meta-injector, Cognitive.Engine.Graphs).
 .l9/
+
+# Governance projections written into this workspace by the Claude Code
+# sessionStart bootstrap. Their SSOT is Quantum-L9/Cursor-Governance, which
+# tracks all three files; a copy here is a duplicate of another repo's source,
+# rewritten on every session. Same reasoning as `.l9/` above.
+#
+# `.claude/rules` is the sharper case: it is a SYMLINK to an absolute path
+# inside the governance clone (`/root/.cursor-governance/...`). Committing it
+# would put a machine-specific path in shared branch content and resolve to
+# nothing on any other checkout.
+#
+# Deliberately NOT a blanket `.claude/` — `.claude/hooks/session-start.sh` is
+# this repository's own file and stays tracked.
+.claude/rules
+.claude/settings.json
+.claude/hooks/merge_gate_wrap.py
+.claude/hooks/session_start_claude_governance.sh
+
+# pnpm's lockfile. This repo's SSOT is package-lock.json (committed, and what
+# CI installs with `npm ci`). A second lockfile drifts silently from the first
+# and changes what a contributor's install resolves.
+pnpm-lock.yaml
