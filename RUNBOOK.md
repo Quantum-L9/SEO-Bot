@@ -135,15 +135,30 @@ ORDER BY d.created_at DESC
 LIMIT 20;
 
 -- What is it currently prioritizing?
--- NOTE: `status` has no transition yet — nothing closes an opportunity, so every
--- row is 'open' and this returns the full history, newest scores included. Bound
--- it by created_at until the lifecycle contract lands (docs/seo-sql/CONTRACTS.md).
+-- `status` transitions now (contract C3): open → actioned when a proposal is
+-- logged, → resolved when a linked experiment measures `improved`, → expired
+-- when it ages out without recurring. A refuted or flat remedy sends an
+-- opportunity back to `open`, so this really is live work rather than history.
 SELECT opportunity_type, title, score, status, target_url, target_keyword, created_at
 FROM intelligence_opportunities
 WHERE client_id = '<client-id>'
-  AND status = 'open'
-  AND created_at >= now() - interval '7 days'
+  AND status IN ('open', 'actioned')
 ORDER BY score DESC;
+
+-- What did the bot conclude actually worked, and what did it have to reopen?
+SELECT status, count(*)
+FROM intelligence_opportunities
+WHERE client_id = '<client-id>'
+GROUP BY status;
+
+-- Approved CRITICAL actions still waiting for the lifecycle sweep to pick them
+-- up. A row here for more than an hour means intel:lifecycle-sweep is not running.
+SELECT id, action, risk_level, approved_at
+FROM action_log
+WHERE client_id = '<client-id>'
+  AND status = 'approved'
+  AND executed_at IS NULL
+ORDER BY approved_at;
 
 -- Did the changes actually work?
 SELECT target_metric, entity_id, status, result

@@ -51,6 +51,8 @@ const tables = vi.hoisted(() => ({
 const db = vi.hoisted(() => ({
   inserts: [] as { table: string; values: unknown }[],
   updates: [] as { table: string; values: unknown }[],
+  /** Rows the next update() should return, consumed FIFO. Empty = guard rejected. */
+  updateReturns: [] as unknown[],
   /** Queued results for select(), consumed FIFO. */
   selectQueue: [] as unknown[],
   /** Rows returned per extractor/policy query, matched on SQL text. */
@@ -95,7 +97,17 @@ vi.mock("../../src/core/database/index.js", () => {
       set: (values: unknown) => ({
         where: () => {
           db.updates.push({ table: table.__table, values });
-          return Promise.resolve([]);
+          // An update result is consumed either directly (`await`) or through
+          // `.returning()`. The guarded lifecycle transitions need the latter:
+          // returning zero rows is how they tell "the row moved" from "the
+          // status guard rejected it", so a mock that only resolved to []
+          // would make every transition look like a no-op.
+          const rows = db.updateReturns.shift() ?? [{ id: `${table.__table}-updated` }];
+          const settled = Promise.resolve(rows) as Promise<unknown> & {
+            returning: () => Promise<unknown>;
+          };
+          settled.returning = () => Promise.resolve(rows);
+          return settled;
         },
       }),
     }),
@@ -145,6 +157,7 @@ function rowsFor(table: string): Record<string, unknown>[] {
 beforeEach(() => {
   db.inserts = [];
   db.updates = [];
+  db.updateReturns = [];
   db.selectQueue = [];
   db.executeRows = new Map();
   db.executed = [];
@@ -261,12 +274,14 @@ describe("runClientTriage — the durable record", () => {
 });
 
 describe("runClientTriage — suppression must expire", () => {
-  it("bounds the duplicate-opportunity lookup by the cooldown window", async () => {
-    // `status` has no transition yet, so an UNBOUNDED `status = 'open'` lookup
-    // matches every opportunity ever recorded and suppression becomes permanent:
-    // a problem acted on once and not actually fixed is re-detected, re-grouped
-    // to the same fingerprint, and then silently dropped on every later run.
-    // The created_at bound is what makes a recurring problem come back.
+  it("does not suppress an opportunity with no live predecessor", async () => {
+    // Suppression is keyed on the LIFECYCLE now (contract C3): only `open` and
+    // `actioned` opportunities suppress. Before status transitioned, an
+    // unbounded `status = 'open'` lookup matched every opportunity ever
+    // recorded and suppression was permanent — a problem acted on once and not
+    // actually fixed was re-detected, re-grouped to the same fingerprint, and
+    // then silently dropped on every later run. A `resolved` or `expired` row
+    // is what now lets a recurring problem come back.
     seedCompoundCase();
     await runClientTriage(CLIENT, "cron", scheduler);
 
@@ -277,7 +292,7 @@ describe("runClientTriage — suppression must expire", () => {
     expect(decisions[0].decision).not.toBe("suppress_duplicate");
   });
 
-  it("suppresses an opportunity whose fingerprint is already open in-window", async () => {
+  it("suppresses an opportunity whose fingerprint is already live", async () => {
     seedCompoundCase();
     const { buildOpportunities } = await import("../../src/intelligence/opportunity-scorer.js");
     const { keywordDropExtractor, pageExperienceExtractor } = await import(
@@ -295,7 +310,7 @@ describe("runClientTriage — suppression must expire", () => {
     ].filter((signal) => signal !== null);
     const fingerprint = buildOpportunities(signals).opportunities[0].fingerprint;
 
-    // A prior run's still-open opportunity, inside the window.
+    // A prior run's opportunity, still in a live (open/actioned) status.
     db.selectQueue[3] = [{ fingerprint }];
 
     await runClientTriage(CLIENT, "cron", scheduler);

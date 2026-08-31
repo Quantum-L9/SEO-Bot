@@ -28,6 +28,7 @@
 import { and, eq, isNull, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "../core/database/index.js";
 import { createModuleLogger } from "../core/logger.js";
+import { applyVerdictToOpportunity, type OpportunityStatus } from "./lifecycle.js";
 import { asNumber } from "./signal-extractor.js";
 
 const logger = createModuleLogger("intelligence:attribution");
@@ -250,6 +251,12 @@ export interface MeasuredExperiment {
   readonly verdict: ExperimentVerdict;
   readonly comparison: MetricComparison;
   readonly learnings: string;
+  /**
+   * Status the opportunity behind this experiment moved to, or null when there
+   * was nothing to move (no linked decision, an inconclusive verdict, or an
+   * opportunity already in a terminal state).
+   */
+  readonly opportunityStatus: OpportunityStatus | null;
 }
 
 /**
@@ -323,8 +330,36 @@ export async function measureDueExperiments(now: Date = new Date()): Promise<Mea
           );
       }
 
-      measured.push({ experimentId: experiment.id, verdict, comparison, learnings });
-      logger.info({ experimentId: experiment.id, metric, verdict }, "Attribution window measured");
+      // Close the loop on the opportunity itself (contract C3). `improved`
+      // resolves it; `declined` and `unchanged` reopen it, because a remedy that
+      // did not work leaves the problem in place and the next cycle has to be
+      // allowed to see it again. A failure here is logged, not thrown: the
+      // measurement is already recorded and losing the transition must not undo
+      // it or abort the remaining experiments.
+      const transition = await applyVerdictToOpportunity(experiment.decisionId, verdict).catch(
+        (error: unknown) => {
+          logger.error(
+            {
+              experimentId: experiment.id,
+              err: error instanceof Error ? error.message : String(error),
+            },
+            "Opportunity transition failed after a successful measurement",
+          );
+          return null;
+        },
+      );
+
+      measured.push({
+        experimentId: experiment.id,
+        verdict,
+        comparison,
+        learnings,
+        opportunityStatus: transition?.status ?? null,
+      });
+      logger.info(
+        { experimentId: experiment.id, metric, verdict, opportunityStatus: transition?.status },
+        "Attribution window measured",
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error({ experimentId: experiment.id, err: message }, "Experiment measurement failed");

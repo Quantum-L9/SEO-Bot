@@ -25,6 +25,9 @@ const hooks = vi.hoisted(() => ({
   measured: [] as { experimentId: string; verdict: string }[],
   triageCalls: [] as unknown[],
   policyRefreshCount: 0,
+  approvedPickups: [] as unknown[],
+  expiredCount: 0,
+  lifecycleConfigChecked: [] as unknown[],
 }));
 
 vi.mock("../../src/reporting/refresh.js", () => ({
@@ -45,6 +48,27 @@ vi.mock("../../src/intelligence/runner.js", () => ({
 }));
 vi.mock("../../src/core/logger.js", () => ({
   createModuleLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }),
+}));
+// Registration asserts the lifecycle config invariant (expiry must outlast the
+// signal cooldown), which reaches the real loader — and the real loader calls
+// process.exit on an unpopulated environment. Registration is what is under
+// test here, not env parsing, so the two values are stubbed like every other
+// dependency in this suite.
+vi.mock("../../src/core/config.js", () => ({
+  getConfig: () => ({
+    INTELLIGENCE_OPPORTUNITY_EXPIRY_DAYS: 30,
+    INTELLIGENCE_SIGNAL_COOLDOWN_DAYS: 7,
+  }),
+}));
+vi.mock("../../src/intelligence/lifecycle.js", () => ({
+  assertLifecycleConfig: (config: {
+    INTELLIGENCE_OPPORTUNITY_EXPIRY_DAYS: number;
+    INTELLIGENCE_SIGNAL_COOLDOWN_DAYS: number;
+  }) => {
+    hooks.lifecycleConfigChecked.push(config);
+  },
+  sweepApprovedActions: async () => hooks.approvedPickups,
+  expireStaleOpportunities: async () => hooks.expiredCount,
 }));
 
 import { INTELLIGENCE_JOBS, registerIntelligenceHandlers } from "../../src/intelligence/index.js";
@@ -78,6 +102,9 @@ beforeEach(() => {
   hooks.measured = [];
   hooks.triageCalls = [];
   hooks.policyRefreshCount = 0;
+  hooks.approvedPickups = [];
+  hooks.expiredCount = 0;
+  hooks.lifecycleConfigChecked = [];
   scheduler = fakeScheduler();
   registerIntelligenceHandlers(scheduler as unknown as never);
 });
@@ -107,7 +134,22 @@ describe("job definitions", () => {
     expect(byName.get(INTELLIGENCE_JOBS.dailyTriage)?.clientScoped).toBe(true);
     expect(byName.get(INTELLIGENCE_JOBS.outcomeAttribution)?.clientScoped).toBe(false);
     expect(byName.get(INTELLIGENCE_JOBS.policyRefresh)?.clientScoped).toBe(false);
+    expect(byName.get(INTELLIGENCE_JOBS.lifecycleSweep)?.clientScoped).toBe(false);
     expect(byName.get(INTELLIGENCE_JOBS.reportingRefresh)?.clientScoped).toBe(false);
+  });
+
+  it("runs the lifecycle sweep hourly, not once a day", () => {
+    // An operator who approves a CRITICAL action at 09:00 should not wait for
+    // the overnight pass before its follow-up job is queued.
+    const sweep = scheduler.definitions.find((d) => d.name === INTELLIGENCE_JOBS.lifecycleSweep);
+    expect(sweep?.cron.split(" ")[1]).toBe("*");
+  });
+
+  it("proves the expiry window outlasts the signal cooldown at registration", () => {
+    // The two are set independently by environment. Crossing them makes routine
+    // signal suppression look like the problem going away, and live
+    // opportunities expire — with nothing failing to say so.
+    expect(hooks.lifecycleConfigChecked).toHaveLength(1);
   });
 
   it("runs triage after the overnight collection jobs, not before them", () => {
@@ -155,6 +197,13 @@ describe("handlers", () => {
       { viewName: "reporting.mv_llm_spend_monthly", status: "ok", durationMs: 5 },
     ];
     const handler = scheduler.handlers.get(INTELLIGENCE_JOBS.reportingRefresh);
+    await expect(handler?.({} as Job)).resolves.toBeUndefined();
+  });
+
+  it("runs the lifecycle sweep: approved pickups and expiry together", async () => {
+    hooks.approvedPickups = [{ actionLogId: "a1" }];
+    hooks.expiredCount = 2;
+    const handler = scheduler.handlers.get(INTELLIGENCE_JOBS.lifecycleSweep);
     await expect(handler?.({} as Job)).resolves.toBeUndefined();
   });
 

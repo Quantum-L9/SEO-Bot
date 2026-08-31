@@ -86,6 +86,12 @@ const envSchema = z.object({
   // Days a signal fingerprint stays suppressed after being observed, so the same
   // observation does not regenerate the same opportunity every cycle.
   INTELLIGENCE_SIGNAL_COOLDOWN_DAYS: z.coerce.number().int().min(0).max(90).default(7),
+  // Age at which an opportunity that has stopped recurring is marked `expired`
+  // (ADR-0016 contract C3). MUST exceed INTELLIGENCE_SIGNAL_COOLDOWN_DAYS: inside
+  // the cooldown a repeat observation is suppressed and writes no new opportunity
+  // row, so a shorter window would read ordinary suppression as the problem
+  // having gone away. `assertLifecycleConfig` enforces the relationship.
+  INTELLIGENCE_OPPORTUNITY_EXPIRY_DAYS: z.coerce.number().int().min(1).max(365).default(30),
   // Attribution windows: how long before/after an action is measured.
   INTELLIGENCE_BASELINE_DAYS: z.coerce.number().int().min(1).max(90).default(14),
   INTELLIGENCE_MEASUREMENT_DAYS: z.coerce.number().int().min(1).max(180).default(28),

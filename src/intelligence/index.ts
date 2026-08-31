@@ -22,7 +22,13 @@
 import type { Job } from "bullmq";
 import { createModuleLogger } from "../core/logger.js";
 import type { Scheduler } from "../core/scheduler.js";
+import { getConfig } from "../core/config.js";
 import { refreshMaterializedViews } from "../reporting/refresh.js";
+import {
+  assertLifecycleConfig,
+  expireStaleOpportunities,
+  sweepApprovedActions,
+} from "./lifecycle.js";
 import { measureDueExperiments } from "./outcome-attributor.js";
 import { refreshAllPolicyState, runClientTriage } from "./runner.js";
 
@@ -32,6 +38,7 @@ export const INTELLIGENCE_JOBS = {
   dailyTriage: "intel:daily-triage",
   outcomeAttribution: "intel:outcome-attribution",
   policyRefresh: "intel:refresh-policy-state",
+  lifecycleSweep: "intel:lifecycle-sweep",
   reportingRefresh: "reporting:refresh-materialized",
 } as const;
 
@@ -75,6 +82,20 @@ export function registerIntelligenceHandlers(scheduler: Scheduler): void {
     enabled: true,
   });
 
+  // Hourly, not daily. An operator who approves a CRITICAL action at 09:00
+  // should not wait until the next overnight pass for its measurement window to
+  // open — the baseline is anchored to the approval instant either way, but the
+  // follow-up job that gathers the "after" data would sit unqueued all day.
+  scheduler.registerDefinition({
+    name: INTELLIGENCE_JOBS.lifecycleSweep,
+    module: "intelligence",
+    cron: "20 * * * *",
+    handler: "sweepLifecycle",
+    clientScoped: false,
+    tokenBudget: { ...ZERO_TOKENS },
+    enabled: true,
+  });
+
   scheduler.registerDefinition({
     name: INTELLIGENCE_JOBS.reportingRefresh,
     module: "reporting",
@@ -109,6 +130,18 @@ export function registerIntelligenceHandlers(scheduler: Scheduler): void {
     logger.info({ refreshed }, "Policy state refreshed for active clients");
   });
 
+  scheduler.registerHandler(INTELLIGENCE_JOBS.lifecycleSweep, async () => {
+    const pickups = await sweepApprovedActions(scheduler);
+    // Expiry is a bounded, idempotent UPDATE, so running it beside the pickup
+    // costs nothing and keeps the whole lifecycle in one place rather than
+    // splitting it across two jobs with two failure modes.
+    const expired = await expireStaleOpportunities();
+    logger.info(
+      { approvedPickups: pickups.length, expiredOpportunities: expired },
+      "Lifecycle sweep completed",
+    );
+  });
+
   scheduler.registerHandler(INTELLIGENCE_JOBS.reportingRefresh, async () => {
     const outcomes = await refreshMaterializedViews();
     const failed = outcomes.filter((outcome) => outcome.status === "error");
@@ -125,6 +158,9 @@ export function registerIntelligenceHandlers(scheduler: Scheduler): void {
       );
     }
   });
+
+  // Fail at registration, not at 02:20 on the first night the two values cross.
+  assertLifecycleConfig(getConfig());
 
   logger.info("Intelligence plane handlers registered");
 }
