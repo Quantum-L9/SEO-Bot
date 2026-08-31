@@ -178,6 +178,7 @@ This captures:
 | `/api/reporting/views` | GET | Named queries the calling audience may run |
 | `/api/reporting/query` | POST | Run one named query (see below) |
 | `/api/reporting/refresh-status` | GET | Freshness of the materialized views |
+| `/dashboard/intelligence` | GET | What the bot concluded this week, and whether it worked |
 
 ### Reporting queries
 
@@ -233,6 +234,20 @@ the answer is in the history rather than only in a live query.
 
 No column of either view carries a client id, name, or domain, so both are
 readable by the agent audience.
+
+### Reviewing what the bot decided
+
+`/dashboard/intelligence` answers "what did the bot do this week, and did it
+work?" without opening psql: open work by score, the last seven days of
+decisions with the rationale behind each, attribution windows still counting
+down, and measured outcomes with the learning the memory promoter reads.
+Materialized-snapshot age is shown inline — an operator reading a stale number
+without knowing it is stale is worse served than one shown no number.
+
+The page reads through the reporting gateway rather than the intelligence
+tables, so it is audited, read-only and timeout-bounded like every other
+consumer. A panel whose view is missing says so in its own box instead of taking
+the page down with it.
 
 ---
 

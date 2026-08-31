@@ -1,8 +1,8 @@
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- SEO-Bot Reporting SQL Plane — role provisioning (ADR-0015)
 --
--- Run by an operator with role-creation rights, AFTER migrations 0002 and 0004
--- have applied (the grants below target objects those migrations create).
+-- Run by an operator with role-creation rights, AFTER migrations 0002, 0004 and
+-- 0005 have applied (the grants below target objects those migrations create).
 -- Re-runnable, and re-running it is how a privilege NARROWING reaches an
 -- existing install — see the REVOKE on the benchmark role below.
 --
@@ -121,6 +121,10 @@ GRANT SELECT ON
   reporting.mv_portfolio_benchmarks,
   reporting.portfolio_cohort_coverage,
   reporting.mv_portfolio_cohort_coverage,
+  reporting.intelligence_opportunities_live,
+  reporting.intelligence_decisions_recent,
+  reporting.intelligence_experiments_pending,
+  reporting.intelligence_outcomes_measured,
   reporting.job_failures_recent,
   reporting.pending_approvals,
   reporting.link_prospects_uncontacted,
@@ -136,6 +140,10 @@ GRANT SELECT ON
   reporting.page_experience_risks,
   reporting.mv_aeo_citation_rate_monthly,
   reporting.mv_llm_spend_monthly,
+  reporting.intelligence_opportunities_live,
+  reporting.intelligence_decisions_recent,
+  reporting.intelligence_experiments_pending,
+  reporting.intelligence_outcomes_measured,
   reporting.job_failures_recent,
   reporting.refresh_log
 TO seo_agent_reporting;

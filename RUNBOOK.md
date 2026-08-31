@@ -134,6 +134,11 @@ WHERE d.client_id = '<client-id>'
 ORDER BY d.created_at DESC
 LIMIT 20;
 
+> Most of what follows is now on **`/dashboard/intelligence`** (contract C4) —
+> open work by score, the last seven days of decisions with their rationale,
+> windows still counting down, and measured outcomes with snapshot age inline.
+> Reach for psql when you need a shape the page does not have.
+
 -- What is it currently prioritizing?
 -- `status` transitions now (contract C3): open → actioned when a proposal is
 -- logged, → resolved when a linked experiment measures `improved`, → expired

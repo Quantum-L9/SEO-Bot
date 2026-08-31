@@ -14,6 +14,7 @@
  *
  * Routes:
  *   GET /dashboard              → Portfolio overview (all clients)
+ *   GET /dashboard/intelligence → What the bot concluded, and whether it worked
  *   GET /dashboard/:clientId    → Client drill-down
  *   GET /dashboard/approvals    → Pending approvals queue
  *   POST /dashboard/approve/:id → Approve an action
@@ -25,6 +26,9 @@ import { and, desc, eq, gte, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { getDb, schema } from "../core/database/index.js";
 import { createModuleLogger } from "../core/logger.js";
+import type { ReportingQueryRequest } from "../reporting/query-compiler.js";
+import { executeReportingQuery } from "../reporting/query-gateway.js";
+import { getRefreshStatus } from "../reporting/refresh.js";
 
 const logger = createModuleLogger("dashboard");
 
@@ -77,6 +81,74 @@ function rankDeltaText(position: number | undefined, previous: number | undefine
   if (position < previous) return `+${previous - position}`;
   if (position > previous) return `-${position - previous}`;
   return "=";
+}
+
+// ─── Intelligence panels (ADR-0016, contract C4) ──────────────────────────────
+//
+// Read through the reporting GATEWAY, never straight off the tables. The gateway
+// audits before it executes, holds a read-only transaction, applies a statement
+// timeout, and projects per audience. A dashboard that queried the tables
+// directly would be a second, unaudited read path — and the audit log exists
+// precisely so there is only one.
+
+const DASHBOARD_ACTOR = {
+  id: "dashboard",
+  type: "human" as const,
+  surface: "dashboard",
+  audience: "operator" as const,
+};
+
+interface PanelResult {
+  readonly rows: readonly Record<string, unknown>[];
+  /** Set when the panel could not be loaded. Rendered in place of the rows. */
+  readonly error: string | null;
+}
+
+/**
+ * Run one named query for a panel.
+ *
+ * A failure is captured, not thrown. These views arrive with migration 0005, and
+ * a dashboard that 500s wholesale because one view is missing takes the working
+ * panels down with it — including the approvals queue an operator may be trying
+ * to reach. Each panel says what went wrong in its own box instead.
+ */
+async function panel(request: ReportingQueryRequest): Promise<PanelResult> {
+  try {
+    const result = await executeReportingQuery(request, DASHBOARD_ACTOR);
+    return { rows: result.rows, error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error({ view: request.view, err: message }, "Intelligence panel query failed");
+    return { rows: [], error: message };
+  }
+}
+
+/**
+ * Age of the materialized snapshots, worst first.
+ *
+ * Surfaced inline rather than on a separate page: an operator reading a stale
+ * number without knowing it is stale is worse served than one shown no number.
+ */
+async function snapshotAges(): Promise<{ rows: RefreshAgeRow[]; error: string | null }> {
+  try {
+    const status = await getRefreshStatus();
+    const rows = status
+      .map((row) => ({
+        viewName: row.viewName,
+        ageMinutes: Math.round(row.ageSeconds / 60),
+        status: row.status,
+      }))
+      .sort((a, b) => b.ageMinutes - a.ageMinutes);
+    return { rows, error: null };
+  } catch (error) {
+    return { rows: [], error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+interface RefreshAgeRow {
+  viewName: string;
+  ageMinutes: number;
+  status: string;
 }
 
 // ─── Dashboard Registration ───────────────────────────────────────────────────
@@ -154,6 +226,45 @@ export async function registerDashboard(app: FastifyInstance): Promise<void> {
 
     const html = renderPortfolio(clientSummaries, pendingCount, todaySpend);
     reply.type("text/html").send(html);
+  });
+
+  // ─── Intelligence: what the bot concluded, and whether it worked ──────────
+  //
+  // Declared BEFORE /dashboard/:clientId. Fastify's radix router prefers a
+  // static segment over a parameter, but stating the order here means the page
+  // does not depend on that preference holding for a future router change —
+  // "intelligence" resolving as a client id would 404 with no clue why.
+
+  app.get("/dashboard/intelligence", async (_request, reply) => {
+    // Sequential, not Promise.all: each gateway query holds a connection for the
+    // length of its statement timeout, and four at once on an operator page
+    // refresh is a self-inflicted connection spike on the box running the bot.
+    const opportunities = await panel({
+      view: "intelligence_opportunities_live",
+      orderBy: "score_desc",
+      limit: 20,
+    });
+    const decisions = await panel({
+      view: "intelligence_decisions_recent",
+      filters: { days: 7 },
+      orderBy: "created_at_desc",
+      limit: 20,
+    });
+    const pending = await panel({
+      view: "intelligence_experiments_pending",
+      orderBy: "soonest_first",
+      limit: 20,
+    });
+    const outcomes = await panel({
+      view: "intelligence_outcomes_measured",
+      orderBy: "measured_at_desc",
+      limit: 20,
+    });
+    const freshness = await snapshotAges();
+
+    reply
+      .type("text/html")
+      .send(renderIntelligence({ opportunities, decisions, pending, outcomes, freshness }));
   });
 
   // ─── Client Drill-Down ────────────────────────────────────────────────────
@@ -344,6 +455,7 @@ function baseLayout(title: string, content: string): string {
       <h1>L9 SEO Bot</h1>
       <div class="nav">
         <a href="/dashboard">Portfolio</a>
+        <a href="/dashboard/intelligence">Intelligence</a>
         <a href="/dashboard/approvals">Approvals</a>
         <a href="/health">Health</a>
       </div>
@@ -525,6 +637,151 @@ function renderClientDetail(
   `;
 
   return baseLayout(client.name, content);
+}
+
+interface IntelligencePageData {
+  opportunities: PanelResult;
+  decisions: PanelResult;
+  pending: PanelResult;
+  outcomes: PanelResult;
+  freshness: { rows: RefreshAgeRow[]; error: string | null };
+}
+
+function verdictBadgeClass(verdict: unknown): string {
+  if (verdict === "improved") return "good";
+  if (verdict === "declined") return "critical";
+  return "warning";
+}
+
+function decisionBadgeClass(decision: unknown): string {
+  if (decision === "propose_action") return "good";
+  if (decision === "escalate_to_operator") return "critical";
+  return "pending";
+}
+
+/** Fixed-precision, or an em dash. `null` must not render as "null". */
+function num(value: unknown, digits = 2): string {
+  const parsed = typeof value === "string" ? Number(value) : value;
+  if (typeof parsed !== "number" || !Number.isFinite(parsed)) return "—";
+  return parsed.toFixed(digits);
+}
+
+/**
+ * A panel's body, or the reason it has none.
+ *
+ * `columns` is the colspan for the empty/error row, so a failed panel does not
+ * collapse the table it sits in.
+ */
+function panelBody(result: PanelResult, columns: number, rows: string): string {
+  if (result.error) {
+    return `<tr><td colspan="${columns}" style="color: #fca5a5;">Unavailable: ${esc(result.error)}</td></tr>`;
+  }
+  return rows || `<tr><td colspan="${columns}" style="color: #94a3b8;">Nothing yet.</td></tr>`;
+}
+
+/**
+ * The operator's answer to "what did the bot do this week, and did it work?"
+ *
+ * EVERY interpolated value goes through `esc`. `title`, `description`,
+ * `rationale`, `hypothesis` and `learnings` are model-authored free text that
+ * quotes evidence the bot read — a client registered with a `<script>` name, or
+ * a keyword containing one, reaches this page through them.
+ */
+function renderIntelligence(data: IntelligencePageData): string {
+  const freshnessHtml = data.freshness.error
+    ? `<p style="color: #fca5a5;">Snapshot freshness unavailable: ${esc(data.freshness.error)}</p>`
+    : data.freshness.rows.length === 0
+      ? `<p style="color: #94a3b8;">No materialized snapshot has been refreshed yet.</p>`
+      : `<p style="color: #94a3b8; font-size: 13px;">Snapshot age: ${data.freshness.rows
+          .map(
+            (row) =>
+              `<span style="color: ${row.status === "ok" && row.ageMinutes < 720 ? "#94a3b8" : "#fbbf24"}">` +
+              `${esc(row.viewName.replace("reporting.", ""))} ${esc(row.ageMinutes)}m</span>`,
+          )
+          .join(" · ")}</p>`;
+
+  const opportunityRows = data.opportunities.rows
+    .map(
+      (row) => `
+    <tr>
+      <td>${esc(row.client_name)}</td>
+      <td>${esc(row.title)}</td>
+      <td>${esc(row.target_url ?? row.target_keyword ?? "—")}</td>
+      <td>${num(row.score)}</td>
+      <td><span class="badge badge-${row.status === "actioned" ? "pending" : "warning"}">${esc(row.status)}</span></td>
+    </tr>`,
+    )
+    .join("");
+
+  const decisionRows = data.decisions.rows
+    .map(
+      (row) => `
+    <tr>
+      <td>${esc(row.client_name)}</td>
+      <td><span class="badge badge-${decisionBadgeClass(row.decision)}">${esc(row.decision)}</span></td>
+      <td>${esc(row.opportunity_title ?? row.decision_type)}</td>
+      <td style="color: #94a3b8; font-size: 13px;">${esc(row.rationale)}</td>
+      <td>${esc(row.created_at)}</td>
+    </tr>`,
+    )
+    .join("");
+
+  const pendingRows = data.pending.rows
+    .map(
+      (row) => `
+    <tr>
+      <td>${esc(row.client_name)}</td>
+      <td>${esc(row.target_metric)}</td>
+      <td>${esc(row.entity_id)}</td>
+      <td style="color: #94a3b8; font-size: 13px;">${esc(row.hypothesis)}</td>
+      <td>${esc(row.days_remaining)}d</td>
+    </tr>`,
+    )
+    .join("");
+
+  const outcomeRows = data.outcomes.rows
+    .map(
+      (row) => `
+    <tr>
+      <td>${esc(row.client_name)}</td>
+      <td><span class="badge badge-${verdictBadgeClass(row.verdict)}">${esc(row.verdict ?? row.status)}</span></td>
+      <td>${esc(row.target_metric)}</td>
+      <td>${num(row.baseline)} → ${num(row.measured)}</td>
+      <td style="color: #94a3b8; font-size: 13px;">${esc(row.learnings)}</td>
+    </tr>`,
+    )
+    .join("");
+
+  const content = `
+    <h2 style="margin-bottom: 4px; color: #f8fafc;">Intelligence</h2>
+    ${freshnessHtml}
+
+    <h3 style="margin: 24px 0 12px; color: #f8fafc;">Open work, highest score first</h3>
+    <table>
+      <thead><tr><th>Client</th><th>Opportunity</th><th>Target</th><th>Score</th><th>Status</th></tr></thead>
+      <tbody>${panelBody(data.opportunities, 5, opportunityRows)}</tbody>
+    </table>
+
+    <h3 style="margin: 24px 0 12px; color: #f8fafc;">Decisions, last 7 days</h3>
+    <table>
+      <thead><tr><th>Client</th><th>Decision</th><th>About</th><th>Rationale</th><th>When</th></tr></thead>
+      <tbody>${panelBody(data.decisions, 5, decisionRows)}</tbody>
+    </table>
+
+    <h3 style="margin: 24px 0 12px; color: #f8fafc;">Awaiting measurement</h3>
+    <table>
+      <thead><tr><th>Client</th><th>Metric</th><th>Entity</th><th>Hypothesis</th><th>Remaining</th></tr></thead>
+      <tbody>${panelBody(data.pending, 5, pendingRows)}</tbody>
+    </table>
+
+    <h3 style="margin: 24px 0 12px; color: #f8fafc;">Did it work?</h3>
+    <table>
+      <thead><tr><th>Client</th><th>Verdict</th><th>Metric</th><th>Before → After</th><th>Learning</th></tr></thead>
+      <tbody>${panelBody(data.outcomes, 5, outcomeRows)}</tbody>
+    </table>
+  `;
+
+  return baseLayout("Intelligence", content);
 }
 
 function renderApprovals(pending: DashboardApprovalRow[]): string {

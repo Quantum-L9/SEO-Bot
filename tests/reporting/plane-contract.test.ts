@@ -40,6 +40,7 @@ function migration(file: string): string {
 
 const MIGRATION = migration("0002_reporting_plane.sql");
 const BENCHMARKS = migration("0004_portfolio_benchmarks.sql");
+const INTELLIGENCE_VIEWS = migration("0005_intelligence_reporting_views.sql");
 
 /**
  * Every migration that adds to the `reporting` schema. The registry does not
@@ -47,7 +48,7 @@ const BENCHMARKS = migration("0004_portfolio_benchmarks.sql");
  * them all — pinning them to 0002 alone would have made every later reporting
  * migration invisible to the very test that exists to catch drift.
  */
-const REPORTING_MIGRATIONS = [MIGRATION, BENCHMARKS].join("\n");
+const REPORTING_MIGRATIONS = [MIGRATION, BENCHMARKS, INTELLIGENCE_VIEWS].join("\n");
 
 /**
  * The migration with `--` line comments stripped. Assertions about what the
@@ -165,6 +166,7 @@ describe("migration journal", () => {
     expect(tags).toContain("0002_reporting_plane");
     expect(tags).toContain("0003_intelligence_plane");
     expect(tags).toContain("0004_portfolio_benchmarks");
+    expect(tags).toContain("0005_intelligence_reporting_views");
 
     // drizzle decides what is pending by comparing folderMillis; a non-increasing
     // `when` makes a migration silently un-appliable.
