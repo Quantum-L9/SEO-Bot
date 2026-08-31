@@ -77,7 +77,11 @@ export interface SynthesizedSelection {
 }
 
 const rankedActionSchema = z.object({
-  action: z.string().min(1).max(100),
+  // 50, matching `action_log.selected_option` — the option id an operator's
+  // approval POSTs back into that column. Allowing a longer action here would
+  // produce an option nobody could approve, and the failure would surface as a
+  // silently rejected approval rather than as anything pointing back to here.
+  action: z.string().min(1).max(50),
   rationale: z.string().min(1).max(600),
   confidence: z.coerce.number().min(0).max(1),
 });

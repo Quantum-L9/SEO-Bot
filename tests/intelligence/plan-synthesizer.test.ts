@@ -229,6 +229,17 @@ describe("validateSelection", () => {
     }
   });
 
+  it("caps an action id at the width of the column an approval writes it to", () => {
+    // action_log.selected_option is varchar(50). A longer id would produce an
+    // option nobody could approve, failing at the POST rather than here.
+    expect(() =>
+      validateSelection(
+        { summary: "s", ranked: [{ action: "a".repeat(51), rationale: "r", confidence: 0.5 }] },
+        pack({ allowed_actions: ["a".repeat(51)] }),
+      ),
+    ).toThrow();
+  });
+
   it("caps the ranking length", () => {
     const ranked = Array.from({ length: MAX_RANKED_ACTIONS + 1 }, () => ({
       action: "page_speed_optimization",
