@@ -15,6 +15,20 @@
       "when": 1786838400000,
       "tag": "0001_build_intelligence_artifacts",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788134400000,
+      "tag": "0002_reporting_plane",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788138000000,
+      "tag": "0003_intelligence_plane",
+      "breakpoints": true
     }
   ]
 }

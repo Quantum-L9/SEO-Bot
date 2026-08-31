@@ -407,4 +407,31 @@ export function getScheduler(): Scheduler {
   return _scheduler;
 }
 
+/**
+ * Jobs that may be triggered outside their cron schedule — by an operator via
+ * POST /api/clients/:clientId/trigger, or by the intelligence plane's action
+ * planner.
+ *
+ * This is the single allow-list for both callers. It deliberately EXCLUDES
+ * `serp:execute-surpass-plans` (the gated live-site write path, AGENTS §9) and
+ * `reports:weekly-summary`, neither of which should be reachable by an
+ * on-demand trigger.
+ */
+export const TRIGGERABLE_JOBS: readonly string[] = [
+  "serp:check-rankings",
+  "serp:competitor-analysis",
+  "serp:generate-surpass-plan",
+  "vitals:check-all-sources",
+  "aeo:check-citations",
+  "aeo:optimize-faqs",
+  "links:discover-prospects",
+  "links:process-outreach",
+  "behavior:pull-engagement",
+  "behavior:generate-insights",
+] as const;
+
+export function isTriggerableJob(jobName: string): boolean {
+  return TRIGGERABLE_JOBS.includes(jobName);
+}
+
 export const jobDefinitions = JOB_DEFINITIONS;

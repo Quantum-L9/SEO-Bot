@@ -1,0 +1,569 @@
+/* L9_META
+ * layer: module
+ * role: seo_bot_engine
+ * status: active
+ */
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * L9 SEO Bot - Signal Extractors (ADR-0016)
+ *
+ * The Observe→Diagnose step. Each extractor is one deterministic SQL question
+ * asked on a schedule, turning raw module output into normalized signals.
+ *
+ * Two deliberate choices:
+ *
+ *   1. Several extractors read the `reporting` views rather than re-deriving
+ *      "latest row per entity" windows inline. The reporting plane already owns
+ *      those semantics; a second, drifting copy of them inside the bot is how
+ *      the operator's dashboard and the bot's own reasoning end up disagreeing
+ *      about what happened.
+ *
+ *   2. Every extractor is split into a SQL half and a pure `mapRow` half. The
+ *      mapping — severity thresholds, confidence, fingerprint, grouping key — is
+ *      where the judgment lives, so it is the part that must be unit-testable
+ *      without a database.
+ *
+ * Zero tokens. No LLM is involved in extraction.
+ * ═══════════════════════════════════════════════════════════════════════════════
+ */
+
+import { type SQL, sql } from "drizzle-orm";
+import { getDb } from "../core/database/index.js";
+import { createModuleLogger } from "../core/logger.js";
+import {
+  normalizePageKey,
+  type SignalCandidate,
+  type SignalSeverity,
+  type SignalType,
+  signalFingerprint,
+} from "./types.js";
+
+const logger = createModuleLogger("intelligence:signals");
+
+type Row = Record<string, unknown>;
+
+export interface SignalExtractor {
+  readonly signalType: SignalType;
+  readonly description: string;
+  /** Parameterized query for one tenant. */
+  readonly query: (clientId: string) => SQL;
+  /** Pure: row → signal. Returns null when the row does not clear the bar. */
+  readonly mapRow: (row: Row, clientId: string) => SignalCandidate | null;
+}
+
+// ─── Row coercion ────────────────────────────────────────────────────────────
+// pg returns numeric/bigint as strings to avoid precision loss, so every numeric
+// read goes through these rather than trusting the driver's JS type.
+
+export function asNumber(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+export function asString(value: unknown): string | null {
+  if (typeof value === "string" && value.trim() !== "") return value;
+  if (typeof value === "number") return String(value);
+  return null;
+}
+
+function build(
+  clientId: string,
+  signalType: SignalType,
+  entityType: SignalCandidate["entityType"],
+  entityId: string,
+  severity: SignalSeverity,
+  confidence: number,
+  evidence: Record<string, unknown>,
+  groupKey: string,
+): SignalCandidate {
+  return {
+    clientId,
+    entityType,
+    entityId,
+    signalType,
+    severity,
+    confidence,
+    evidence,
+    fingerprint: signalFingerprint(clientId, signalType, entityId),
+    groupKey,
+  };
+}
+
+// ─── Extractors ──────────────────────────────────────────────────────────────
+
+/** A tracked keyword lost five or more positions in the last seven days. */
+export const keywordDropExtractor: SignalExtractor = {
+  signalType: "keyword_drop",
+  description: "Keywords that lost five or more positions in the last seven days.",
+  query: (clientId) => sql`
+    SELECT keyword, device, previous_position, current_position, position_delta, url, checked_at
+    FROM reporting.keyword_drops_7d
+    WHERE client_id = ${clientId}::uuid
+    ORDER BY position_delta DESC
+    LIMIT 100
+  `,
+  mapRow: (row, clientId) => {
+    const keyword = asString(row.keyword);
+    const delta = asNumber(row.position_delta);
+    if (!keyword || delta === null || delta < 5) return null;
+
+    const severity: SignalSeverity = delta >= 10 ? "high" : delta >= 5 ? "medium" : "low";
+    const url = asString(row.url);
+    const pageKey = normalizePageKey(url);
+
+    return build(
+      clientId,
+      "keyword_drop",
+      "keyword",
+      keyword,
+      severity,
+      0.85,
+      {
+        keyword,
+        device: asString(row.device),
+        current_position: asNumber(row.current_position),
+        previous_position: asNumber(row.previous_position),
+        position_delta: delta,
+        url,
+        page_path: pageKey,
+        checked_at: asString(row.checked_at),
+      },
+      // Group on the ranking page when we know it, so a ranking drop and a page
+      // experience problem on the same URL become ONE opportunity.
+      pageKey ?? `keyword:${keyword}`,
+    );
+  },
+};
+
+/** A page where visitors leave AND the page is slow — the compound failure. */
+export const pageExperienceExtractor: SignalExtractor = {
+  signalType: "high_exit_bad_lcp",
+  description: "Pages combining a high exit rate with poor Largest Contentful Paint.",
+  query: (clientId) => sql`
+    SELECT page_path, period, exit_rate, bounce_rate, avg_scroll_depth,
+           total_pageviews, device, lcp, inp, cls, risk_level, measured_at
+    FROM reporting.page_experience_risks
+    WHERE client_id = ${clientId}::uuid
+      AND risk_level IN ('critical', 'high')
+    ORDER BY total_pageviews DESC NULLS LAST
+    LIMIT 50
+  `,
+  mapRow: (row, clientId) => {
+    const pagePath = normalizePageKey(asString(row.page_path));
+    if (!pagePath) return null;
+
+    const riskLevel = asString(row.risk_level);
+    const severity: SignalSeverity = riskLevel === "critical" ? "critical" : "high";
+    const pageviews = asNumber(row.total_pageviews) ?? 0;
+
+    return build(
+      clientId,
+      "high_exit_bad_lcp",
+      "page",
+      pagePath,
+      severity,
+      // A judgment on a handful of sessions is a judgment on noise. Traffic
+      // volume is the only thing separating a real pattern from three visitors.
+      pageviews >= 100 ? 0.9 : pageviews >= 20 ? 0.7 : 0.45,
+      {
+        page_path: pagePath,
+        period: asString(row.period),
+        exit_rate: asNumber(row.exit_rate),
+        bounce_rate: asNumber(row.bounce_rate),
+        avg_scroll_depth: asNumber(row.avg_scroll_depth),
+        total_pageviews: pageviews,
+        device: asString(row.device),
+        lcp: asNumber(row.lcp),
+        inp: asNumber(row.inp),
+        cls: asNumber(row.cls),
+        risk_level: riskLevel,
+      },
+      pagePath,
+    );
+  },
+};
+
+/** LCP got materially worse versus the preceding fortnight. */
+export const lcpRegressionExtractor: SignalExtractor = {
+  signalType: "lcp_regression",
+  description: "Pages whose LCP regressed materially against their own recent baseline.",
+  query: (clientId) => sql`
+    WITH latest AS (
+      SELECT DISTINCT ON (reporting.path_from_url(url), COALESCE(device, 'mobile'))
+             reporting.path_from_url(url) AS page_path,
+             COALESCE(device, 'mobile') AS device,
+             lcp,
+             measured_at
+      FROM web_vitals
+      WHERE client_id = ${clientId}::uuid
+        AND lcp IS NOT NULL
+        AND measured_at >= now() - interval '3 days'
+      ORDER BY reporting.path_from_url(url), COALESCE(device, 'mobile'), measured_at DESC
+    ),
+    baseline AS (
+      SELECT reporting.path_from_url(url) AS page_path,
+             COALESCE(device, 'mobile') AS device,
+             percentile_cont(0.5) WITHIN GROUP (ORDER BY lcp) AS baseline_lcp,
+             count(*) AS samples
+      FROM web_vitals
+      WHERE client_id = ${clientId}::uuid
+        AND lcp IS NOT NULL
+        AND measured_at <  now() - interval '3 days'
+        AND measured_at >= now() - interval '17 days'
+      GROUP BY 1, 2
+      HAVING count(*) >= 3
+    )
+    SELECT l.page_path, l.device, l.lcp AS current_lcp, b.baseline_lcp, b.samples, l.measured_at
+    FROM latest l
+    JOIN baseline b ON b.page_path = l.page_path AND b.device = l.device
+    WHERE b.baseline_lcp > 0
+      AND l.lcp >= 2500
+      AND l.lcp >= b.baseline_lcp * 1.2
+    ORDER BY (l.lcp - b.baseline_lcp) DESC
+    LIMIT 50
+  `,
+  mapRow: (row, clientId) => {
+    const pagePath = normalizePageKey(asString(row.page_path));
+    const currentLcp = asNumber(row.current_lcp);
+    const baselineLcp = asNumber(row.baseline_lcp);
+    if (!pagePath || currentLcp === null || baselineLcp === null || baselineLcp <= 0) return null;
+
+    const ratio = currentLcp / baselineLcp;
+    const severity: SignalSeverity = ratio >= 1.5 ? "high" : "medium";
+    const samples = asNumber(row.samples) ?? 0;
+
+    return build(
+      clientId,
+      "lcp_regression",
+      "page",
+      pagePath,
+      severity,
+      samples >= 10 ? 0.85 : 0.65,
+      {
+        page_path: pagePath,
+        device: asString(row.device),
+        current_lcp: currentLcp,
+        baseline_lcp: Math.round(baselineLcp),
+        regression_ratio: Math.round(ratio * 100) / 100,
+        baseline_samples: samples,
+        measured_at: asString(row.measured_at),
+      },
+      pagePath,
+    );
+  },
+};
+
+/** Answer-engine citation rate fell month over month on a platform. */
+export const citationRateExtractor: SignalExtractor = {
+  signalType: "citation_rate_down",
+  description: "Platforms whose answer-engine citation rate fell against the previous month.",
+  query: (clientId) => sql`
+    WITH monthly AS (
+      SELECT platform,
+             date_trunc('month', checked_at)::date AS month,
+             count(*) AS queries_checked,
+             count(*) FILTER (WHERE cited) AS cited_count,
+             100.0 * count(*) FILTER (WHERE cited) / NULLIF(count(*), 0) AS rate_pct
+      FROM aeo_citations
+      WHERE client_id = ${clientId}::uuid
+        AND checked_at >= date_trunc('month', now()) - interval '1 month'
+      GROUP BY 1, 2
+      HAVING count(*) >= 3
+    )
+    SELECT c.platform,
+           c.month,
+           c.queries_checked,
+           c.cited_count,
+           round(c.rate_pct, 2) AS current_rate_pct,
+           round(p.rate_pct, 2) AS previous_rate_pct
+    FROM monthly c
+    JOIN monthly p
+      ON p.platform = c.platform
+     AND p.month = (c.month - interval '1 month')::date
+    WHERE c.month = date_trunc('month', now())::date
+      AND c.rate_pct < p.rate_pct - 10
+  `,
+  mapRow: (row, clientId) => {
+    const platform = asString(row.platform);
+    const current = asNumber(row.current_rate_pct);
+    const previous = asNumber(row.previous_rate_pct);
+    if (!platform || current === null || previous === null) return null;
+
+    const dropPoints = previous - current;
+    const severity: SignalSeverity = dropPoints >= 30 ? "high" : "medium";
+    const checked = asNumber(row.queries_checked) ?? 0;
+
+    return build(
+      clientId,
+      "citation_rate_down",
+      "platform",
+      platform,
+      severity,
+      checked >= 10 ? 0.8 : 0.6,
+      {
+        platform,
+        current_rate_pct: current,
+        previous_rate_pct: previous,
+        drop_points: Math.round(dropPoints * 100) / 100,
+        queries_checked: checked,
+        cited_count: asNumber(row.cited_count),
+      },
+      `platform:${platform}`,
+    );
+  },
+};
+
+/** A competitor is being cited on queries where the client is not. */
+export const competitorCitationExtractor: SignalExtractor = {
+  signalType: "competitor_citation_gain",
+  description: "Queries where a competitor is cited by an answer engine and the client is not.",
+  query: (clientId) => sql`
+    SELECT platform,
+           competitor_cited,
+           count(*) AS occurrences,
+           max(checked_at) AS last_seen,
+           (array_agg(query ORDER BY checked_at DESC))[1:3] AS sample_queries
+    FROM aeo_citations
+    WHERE client_id = ${clientId}::uuid
+      AND cited = false
+      AND competitor_cited IS NOT NULL
+      AND checked_at >= now() - interval '30 days'
+    GROUP BY platform, competitor_cited
+    HAVING count(*) >= 2
+    ORDER BY count(*) DESC
+    LIMIT 25
+  `,
+  mapRow: (row, clientId) => {
+    const platform = asString(row.platform);
+    const competitor = asString(row.competitor_cited);
+    const occurrences = asNumber(row.occurrences) ?? 0;
+    if (!platform || !competitor || occurrences < 2) return null;
+
+    const severity: SignalSeverity = occurrences >= 5 ? "high" : "medium";
+    const sampleQueries = Array.isArray(row.sample_queries)
+      ? (row.sample_queries as unknown[]).map(asString).filter((q): q is string => q !== null)
+      : [];
+
+    return build(
+      clientId,
+      "competitor_citation_gain",
+      "platform",
+      `${platform}:${competitor}`,
+      severity,
+      0.75,
+      {
+        platform,
+        competitor_domain: competitor,
+        occurrences,
+        sample_queries: sampleQueries,
+        last_seen: asString(row.last_seen),
+      },
+      `platform:${platform}`,
+    );
+  },
+};
+
+/** High-authority prospects discovered and never contacted. */
+export const prospectReadyExtractor: SignalExtractor = {
+  signalType: "prospect_high_dr_ready",
+  description: "Discovered link prospects above the authority bar, not yet contacted.",
+  query: (clientId) => sql`
+    SELECT count(*) AS prospect_count,
+           max(domain_rating) AS best_domain_rating,
+           round(avg(domain_rating)::numeric, 1) AS avg_domain_rating,
+           count(*) FILTER (WHERE contact_email IS NOT NULL) AS with_contact
+    FROM link_prospects
+    WHERE client_id = ${clientId}::uuid
+      AND status = 'discovered'
+      AND domain_rating >= 40
+  `,
+  mapRow: (row, clientId) => {
+    const count = asNumber(row.prospect_count) ?? 0;
+    const withContact = asNumber(row.with_contact) ?? 0;
+    // Prospects nobody can reach are not an outreach opportunity.
+    if (count < 3 || withContact < 1) return null;
+
+    const severity: SignalSeverity = count >= 20 ? "medium" : "low";
+    return build(
+      clientId,
+      "prospect_high_dr_ready",
+      "client",
+      "link_prospects",
+      severity,
+      0.9,
+      {
+        prospect_count: count,
+        contactable_count: withContact,
+        best_domain_rating: asNumber(row.best_domain_rating),
+        avg_domain_rating: asNumber(row.avg_domain_rating),
+      },
+      "client:link_prospects",
+    );
+  },
+};
+
+/** Month-to-date token spend is approaching the client's monthly budget. */
+export function llmBudgetExtractor(monthlyBudgetUsd: number): SignalExtractor {
+  return {
+    signalType: "llm_budget_pressure",
+    description: "Month-to-date LLM spend approaching the configured monthly budget.",
+    query: (clientId) => sql`
+      SELECT COALESCE(sum(cost), 0)::numeric(12, 4) AS spend_usd,
+             count(*) AS call_count
+      FROM llm_usage
+      WHERE client_id = ${clientId}::uuid
+        AND timestamp >= date_trunc('month', now())
+    `,
+    mapRow: (row, clientId) => {
+      const spend = asNumber(row.spend_usd);
+      if (spend === null || monthlyBudgetUsd <= 0) return null;
+
+      const utilization = spend / monthlyBudgetUsd;
+      if (utilization < 0.8) return null;
+
+      const severity: SignalSeverity =
+        utilization >= 1 ? "critical" : utilization >= 0.9 ? "high" : "medium";
+
+      return build(
+        clientId,
+        "llm_budget_pressure",
+        "client",
+        "llm_budget",
+        severity,
+        1,
+        {
+          spend_usd: spend,
+          monthly_budget_usd: monthlyBudgetUsd,
+          utilization: Math.round(utilization * 1000) / 1000,
+          call_count: asNumber(row.call_count),
+        },
+        "client:llm_budget",
+      );
+    },
+  };
+}
+
+/** The same scheduled job failed more than once in 48 hours. */
+export const jobFailureExtractor: SignalExtractor = {
+  signalType: "job_failure_cluster",
+  description: "Scheduled jobs that failed repeatedly in the last 48 hours.",
+  query: (clientId) => sql`
+    SELECT job_name,
+           count(*) AS failure_count,
+           max(started_at) AS last_failure_at
+    FROM job_executions
+    WHERE client_id = ${clientId}::uuid
+      AND status IN ('failed', 'error')
+      AND started_at >= now() - interval '48 hours'
+    GROUP BY job_name
+    HAVING count(*) >= 2
+    ORDER BY count(*) DESC
+    LIMIT 25
+  `,
+  mapRow: (row, clientId) => {
+    const jobName = asString(row.job_name);
+    const failures = asNumber(row.failure_count) ?? 0;
+    if (!jobName || failures < 2) return null;
+
+    const severity: SignalSeverity = failures >= 5 ? "critical" : failures >= 3 ? "high" : "medium";
+    return build(
+      clientId,
+      "job_failure_cluster",
+      "job",
+      jobName,
+      severity,
+      1,
+      {
+        job_name: jobName,
+        failure_count: failures,
+        last_failure_at: asString(row.last_failure_at),
+        // Named explicitly: every downstream signal for this client is only as
+        // fresh as the job that feeds it.
+        impact: "Data feeding other signals for this client may be stale.",
+      },
+      `job:${jobName}`,
+    );
+  },
+};
+
+/** All extractors that need no configuration. */
+export const STATIC_EXTRACTORS: readonly SignalExtractor[] = [
+  keywordDropExtractor,
+  pageExperienceExtractor,
+  lcpRegressionExtractor,
+  citationRateExtractor,
+  competitorCitationExtractor,
+  prospectReadyExtractor,
+  jobFailureExtractor,
+];
+
+export function allExtractors(monthlyBudgetUsd: number): SignalExtractor[] {
+  return [...STATIC_EXTRACTORS, llmBudgetExtractor(monthlyBudgetUsd)];
+}
+
+/**
+ * Run every extractor for one client.
+ *
+ * A failing extractor does not abort the cycle: partial signal coverage plus a
+ * logged failure is strictly better than a run that produces nothing because one
+ * view was slow. The `job_failure_cluster` extractor is what surfaces a
+ * persistently broken one.
+ */
+export async function extractSignals(
+  clientId: string,
+  extractors: readonly SignalExtractor[],
+): Promise<{ signals: SignalCandidate[]; failures: { signalType: SignalType; error: string }[] }> {
+  const db = getDb();
+  const signals: SignalCandidate[] = [];
+  const failures: { signalType: SignalType; error: string }[] = [];
+
+  for (const extractor of extractors) {
+    try {
+      const result = await db.execute(extractor.query(clientId));
+      const rows = (result as unknown as { rows: Row[] }).rows ?? [];
+      for (const row of rows) {
+        const signal = extractor.mapRow(row, clientId);
+        if (signal) signals.push(signal);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failures.push({ signalType: extractor.signalType, error: message });
+      logger.error(
+        { clientId, signalType: extractor.signalType, err: message },
+        "Signal extractor failed",
+      );
+    }
+  }
+
+  return { signals, failures };
+}
+
+/**
+ * Drop signals whose fingerprint was already observed inside the cooldown.
+ *
+ * Without this the same unchanged problem regenerates the same opportunity every
+ * cycle, and the approval queue fills with duplicates until the operator stops
+ * reading it. Pure, so the window logic is testable without a database.
+ */
+export function applySuppression(
+  signals: readonly SignalCandidate[],
+  recentFingerprints: ReadonlySet<string>,
+): { kept: SignalCandidate[]; suppressed: SignalCandidate[] } {
+  const kept: SignalCandidate[] = [];
+  const suppressed: SignalCandidate[] = [];
+  for (const signal of signals) {
+    // A critical finding is never suppressed: "we already told you" is not a
+    // reason to stop reporting something that is still critical.
+    if (signal.severity !== "critical" && recentFingerprints.has(signal.fingerprint)) {
+      suppressed.push(signal);
+    } else {
+      kept.push(signal);
+    }
+  }
+  return { kept, suppressed };
+}

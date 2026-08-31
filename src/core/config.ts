@@ -68,6 +68,28 @@ const envSchema = z.object({
   // disabled (same-origin only) — the safe default for an operator-only surface.
   DASHBOARD_ALLOWED_ORIGINS: z.string().optional(),
 
+  // Reporting SQL plane (ADR-0015). The agent read surface is OPT-IN: when this
+  // is unset, /api/reporting/* is reachable by the operator key only and no
+  // agent audience exists. Set it to give IgorBot / n8n / LLM tooling access to
+  // the masked, identity-free projections — never the operator key, which would
+  // hand an agent client names, domains, and contact PII.
+  REPORTING_AGENT_API_KEY: z.string().optional(),
+
+  // Intelligence plane (ADR-0016). Opportunities scoring at or above this
+  // threshold are eligible to become action proposals; everything below is
+  // recorded and left for the next cycle. Raising it makes the bot more
+  // conservative without disabling reasoning.
+  INTELLIGENCE_MIN_OPPORTUNITY_SCORE: z.coerce.number().min(0).default(20),
+  // Per-run ceiling on how many opportunities may be turned into proposals for
+  // one client. Bounds blast radius when a client suddenly produces many signals.
+  INTELLIGENCE_MAX_ACTIONS_PER_RUN: z.coerce.number().int().min(0).max(100).default(3),
+  // Days a signal fingerprint stays suppressed after being observed, so the same
+  // observation does not regenerate the same opportunity every cycle.
+  INTELLIGENCE_SIGNAL_COOLDOWN_DAYS: z.coerce.number().int().min(0).max(90).default(7),
+  // Attribution windows: how long before/after an action is measured.
+  INTELLIGENCE_BASELINE_DAYS: z.coerce.number().int().min(1).max(90).default(14),
+  INTELLIGENCE_MEASUREMENT_DAYS: z.coerce.number().int().min(1).max(180).default(28),
+
   // Email Outreach
   SMTP_HOST: z.string().default("smtp.sendgrid.net"),
   SMTP_PORT: z.coerce.number().default(587),
@@ -126,6 +148,28 @@ const envSchema = z.object({
   SITE_DEPLOY_DRY_RUN: z.string().optional(),
 });
 
+/**
+ * The operator key and the reporting agent key must be DIFFERENT secrets.
+ * Sharing one collapses the audience split: the agent surface would resolve to
+ * the operator audience (checked first) and receive client names, domains, and
+ * contact PII — exactly what the masked plane exists to prevent. Fail at
+ * startup rather than leaking on the first request.
+ */
+const configSchema = envSchema.superRefine((value, ctx) => {
+  if (
+    value.OPERATOR_API_KEY &&
+    value.REPORTING_AGENT_API_KEY &&
+    value.OPERATOR_API_KEY === value.REPORTING_AGENT_API_KEY
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["REPORTING_AGENT_API_KEY"],
+      message:
+        "must not equal OPERATOR_API_KEY — the reporting agent surface requires its own secret",
+    });
+  }
+});
+
 export type EnvConfig = z.infer<typeof envSchema>;
 
 let _config: EnvConfig | null = null;
@@ -133,7 +177,7 @@ let _config: EnvConfig | null = null;
 export function loadConfig(): EnvConfig {
   if (_config) return _config;
 
-  const result = envSchema.safeParse(process.env);
+  const result = configSchema.safeParse(process.env);
 
   if (!result.success) {
     const errors = result.error.issues.map(
