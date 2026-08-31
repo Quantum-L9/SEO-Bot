@@ -194,11 +194,18 @@ and a real Redis. Excluded from the default `vitest run` on purpose: a default
 run that silently skipped them would report green for a gate it never reached.
 
 ```bash
-npm run live:up          # docker compose -f docker-compose.validation.yml
-export DATABASE_URL=... REDIS_URL=...
+npm run live:up          # docker compose -f docker-compose.validation.yml, --wait
+export DATABASE_URL=postgres://l9bot:validation-only@127.0.0.1:55432/l9_seo_bot_validation
+export REDIS_URL=redis://127.0.0.1:56379
+npm run migrate          # first run only, or after adding a migration
 npm run test:live
-npm run live:down
+npm run live:down        # -v, so the next run starts from an empty database
 ```
+
+The compose file binds both to loopback on non-default host ports, so starting
+them does not shadow a real Postgres on 5432 or Redis on 6379. Any other
+reachable pair works too — the suite reads `DATABASE_URL` and `REDIS_URL` and
+knows nothing about compose.
 
 Without services the suite skips and says how to start them.
 `LIVE_SERVICES_REQUIRED=1` turns that skip into a failure; the `gate5` job in
