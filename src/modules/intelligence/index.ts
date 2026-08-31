@@ -243,13 +243,27 @@ export async function handleAttributeOutcomes(job: Job): Promise<void> {
 }
 
 /**
- * Produce the plan: the LLM's proposals when planning is enabled, otherwise the
- * deterministic mapping from open opportunities.
+ * Produce the plan: the LLM's proposals when planning is enabled and it
+ * answered, otherwise the deterministic mapping from open opportunities.
  *
- * A rejected or unavailable planner falls back to the deterministic plan rather
- * than to nothing — the loop's safe behaviour should not depend on a model
- * being up, and the deterministic path is the one that was true before the LLM
- * was ever consulted.
+ * The distinction between "the planner proposed nothing" and "the planner did
+ * not answer" is load-bearing, and conflating them is a real failure mode.
+ *
+ * The system prompt tells the model that returning an empty actions array is a
+ * valid and often correct answer. If an empty answer then fell through to the
+ * deterministic plan, that instruction would be a lie: the model's judgment
+ * that nothing is worth doing could never take effect, and the loop would act
+ * anyway. So a planner that RAN and returned nothing is respected.
+ *
+ * A planner that did not run — gate refused, model unreachable, output rejected
+ * — falls back to the deterministic plan instead. The loop's safe behaviour
+ * must not depend on a model being up, and the deterministic path is the one
+ * that was true before an LLM was ever consulted.
+ *
+ * The planner reports this directly as `answered`. Do NOT infer it from `pack`
+ * being present: the pack is built before the model is called, so it survives a
+ * transport failure and would make an unreachable model look like a deliberate
+ * silence — the exact conflation this distinction exists to prevent.
  */
 async function buildPlan(params: {
   clientId: string;
@@ -258,8 +272,13 @@ async function buildPlan(params: {
   const { clientId, clientConfig } = params;
 
   if (checkCapability("llm_planning").allowed) {
-    const { actions } = await planActionsWithLlm({ clientId, clientConfig });
+    const { actions, answered } = await planActionsWithLlm({ clientId, clientConfig });
     if (actions.length > 0) return actions;
+    if (answered) {
+      // It ran, saw the evidence, and proposed nothing. Take it at its word.
+      logger.info({ clientId }, "planner proposed no actions — not falling back");
+      return [];
+    }
   }
 
   const db = getDb();

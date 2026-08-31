@@ -79,7 +79,8 @@ CREATE TABLE IF NOT EXISTS "intelligence_action_links" (
 	"job_name" varchar(100),
 	"job_id" varchar(255),
 	"action_log_id" uuid,
-	"linked_at" timestamp DEFAULT now() NOT NULL
+	"linked_at" timestamp DEFAULT now() NOT NULL,
+	"attributed_at" timestamp
 );
 --> statement-breakpoint
 DO $$ BEGIN

@@ -273,14 +273,26 @@ export async function planActionsWithLlm(params: {
   clientId: string;
   clientConfig?: Record<string, unknown>;
   now?: Date;
-}): Promise<{ actions: PlannedAction[]; rejection?: RejectionCode; pack?: EvidencePack }> {
+}): Promise<{
+  actions: PlannedAction[];
+  /**
+   * True only when the model actually returned a response that passed
+   * validation. Distinguishes "it ran and proposed nothing" — which callers
+   * must respect — from "it never answered", which must fall back. Never infer
+   * this from `pack` being present: the pack is built BEFORE the call, so it
+   * survives a transport failure too.
+   */
+  answered: boolean;
+  rejection?: RejectionCode;
+  pack?: EvidencePack;
+}> {
   const { clientId, clientConfig } = params;
   assertClientId(clientId);
 
   const gate = await evaluateGate({ capability: "llm_planning", clientId, clientConfig });
   if (!gate.allowed) {
     logger.info({ clientId, gate: gate.gate, reason: gate.reason }, "LLM planning blocked");
-    return { actions: [] };
+    return { actions: [], answered: false };
   }
 
   const mode = currentMode();
@@ -291,7 +303,9 @@ export async function planActionsWithLlm(params: {
     now: params.now,
   });
 
-  if (pack.opportunities.length === 0) return { actions: [], pack };
+  // Nothing to plan against. Counted as answered: there is no work the
+  // deterministic path could find either, so falling back would be pointless.
+  if (pack.opportunities.length === 0) return { actions: [], answered: true, pack };
 
   const knownOpportunityFingerprints = pack.opportunities.map((o) => o.opportunityFingerprint);
 
@@ -310,17 +324,17 @@ export async function planActionsWithLlm(params: {
           knownOpportunityFingerprints,
         }),
     });
-    return { actions, pack };
+    return { actions, answered: true, pack };
   } catch (error: unknown) {
     if (error instanceof PlannerRejection) {
       logger.warn({ clientId, code: error.code, err: error.message }, "planner output rejected");
-      return { actions: [], rejection: error.code, pack };
+      return { actions: [], answered: false, rejection: error.code, pack };
     }
     logger.warn(
       { clientId, err: error instanceof Error ? error.message : String(error) },
       "planner call failed — proposing nothing",
     );
-    return { actions: [], pack };
+    return { actions: [], answered: false, pack };
   }
 }
 

@@ -27,8 +27,8 @@
 import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
 import { getDb, schema } from "../../core/database/index.js";
 import { createModuleLogger } from "../../core/logger.js";
-import { SAFETY } from "../link-building/index.js";
-import { THRESHOLDS } from "../web-vitals/index.js";
+import { SAFETY } from "../link-building/safety.js";
+import { THRESHOLDS } from "../web-vitals/thresholds.js";
 import { normalizeSubject, signalFingerprint } from "./fingerprint.js";
 import { assertClientId } from "./policy-gate.js";
 import type { Signal, SignalSeverity } from "./types.js";

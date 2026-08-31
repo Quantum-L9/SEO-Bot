@@ -39,24 +39,18 @@ import { createModuleLogger } from "../../core/logger.js";
 import type { Scheduler } from "../../core/scheduler.js";
 import { getLlmService } from "../../services/llm.js";
 import { getNotificationService } from "../../services/notifications.js";
+import { SAFETY } from "./safety.js";
 import { velocityRunLimit } from "./velocity.js";
 
 const logger = createModuleLogger("link-building");
 
 // ─── Safety Controls ─────────────────────────────────────────────────────────
 
-/**
- * Exported so the intelligence policy gate enforces the SAME numbers this
- * module enforces, rather than a second copy that can drift out of step.
- */
-export const SAFETY = {
-  maxLinksPerWeek: 5, // Conservative velocity
-  minDomainRating: 20, // Minimum DR for prospects
-  maxEmailsPerDay: 10, // Daily outreach cap
-  followUpDelayDays: 3, // Days between follow-ups
-  maxFollowUps: 2, // Max follow-up emails per prospect
-  circuitBreakerDropPct: 30, // Pause if rankings drop 30%+
-};
+// Safety constants live in a leaf module so callers that need only the numbers
+// (the intelligence policy gate) do not import this file's LLM, notification,
+// and database dependencies. Re-exported here so existing importers are
+// unaffected.
+export { SAFETY } from "./safety.js";
 
 // ─── Tactic Definitions ──────────────────────────────────────────────────────
 

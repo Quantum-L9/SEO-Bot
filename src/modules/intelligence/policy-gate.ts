@@ -35,7 +35,7 @@ import { getConfig } from "../../core/config.js";
 import { getDb, schema } from "../../core/database/index.js";
 import { createModuleLogger } from "../../core/logger.js";
 import { siteConfigFromClient } from "../../services/site-deployment.js";
-import { SAFETY } from "../link-building/index.js";
+import { SAFETY } from "../link-building/safety.js";
 import { velocityRunLimit } from "../link-building/velocity.js";
 import { type GateVerdict, type IntelligenceMode, modeRank } from "./types.js";
 

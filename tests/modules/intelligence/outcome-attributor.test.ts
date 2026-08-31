@@ -230,6 +230,73 @@ describe("attribution", () => {
   });
 });
 
+describe("idempotency", () => {
+  it("measures each matured routing exactly once across repeated runs", async () => {
+    await seedRoutedKeyword({
+      clientId: clientA,
+      keyword: "metal roofing",
+      positionBefore: 11,
+      positionAfter: 4,
+      linkedAt: MATURED,
+    });
+
+    const first = await attributeOutcomes(clientA, { now: NOW });
+    expect(first).toHaveLength(1);
+
+    // The attribution window is weeks wide and this job runs weekly, so the
+    // same routing is still "matured" on the next run. Without the marker it
+    // would be re-measured and re-inserted every week.
+    const second = await attributeOutcomes(clientA, { now: new Date(NOW.getTime() + 86_400_000) });
+    expect(second).toHaveLength(0);
+
+    const rows = await db
+      .select()
+      .from(schema.actionOutcomes)
+      .where(eq(schema.actionOutcomes.clientId, clientA));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("does not retry a routing whose outcome was unmeasurable", async () => {
+    await seedRoutedKeyword({
+      clientId: clientA,
+      keyword: "flat roof",
+      positionBefore: 11,
+      linkedAt: MATURED,
+    });
+
+    const first = await attributeOutcomes(clientA, { now: NOW });
+    expect(first[0].success).toBeNull();
+
+    // A null outcome has still been measured for. Leaving it unmarked would
+    // make every subsequent run insert another null row forever.
+    const second = await attributeOutcomes(clientA, { now: new Date(NOW.getTime() + 86_400_000) });
+    expect(second).toHaveLength(0);
+
+    const rows = await db
+      .select()
+      .from(schema.actionOutcomes)
+      .where(eq(schema.actionOutcomes.clientId, clientA));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("stamps attributed_at on the link it measured", async () => {
+    await seedRoutedKeyword({
+      clientId: clientA,
+      keyword: "gutters",
+      positionBefore: 11,
+      positionAfter: 4,
+      linkedAt: MATURED,
+    });
+    await attributeOutcomes(clientA, { now: NOW });
+
+    const [link] = await db
+      .select()
+      .from(schema.intelligenceActionLinks)
+      .where(eq(schema.intelligenceActionLinks.clientId, clientA));
+    expect(link.attributedAt).not.toBeNull();
+  });
+});
+
 describe("windowing", () => {
   it("ignores a routing that has not matured yet", async () => {
     await seedRoutedKeyword({

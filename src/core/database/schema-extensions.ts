@@ -305,6 +305,12 @@ export const intelligenceActionLinks = pgTable(
     jobId: varchar("job_id", { length: 255 }),
     actionLogId: uuid("action_log_id"),
     linkedAt: timestamp("linked_at").notNull().defaultNow(),
+    // Set once the outcome attributor has measured this routing. The
+    // attribution window spans weeks while the job runs weekly, so without a
+    // marker every run would re-measure — and re-insert — the same matured
+    // routing. NULL means "not yet measured", which is also the state a
+    // re-delivered attribution job must not change twice.
+    attributedAt: timestamp("attributed_at"),
   },
   (table) => ({
     uniqueRouteIdx: uniqueIndex("uq_intel_links_client_opp_job").on(

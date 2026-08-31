@@ -28,23 +28,17 @@ import { createModuleLogger } from "../../core/logger.js";
 import { resolvePostHogQueryApiKey } from "../../core/posthog-auth.js";
 import type { Scheduler } from "../../core/scheduler.js";
 import { getNotificationService } from "../../services/notifications.js";
+import { THRESHOLDS } from "./thresholds.js";
 
 const logger = createModuleLogger("web-vitals");
 
 // ─── Thresholds (Google's Core Web Vitals standards) ─────────────────────────
 
-/**
- * Exported so the intelligence signal extractor calls a page "slow" by the same
- * Core Web Vitals boundary this module rates against, rather than a second
- * hardcoded number that can drift.
- */
-export const THRESHOLDS = {
-  lcp: { good: 2500, poor: 4000 }, // ms
-  inp: { good: 200, poor: 500 }, // ms
-  cls: { good: 0.1, poor: 0.25 }, // score
-  fcp: { good: 1800, poor: 3000 }, // ms
-  ttfb: { good: 800, poor: 1800 }, // ms
-};
+// Thresholds live in a leaf module so callers that need only the numbers (the
+// intelligence signal extractor) do not import this file's PostHog and
+// notification dependencies. Re-exported here so existing importers are
+// unaffected.
+export { THRESHOLDS } from "./thresholds.js";
 
 function rateMetric(metric: string, value: number): "good" | "needs_improvement" | "poor" {
   const threshold = THRESHOLDS[metric as keyof typeof THRESHOLDS];

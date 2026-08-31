@@ -25,7 +25,7 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
 import { getDb, schema } from "../../core/database/index.js";
 import { createModuleLogger } from "../../core/logger.js";
 import { assertClientId } from "./policy-gate.js";
@@ -68,6 +68,7 @@ export async function attributeOutcomes(
 
   const links = await db
     .select({
+      id: schema.intelligenceActionLinks.id,
       opportunityId: schema.intelligenceActionLinks.opportunityId,
       linkedAt: schema.intelligenceActionLinks.linkedAt,
     })
@@ -77,6 +78,12 @@ export async function attributeOutcomes(
         eq(schema.intelligenceActionLinks.clientId, clientId),
         lte(schema.intelligenceActionLinks.linkedAt, maturedBefore),
         gte(schema.intelligenceActionLinks.linkedAt, notOlderThan),
+        // Measure each routing ONCE. The attribution window is weeks wide and
+        // this job runs weekly, so without this filter every run would
+        // re-measure the same matured routing and insert another
+        // action_outcomes row — inflating the feedback signal the loop learns
+        // from with duplicates of one observation.
+        isNull(schema.intelligenceActionLinks.attributedAt),
       ),
     );
 
@@ -179,6 +186,23 @@ export async function attributeOutcomes(
         `factors (competitor moves, algorithm updates) are not controlled for.`,
     });
   }
+
+  // Mark every link this run considered — including ones that produced a null
+  // outcome. A routing whose effect could not be measured has still been
+  // measured FOR; leaving it unmarked would make the next run retry it forever
+  // and re-insert its null row each time.
+  await db
+    .update(schema.intelligenceActionLinks)
+    .set({ attributedAt: now })
+    .where(
+      and(
+        eq(schema.intelligenceActionLinks.clientId, clientId),
+        inArray(
+          schema.intelligenceActionLinks.id,
+          links.map((link) => link.id),
+        ),
+      ),
+    );
 
   logger.info({ clientId, count: outcomes.length }, "outcomes attributed");
   return outcomes;
