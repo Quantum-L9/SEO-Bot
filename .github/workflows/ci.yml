@@ -90,6 +90,20 @@ jobs:
       DATABASE_URL: postgres://l9bot:ci-only@127.0.0.1:5432/l9_seo_bot_ci
       REDIS_URL: redis://127.0.0.1:6379
       NODE_ENV: test
+      # `getConfig()` validates the WHOLE env schema on first use, so every step
+      # below needs these even though this job never calls a vendor. They live
+      # at job level rather than only in vitest.live.config.ts because the
+      # migrate and invariant steps are plain `tsx`, not vitest, and a config
+      # that covers only the test runner leaves them failing on a missing key
+      # unrelated to what they check. Placeholders, not credentials — an
+      # accidental live call fails loudly on an unresolvable host.
+      POSTHOG_API_URL: https://posthog.invalid
+      POSTHOG_PERSONAL_API_KEY: live-suite-placeholder
+      DATAFORSEO_LOGIN: live-suite-placeholder
+      DATAFORSEO_PASSWORD: live-suite-placeholder
+      PAGESPEED_API_KEY: live-suite-placeholder
+      OPENROUTER_API_KEY: live-suite-placeholder
+      PERPLEXITY_API_KEY: live-suite-placeholder
     steps:
       - uses: actions/checkout@v4
         with:
