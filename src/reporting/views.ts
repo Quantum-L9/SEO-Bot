@@ -55,7 +55,15 @@ export type FilterSpec =
       maxSelected: number;
       description: string;
     }
-  | { kind: "recentDays"; column: string; min: number; max: number; description: string };
+  | { kind: "recentDays"; column: string; min: number; max: number; description: string }
+  /**
+   * Bounded free text, for an open-set dimension an enum cannot enumerate —
+   * `industry` and `state` are whatever client registration recorded. The value
+   * is a bound parameter either way, so this is not an injection boundary; the
+   * charset and length cap keep unbounded caller strings out of the audit row
+   * and make a typo a rejection rather than an empty result set.
+   */
+  | { kind: "token"; column: string; operator: "="; maxLength: number; description: string };
 
 export interface ReportingViewDefinition {
   /** Stable public name callers pass as `view`. */
@@ -83,6 +91,51 @@ const CLIENT_FILTER: FilterSpec = {
   operator: "=",
   description: "Restrict to a single tenant.",
 };
+
+/**
+ * Minimum number of distinct clients a cohort must contain before any statistic
+ * about it may be published (ADR-0015, contract C1).
+ *
+ * The number that actually governs disclosure lives in migration 0004, as a
+ * literal repeated at every guard — a function or a setting could be changed at
+ * runtime, whereas lowering the floor in a view definition is a migration
+ * someone has to review. This constant exists so the TypeScript side can state
+ * the same number, and `plane-contract.test.ts` reads the migration's literals
+ * back and refuses any that fall below it.
+ *
+ * Five, not two or three: with two clients in a cohort each derives the other's
+ * numbers exactly from the aggregate and its own, and with three or four,
+ * closely enough to be a disclosure.
+ */
+export const BENCHMARK_K_ANONYMITY_FLOOR = 5;
+
+/**
+ * Cohort dimensions plus the distribution. No client id, name, or domain — the
+ * whole point of the plane is that this can be read without one.
+ */
+const PORTFOLIO_BENCHMARK_COLUMNS: readonly string[] = [
+  "industry",
+  "country",
+  "state",
+  "period",
+  "cohort_size",
+  "position_clients",
+  "position_p25",
+  "position_p50",
+  "position_p75",
+  "lcp_clients",
+  "lcp_p25",
+  "lcp_p50",
+  "lcp_p75",
+  "exit_rate_clients",
+  "exit_rate_p25",
+  "exit_rate_p50",
+  "exit_rate_p75",
+  "citation_rate_clients",
+  "citation_rate_p25",
+  "citation_rate_p50",
+  "citation_rate_p75",
+];
 
 export const REPORTING_VIEWS: readonly ReportingViewDefinition[] = [
   {
@@ -519,6 +572,103 @@ export const REPORTING_VIEWS: readonly ReportingViewDefinition[] = [
     defaultOrderBy: "risk_then_age",
     defaultLimit: 100,
     maxLimit: 500,
+  },
+  {
+    name: "portfolio_benchmarks",
+    relation: '"reporting"."mv_portfolio_benchmarks"',
+    description:
+      "Cross-client cohort statistics by industry × geography × month. Suppressed below the " +
+      "k-anonymity floor, at both cohort and per-metric level. Carries no client identity.",
+    projections: {
+      operator: PORTFOLIO_BENCHMARK_COLUMNS,
+      // Identical to the operator projection, deliberately: a cohort statistic
+      // that cleared the floor is not client data, and there is nothing here for
+      // an agent projection to have to strip.
+      agent: PORTFOLIO_BENCHMARK_COLUMNS,
+    },
+    filters: {
+      industry: {
+        kind: "token",
+        column: "industry",
+        operator: "=",
+        maxLength: 80,
+        description: "Cohort industry, lower-cased ('unknown' where the client has none).",
+      },
+      state: {
+        kind: "token",
+        column: "state",
+        operator: "=",
+        maxLength: 80,
+        description: "Cohort state or region, lower-cased ('unknown' where absent).",
+      },
+      country: {
+        kind: "token",
+        column: "country",
+        operator: "=",
+        maxLength: 80,
+        description: "Cohort country, lower-cased ('unknown' where absent).",
+      },
+      days: {
+        kind: "recentDays",
+        column: "period",
+        min: 1,
+        max: 1095,
+        description: "Only cohort periods starting within this many days.",
+      },
+      min_cohort_size: {
+        kind: "int",
+        column: "cohort_size",
+        operator: ">=",
+        min: BENCHMARK_K_ANONYMITY_FLOOR,
+        max: 10_000,
+        // The minimum is the floor itself: a caller asking for smaller cohorts
+        // is asking for suppressed ones, and the answer is a rejection rather
+        // than an empty result that reads like "no such cohort".
+        description: `Only cohorts of at least this many clients (never below ${BENCHMARK_K_ANONYMITY_FLOOR}).`,
+      },
+    },
+    orderBy: {
+      period_desc: "period DESC, industry ASC",
+      cohort_size_desc: "cohort_size DESC, period DESC",
+      industry_asc: "industry ASC, period DESC",
+    },
+    defaultOrderBy: "period_desc",
+    defaultLimit: 100,
+    maxLimit: 500,
+  },
+  {
+    name: "portfolio_cohort_coverage",
+    relation: '"reporting"."mv_portfolio_cohort_coverage"',
+    description:
+      "Which cohorts exist and which cleared the anonymity floor. Answers why a benchmark came " +
+      "back empty. Size is published only for cohorts above the floor.",
+    projections: {
+      operator: ["industry", "country", "state", "period", "meets_anonymity_floor", "cohort_size"],
+      agent: ["industry", "country", "state", "period", "meets_anonymity_floor", "cohort_size"],
+    },
+    filters: {
+      industry: {
+        kind: "token",
+        column: "industry",
+        operator: "=",
+        maxLength: 80,
+        description: "Cohort industry, lower-cased.",
+      },
+      days: {
+        kind: "recentDays",
+        column: "period",
+        min: 1,
+        max: 1095,
+        description: "Only cohort periods starting within this many days.",
+      },
+    },
+    orderBy: {
+      period_desc: "period DESC, industry ASC",
+      industry_asc: "industry ASC, period DESC",
+    },
+    defaultOrderBy: "period_desc",
+    defaultLimit: 200,
+    maxLimit: 1000,
   },
   {
     name: "link_prospects_uncontacted",

@@ -204,6 +204,36 @@ The agent surface is opt-in: leave `REPORTING_AGENT_API_KEY` unset and agents
 have no access. `GET /api/reporting/views` returns the filter, ordering, and row
 limit contract for everything the caller can reach, so no schema dump is needed.
 
+### Portfolio benchmarks
+
+`portfolio_benchmarks` answers the one question the per-tenant views cannot:
+*is this number good?* It reports median, p25 and p75 for SERP position, LCP,
+exit rate, and answer-engine citation rate across a cohort of
+**industry × country × state × month**.
+
+```bash
+curl -s https://bot.example/api/reporting/query \
+  -H "Authorization: Bearer $OPERATOR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"view":"portfolio_benchmarks","filters":{"industry":"legal","state":"nc","days":90}}'
+```
+
+A cohort statistic is only safe if the cohort is large enough to hide the
+clients in it, so **a k-anonymity floor of 5 applies twice**: a cohort with
+fewer than five clients returns no row at all, and each individual metric is
+suppressed unless five clients contributed *that metric*. A cohort of five
+clients where only two have Core Web Vitals data publishes no LCP percentile —
+the alternative is a two-client disclosure wearing a five-client label.
+
+An empty benchmark on a small portfolio is therefore the expected result, not a
+fault. `portfolio_cohort_coverage` says which cohorts exist and which cleared
+the floor (never how far below a suppressed one sits), and the weekly
+`intel:weekly-portfolio` run records the same counts on `intelligence_runs` so
+the answer is in the history rather than only in a live query.
+
+No column of either view carries a client id, name, or domain, so both are
+readable by the agent audience.
+
 ---
 
 ## Cron Schedule
@@ -222,6 +252,8 @@ limit contract for everything the caller can reach, so no schema dump is needed.
 | Intelligence triage | Daily 7:30 AM | 0 (deterministic SQL) |
 | Outcome attribution | Daily 4 AM | 0 (deterministic SQL) |
 | Policy state refresh | Every 4 hours | 0 (deterministic SQL) |
+| Lifecycle sweep | Hourly | 0 (deterministic SQL) |
+| Portfolio benchmark | Weekly Monday 7:45 AM | 0 (deterministic SQL) |
 | Reporting view refresh | Every 6 hours | 0 (deterministic SQL) |
 
 **Estimated monthly token cost per client: ~$2-5**

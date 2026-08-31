@@ -34,6 +34,11 @@ export const MATERIALIZED_VIEWS: readonly string[] = [
   "reporting.mv_llm_spend_monthly",
   "reporting.mv_aeo_citation_rate_monthly",
   "reporting.mv_weekly_keyword_movements",
+  // Cohort coverage first: the benchmark reads the same per-client rollup, so
+  // refreshing coverage ahead of it means an operator who finds an empty
+  // benchmark is looking at coverage from the same pass, not the previous one.
+  "reporting.mv_portfolio_cohort_coverage",
+  "reporting.mv_portfolio_benchmarks",
 ] as const;
 
 const SAFE_MATERIALIZED_VIEW = /^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$/;

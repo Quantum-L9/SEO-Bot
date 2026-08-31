@@ -20,9 +20,9 @@
  */
 
 import type { Job } from "bullmq";
+import { getConfig } from "../core/config.js";
 import { createModuleLogger } from "../core/logger.js";
 import type { Scheduler } from "../core/scheduler.js";
-import { getConfig } from "../core/config.js";
 import { refreshMaterializedViews } from "../reporting/refresh.js";
 import {
   assertLifecycleConfig,
@@ -30,6 +30,7 @@ import {
   sweepApprovedActions,
 } from "./lifecycle.js";
 import { measureDueExperiments } from "./outcome-attributor.js";
+import { runPortfolioBenchmark } from "./portfolio.js";
 import { refreshAllPolicyState, runClientTriage } from "./runner.js";
 
 const logger = createModuleLogger("intelligence");
@@ -39,6 +40,7 @@ export const INTELLIGENCE_JOBS = {
   outcomeAttribution: "intel:outcome-attribution",
   policyRefresh: "intel:refresh-policy-state",
   lifecycleSweep: "intel:lifecycle-sweep",
+  portfolioBenchmark: "intel:weekly-portfolio",
   reportingRefresh: "reporting:refresh-materialized",
 } as const;
 
@@ -96,6 +98,19 @@ export function registerIntelligenceHandlers(scheduler: Scheduler): void {
     enabled: true,
   });
 
+  // Weekly, and after the 6-hourly materialized refresh has had a turn — the
+  // benchmark plane is a snapshot, so recording a run against a snapshot that
+  // has not been rebuilt since last week would date the record, not the data.
+  scheduler.registerDefinition({
+    name: INTELLIGENCE_JOBS.portfolioBenchmark,
+    module: "intelligence",
+    cron: "45 7 * * 1",
+    handler: "runPortfolioBenchmark",
+    clientScoped: false,
+    tokenBudget: { ...ZERO_TOKENS },
+    enabled: true,
+  });
+
   scheduler.registerDefinition({
     name: INTELLIGENCE_JOBS.reportingRefresh,
     module: "reporting",
@@ -140,6 +155,11 @@ export function registerIntelligenceHandlers(scheduler: Scheduler): void {
       { approvedPickups: pickups.length, expiredOpportunities: expired },
       "Lifecycle sweep completed",
     );
+  });
+
+  scheduler.registerHandler(INTELLIGENCE_JOBS.portfolioBenchmark, async () => {
+    const summary = await runPortfolioBenchmark("cron");
+    logger.info(summary, "Portfolio benchmark recorded");
   });
 
   scheduler.registerHandler(INTELLIGENCE_JOBS.reportingRefresh, async () => {

@@ -1,8 +1,10 @@
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- SEO-Bot Reporting SQL Plane — role provisioning (ADR-0015)
 --
--- Run ONCE by an operator with role-creation rights, AFTER migration 0002 has
--- applied (the grants below target objects that migration creates).
+-- Run by an operator with role-creation rights, AFTER migrations 0002 and 0004
+-- have applied (the grants below target objects those migrations create).
+-- Re-runnable, and re-running it is how a privilege NARROWING reaches an
+-- existing install — see the REVOKE on the benchmark role below.
 --
 --   psql "$SUPERUSER_DATABASE_URL" \
 --     -v ON_ERROR_STOP=1 \
@@ -115,6 +117,10 @@ GRANT SELECT ON
   reporting.mv_aeo_citation_rate_monthly,
   reporting.llm_spend_monthly,
   reporting.mv_llm_spend_monthly,
+  reporting.portfolio_benchmarks,
+  reporting.mv_portfolio_benchmarks,
+  reporting.portfolio_cohort_coverage,
+  reporting.mv_portfolio_cohort_coverage,
   reporting.job_failures_recent,
   reporting.pending_approvals,
   reporting.link_prospects_uncontacted,
@@ -134,13 +140,26 @@ GRANT SELECT ON
   reporting.refresh_log
 TO seo_agent_reporting;
 
--- Benchmarking: aggregates only, and only through the masked dimension.
+-- Benchmark surface: cohort statistics ONLY.
+--
+-- This role used to be granted the same per-tenant monthly matviews as the agent
+-- role. Those carry client_id, so a role whose entire purpose is "cross-client
+-- aggregates with no client identity at all" could read per-tenant rows — the
+-- gap contract C1 exists to close. The REVOKE below is therefore load-bearing on
+-- an existing install: this script is re-runnable, and a GRANT alone would leave
+-- yesterday's wider privileges in place.
+REVOKE ALL ON ALL TABLES IN SCHEMA reporting FROM seo_benchmark_reporting;
+
 GRANT SELECT ON
-  reporting.clients_agent,
-  reporting.mv_weekly_keyword_movements,
-  reporting.mv_aeo_citation_rate_monthly,
-  reporting.mv_llm_spend_monthly
+  reporting.portfolio_benchmarks,
+  reporting.mv_portfolio_benchmarks,
+  reporting.portfolio_cohort_coverage,
+  reporting.mv_portfolio_cohort_coverage
 TO seo_benchmark_reporting;
+
+-- Deliberately NOT granted to any role: reporting.client_period_metrics. It is
+-- the per-client rollup the benchmark aggregates over, and it exists only to be
+-- aggregated. Neither the registry nor any grant reaches it.
 
 -- The audit log is append-only from the application's perspective and readable
 -- by the operator for review. Agents cannot read it: an actor able to read the

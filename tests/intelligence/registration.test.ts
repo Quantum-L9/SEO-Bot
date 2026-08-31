@@ -28,6 +28,7 @@ const hooks = vi.hoisted(() => ({
   approvedPickups: [] as unknown[],
   expiredCount: 0,
   lifecycleConfigChecked: [] as unknown[],
+  portfolioRuns: 0,
 }));
 
 vi.mock("../../src/reporting/refresh.js", () => ({
@@ -35,6 +36,18 @@ vi.mock("../../src/reporting/refresh.js", () => ({
 }));
 vi.mock("../../src/intelligence/outcome-attributor.js", () => ({
   measureDueExperiments: async () => hooks.measured,
+}));
+vi.mock("../../src/intelligence/portfolio.js", () => ({
+  runPortfolioBenchmark: async () => {
+    hooks.portfolioRuns += 1;
+    return {
+      runId: "run-1",
+      publishedCohorts: 0,
+      suppressedCohorts: 3,
+      periods: 0,
+      anonymityFloor: 5,
+    };
+  },
 }));
 vi.mock("../../src/intelligence/runner.js", () => ({
   runClientTriage: async (...args: unknown[]) => {
@@ -105,6 +118,7 @@ beforeEach(() => {
   hooks.approvedPickups = [];
   hooks.expiredCount = 0;
   hooks.lifecycleConfigChecked = [];
+  hooks.portfolioRuns = 0;
   scheduler = fakeScheduler();
   registerIntelligenceHandlers(scheduler as unknown as never);
 });
@@ -135,6 +149,9 @@ describe("job definitions", () => {
     expect(byName.get(INTELLIGENCE_JOBS.outcomeAttribution)?.clientScoped).toBe(false);
     expect(byName.get(INTELLIGENCE_JOBS.policyRefresh)?.clientScoped).toBe(false);
     expect(byName.get(INTELLIGENCE_JOBS.lifecycleSweep)?.clientScoped).toBe(false);
+    // The portfolio run is the one run type with no client at all: fanning it
+    // out per client would produce N identical cross-client snapshots.
+    expect(byName.get(INTELLIGENCE_JOBS.portfolioBenchmark)?.clientScoped).toBe(false);
     expect(byName.get(INTELLIGENCE_JOBS.reportingRefresh)?.clientScoped).toBe(false);
   });
 
@@ -205,6 +222,12 @@ describe("handlers", () => {
     hooks.expiredCount = 2;
     const handler = scheduler.handlers.get(INTELLIGENCE_JOBS.lifecycleSweep);
     await expect(handler?.({} as Job)).resolves.toBeUndefined();
+  });
+
+  it("records a portfolio benchmark run", async () => {
+    const handler = scheduler.handlers.get(INTELLIGENCE_JOBS.portfolioBenchmark);
+    await expect(handler?.({} as Job)).resolves.toBeUndefined();
+    expect(hooks.portfolioRuns).toBe(1);
   });
 
   it("runs the attribution and policy sweeps", async () => {

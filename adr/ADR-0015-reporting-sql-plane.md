@@ -151,7 +151,25 @@ or reviewed.
 - ADR-0002 (multi-tenant), ADR-0016 (intelligence plane, the primary consumer)
 
 ## Open Questions
-- Whether `seo_benchmark_reporting` needs true k-anonymity thresholds on
-  cross-client aggregates before any benchmark leaves the operator's own hands.
+
+**Resolved — k-anonymity on cross-client aggregates.** Yes, and the threshold is
+five, applied at two levels (migration 0004, contract C1). A row-level
+`HAVING count(DISTINCT client_id) >= 5` drops a cohort that is too small; a
+per-metric guard suppresses any single statistic fewer than five clients
+contributed, because a cohort can hold five clients while only two of them have
+Core Web Vitals data and an LCP median over those two would be a two-client
+disclosure published under a five-client label. `seo_benchmark_reporting` no
+longer holds the per-tenant matview grants it was given before there was
+anything benchmark-shaped to read.
+
+Still open within that: **differencing across periods.** A cohort of exactly
+five one month and six the next reveals the sixth client's contribution to
+anyone comparing the two aggregates. That is inherent to any published
+time series of small-cohort statistics rather than specific to this
+implementation, and the mitigations (period suppression, cohort-membership
+pinning, noise) each cost more accuracy than the current portfolio size
+justifies. Revisit when a cohort routinely sits near the floor rather than
+well above or well below it.
+
 - Whether `reporting.query_audit_log` should be partitioned by month once
   automated consumers are live; it is append-only and unbounded today.

@@ -183,7 +183,18 @@ inline measurement records noise and labels it a learning.
 ## Open Questions
 - Whether the scoring constants should become per-industry once enough measured
   experiments exist to justify differentiating them.
-- Whether a portfolio-wide run type (cross-client benchmarking) belongs here or
-  stays an operator-initiated report.
-- Whether `intelligence_opportunities.status` should transition automatically on
-  a measured experiment, or stay operator-driven.
+- **Resolved — a portfolio-wide run type belongs here.** `weekly_portfolio_benchmark`
+  (contract C1) records a snapshot of the benchmark plane on `intelligence_runs`
+  with a null `client_id`. It is deterministic and zero-token like every other
+  run type, and what it adds over an operator-initiated report is history: how
+  many cohorts were publishable, and how many existed but sat below the
+  k-anonymity floor. Without that, an operator finding an empty benchmark cannot
+  tell a working privacy control from a broken pipeline.
+- **Resolved — status transitions automatically** (contract C3), because it was
+  never really a choice: with no transition, the runner's duplicate-suppression
+  lookup matched every opportunity ever recorded, so a problem acted on once and
+  not actually fixed was suppressed forever. An `improved` verdict resolves the
+  opportunity; `declined` and `unchanged` REOPEN it, since a remedy that did not
+  work leaves the problem in place and the next cycle has to be free to try
+  something else. `inconclusive` moves nothing. Operators retain the override
+  they always had — a status is a column, not a state machine locked in code.
