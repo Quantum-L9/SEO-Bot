@@ -293,6 +293,11 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
     // repair could not recover it.
     expect(contract.route_shape.route_id).toContain("reassert");
     expect(contract.route_shape.path).toContain("reassert");
+    // The container shape must be named too: a live run's batch returned a
+    // bare array (mirroring the global plan's array shape) and its repair
+    // returned a path-keyed map — the contract had never stated the
+    // { routes: [...] } root.
+    expect(contract.container.routes).toContain("ONLY top-level key");
   });
 
   it("batches 29 routes into 8 batches of 4 and persists batch_size/batch_count (oracle: 4 and 8)", async () => {

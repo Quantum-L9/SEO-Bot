@@ -28,6 +28,9 @@ import {
 } from "./llm-run-recorder.js";
 import { hydrateSeoContext } from "./memory.js";
 
+/** llmUsage.clientId is uuid-typed; seam client ids are slugs. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const logger = createModuleLogger("llm");
 
 export class DailyBudgetExhaustedError extends Error {
@@ -662,6 +665,17 @@ export class LlmService {
     const clientId = task.clientId?.trim();
     if (!clientId) {
       logger.warn({ purpose: task.description }, "Skipping LLM usage log: task.clientId missing");
+      return;
+    }
+    // llmUsage.clientId is uuid-typed; build-intelligence seam clients use
+    // slugs (e.g. "quantumaipartners_com"). The budget ledger and run evidence
+    // already track those clients' usage, so skip the row with an explicit
+    // reason instead of letting the insert fail incidentally.
+    if (!UUID_RE.test(clientId)) {
+      logger.warn(
+        { clientId, purpose: task.description },
+        "Skipping LLM usage log: clientId is not a uuid (seam clients are slugs); usage is tracked in the budget ledger and run evidence",
+      );
       return;
     }
     try {
