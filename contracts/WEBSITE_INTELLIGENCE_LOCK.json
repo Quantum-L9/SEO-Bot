@@ -1,57 +1,112 @@
 {
-  "lock_version": 1,
+  "lock_version": 2,
   "status": "ACCEPTED",
-  "locked_at": "2026-08-14",
+  "locked_at": "2026-09-01",
   "protocol": "l9.website-intelligence",
   "protocol_version": "1.0",
-  "mode_scope": ["REDESIGN_IMPROVE"],
+  "mode_scope": [
+    "REDESIGN_IMPROVE"
+  ],
   "copy_mode": {
     "behavior_change_allowed": false,
     "existing_content_generation_preserved": true,
     "existing_reconstruction_semantics_preserved": true
   },
   "dependency_coordination": {
-    "classification": "EXPECTED_NEXT_REPO_DEPENDENCY",
-    "note": "Target coordinated versions for the seam rollout. These are NOT asserted as installed or resolvable in this repository yet, and MUST NOT gate this Website-Bot commit. Convergence and lockfile regeneration happen in the coordinated seam rollout after each package is built, verified, and published.",
+    "classification": "VENDORED_WORKSPACE_SOURCE",
+    "note": "Website-Bot and SEO-Bot each consume bot-interop from the in-repo workspace copy (file:packages/bot-interop). Registry publication is NOT the active convergence mechanism and must not be described as pending convergence. Convergence is byte-level parity of the canonical source set across every peer, mechanically validated.",
     "@quantum-l9/bot-interop": {
-      "target_version": "1.1.0",
-      "status": "PENDING_PUBLICATION",
-      "website_bot_consumption": "file:packages/bot-interop",
-      "comment": "Consumed locally via the workspace file: dependency; no registry resolution required for Website-Bot."
+      "consumption": "file:packages/bot-interop",
+      "convergence_mechanism": "VENDORED_SOURCE_PARITY",
+      "parity_manifest": "contracts/BOT_INTEROP_PARITY.json",
+      "parity_validator": "scripts/validate-interop-parity.mjs",
+      "canonical_source_set": "packages/bot-interop/src/*.ts",
+      "peers": [
+        "Quantum-L9/Website-Bot",
+        "Quantum-L9/SEO-Bot"
+      ],
+      "comment": "Distribution-only fields (publishConfig) are outside the canonical set; the contract source is what must be identical. Both peers commit this identical lock."
     },
     "@quantum-l9/llm-router": {
-      "target_version": "1.1.3",
-      "status": "PENDING_IMPLEMENTATION_AND_PUBLICATION",
       "website_bot_current_pin": "1.1.2",
-      "comment": "Website-Bot stays on the currently resolvable 1.1.2 until 1.1.3 is built, verified, and published."
+      "comment": "Provider/model authority stays with LLM-Router (WBV2-013). Unchanged by this lock revision."
     }
   },
   "artifacts": {
     "competitive_landscape": {
       "version": 1,
       "producer": "SEO-Bot",
-      "consumers": ["Website-Bot", "SEO-Bot"]
+      "consumers": [
+        "Website-Bot",
+        "SEO-Bot"
+      ]
     },
     "website_build_blueprint": {
-      "version": 1,
+      "version": 2,
+      "schema": "l9://website-intelligence/website-build-blueprint/v2",
       "producer": "Website-Bot",
-      "consumers": ["Website-Bot"]
+      "consumers": [
+        "Website-Bot"
+      ],
+      "semantic_inputs": {
+        "ClientVision": "Website-Bot",
+        "DesignReferenceIntelligence": "Website-Bot",
+        "CompetitiveLandscape": "SEO-Bot",
+        "PatternPortfolio": "Website-Bot",
+        "DomainSpec": "Website-Bot"
+      },
+      "required_provenance": [
+        "provenance.competitive_landscape_ref",
+        "provenance.baseline_digest",
+        "provenance.client_vision_digest",
+        "provenance.design_reference_intelligence_digest",
+        "provenance.pattern_portfolio_digest"
+      ],
+      "compiler": "Website-Bot:src/intelligence/WebsiteBuildBlueprintCompiler.ts",
+      "V1": {
+        "status": "SUPERSEDED_REMOVED",
+        "schema": "l9://website-intelligence/website-build-blueprint/v1",
+        "runtime_supported": false,
+        "superseded_by": "ADR-0018",
+        "removed_at": "2026-09-01",
+        "eradication_validator": "Website-Bot:scripts/validate-blueprint-v1-eradication.mjs"
+      },
+      "additive_surfaces": {
+        "visual_requirements": {
+          "added": "campaign-7-redesign-runtime-convergence",
+          "owner": "Website-Bot",
+          "note": "Blueprint-owned visual requirement intent (role, slot, required, min_count, preferred provenance). Asset planning selects WHICH eligible asset satisfies each requirement, never WHETHER the site needs it."
+        },
+        "design_direction": {
+          "added": "ADR-0018",
+          "owner": "Website-Bot",
+          "note": "Sealed design decision: principles, desired/rejected attributes, reference pattern refs, prohibited transfers, and palette authority. Observed palettes are non-authoritative (WBV2-007)."
+        }
+      }
     },
     "seo_content_blueprint": {
       "version": 1,
       "producer": "SEO-Bot",
-      "consumers": ["Website-Bot", "SEO-Bot"]
+      "consumers": [
+        "Website-Bot",
+        "SEO-Bot"
+      ]
     },
     "page_content_contract": {
       "version": 1,
       "producer": "Website-Bot",
       "producer_kind": "DETERMINISTIC_COMPILER",
-      "consumers": ["Website-Bot", "SEO-Bot"]
+      "consumers": [
+        "Website-Bot",
+        "SEO-Bot"
+      ]
     },
     "structured_content_package": {
       "version": 1,
       "producer": "SEO-Bot",
-      "consumers": ["Website-Bot"]
+      "consumers": [
+        "Website-Bot"
+      ]
     }
   },
   "authority": {
@@ -65,7 +120,10 @@
     "site_source_mutation": "Website-Bot",
     "site_build": "Website-Bot",
     "quality_delta": "Website-Bot",
-    "provider_selection": "LLM-Router"
+    "provider_selection": "LLM-Router",
+    "client_vision": "Website-Bot",
+    "design_reference_intelligence": "Website-Bot",
+    "palette_authority": "ClientVision or first-party design spec only"
   },
   "forbidden": [
     "WEBSITE_BOT_IMPROVE_FINAL_COPY_GENERATION",
@@ -76,6 +134,14 @@
     "RAW_COMPETITOR_MARKUP_REUSE",
     "PERPLEXITY_AS_SERP_RANK_AUTHORITY",
     "LLM_PAGE_CONTRACT_MERGE",
-    "COPY_MODE_BEHAVIOR_CHANGE"
-  ]
+    "COPY_MODE_BEHAVIOR_CHANGE",
+    "WEBSITE_BUILD_BLUEPRINT_V1_RUNTIME_USE",
+    "BLUEPRINT_VERSION_NEGOTIATION",
+    "OBSERVED_PALETTE_AS_REDESIGN_THEME_AUTHORITY",
+    "SEO_CONTENT_BLUEPRINT_AS_BLUEPRINT_INPUT",
+    "SEO_BOT_DESIGN_AUTHORITY",
+    "DESIGN_REFERENCE_RAW_EXPRESSION_TRANSFER"
+  ],
+  "governing_adr": "Website-Bot:docs/adr/ADR-0018-website-build-blueprint-v2-single-authority.md",
+  "invariants": "Website-Bot:docs/architecture/WEBSITE_BUILD_BLUEPRINT_V2_INVARIANTS.md"
 }
