@@ -251,7 +251,7 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
     ).rejects.toThrow(/outside this batch/);
   });
 
-  it("carries only the CompetitiveLandscape as an input ref (no WebsiteBuildBlueprint dependency)", async () => {
+  it("carries only the CompetitiveLandscape as an input ref (no WebsiteBuildBlueprintV2 dependency)", async () => {
     const { llm } = fakeLlm([blueprintRoute("home", "/")]);
     const artifact = await createSEOContentBlueprint(
       {

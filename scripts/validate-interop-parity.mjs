@@ -1,0 +1,149 @@
+// L9_META: layer=source, role=tracked_file, status=active, version=1.0.0
+//
+// WBV2-014: every vendored copy of bot-interop participating in the
+// website-intelligence seam must be digest-identical for the canonical source
+// set.
+//
+// Mechanism: both Website-Bot and SEO-Bot commit the SAME
+// contracts/BOT_INTEROP_PARITY.json, and each validates its own vendored
+// sources against it. Two repos that both pass are thereby proven identical to
+// each other, with no network access and no cross-repo checkout — so this runs
+// in ordinary CI on either side and fails on drift introduced by either.
+//
+//   node scripts/validate-interop-parity.mjs           # verify (CI)
+//   node scripts/validate-interop-parity.mjs --write   # regenerate after an
+//                                                      # intentional contract
+//                                                      # change (then copy the
+//                                                      # manifest to the peer)
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+const SRC_DIR = resolve("packages/bot-interop/src");
+const MANIFEST_PATH = resolve("contracts/BOT_INTEROP_PARITY.json");
+const PEERS = ["Quantum-L9/Website-Bot", "Quantum-L9/SEO-Bot"];
+/**
+ * Shared contract documents every peer must commit byte-identically. The lock
+ * asserts in its own text that both peers commit the identical file; nothing
+ * checked that, and it silently drifted when one repo's JSON formatter reflowed
+ * it. A claim no gate enforces is a comment, so it is checked here. The
+ * manifest itself is excluded — it cannot contain its own digest.
+ */
+const SHARED_CONTRACTS = ["contracts/WEBSITE_INTELLIGENCE_LOCK.json"];
+
+function canonicalSourceSet() {
+  return readdirSync(SRC_DIR)
+    .filter((name) => name.endsWith(".ts"))
+    .sort();
+}
+
+function digestOf(name) {
+  return createHash("sha256")
+    .update(readFileSync(resolve(SRC_DIR, name)))
+    .digest("hex");
+}
+
+const files = Object.fromEntries(canonicalSourceSet().map((name) => [name, digestOf(name)]));
+const sharedContracts = Object.fromEntries(
+  SHARED_CONTRACTS.map((path) => [
+    path,
+    createHash("sha256")
+      .update(readFileSync(resolve(path)))
+      .digest("hex"),
+  ]),
+);
+/** One digest over the whole set, so a single value identifies the contract. */
+const setDigest = createHash("sha256")
+  .update(JSON.stringify({ files, shared_contracts: sharedContracts }))
+  .digest("hex");
+
+if (process.argv.includes("--write")) {
+  const manifest = {
+    invariant: "WBV2-014",
+    note:
+      "Canonical bot-interop source set. Every repo in the website-intelligence " +
+      "seam commits this identical manifest and validates its vendored copy " +
+      "against it. Regenerate with --write, then copy this file to every peer.",
+    peers: PEERS,
+    canonical_source_set: "packages/bot-interop/src/*.ts",
+    algorithm: "sha256",
+    set_digest: setDigest,
+    files,
+    shared_contracts: sharedContracts,
+  };
+  // Emitted in the shape SEO-Bot's biome formatter produces (expand: "auto"
+  // collapses a short array onto one line), so `--write` is idempotent in a repo
+  // that lints JSON and does not fight its formatter on every regeneration.
+  // Website-Bot has no JSON formatter, so this shape is simply carried there —
+  // and the two committed manifests stay byte-identical, which is the point.
+  const serialized = JSON.stringify(manifest, null, 2).replace(
+    /"peers": \[\n(?:\s+"[^"]*",?\n)+\s*\]/,
+    `"peers": [${PEERS.map((peer) => JSON.stringify(peer)).join(", ")}]`,
+  );
+  writeFileSync(MANIFEST_PATH, `${serialized}\n`, "utf8");
+  process.stdout.write(
+    `${JSON.stringify({ ok: true, wrote: MANIFEST_PATH, set_digest: setDigest })}\n`,
+  );
+  process.exit(0);
+}
+
+let manifest;
+try {
+  manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
+} catch (error) {
+  console.error(`WBV2-014 VIOLATION: cannot read ${MANIFEST_PATH}: ${String(error)}`);
+  process.exit(1);
+}
+
+const problems = [];
+const expected = manifest.files ?? {};
+for (const [name, digest] of Object.entries(expected)) {
+  if (!(name in files)) {
+    problems.push(`MISSING  ${name} — manifest expects it, this repo does not ship it`);
+  } else if (files[name] !== digest) {
+    problems.push(
+      `DRIFT    ${name}\n           expected ${digest}\n           observed ${files[name]}`,
+    );
+  }
+}
+for (const name of Object.keys(files)) {
+  if (!(name in expected)) {
+    problems.push(`EXTRA    ${name} — present here but absent from the shared manifest`);
+  }
+}
+for (const [path, digest] of Object.entries(manifest.shared_contracts ?? {})) {
+  if (!(path in sharedContracts)) {
+    problems.push(`MISSING  ${path} — manifest expects it, this repo does not ship it`);
+  } else if (sharedContracts[path] !== digest) {
+    problems.push(
+      `DRIFT    ${path}\n           expected ${digest}\n           observed ${sharedContracts[path]}`,
+    );
+  }
+}
+if (manifest.set_digest !== setDigest && problems.length === 0) {
+  problems.push(
+    `SET_DIGEST expected ${manifest.set_digest}, observed ${setDigest} — regenerate the manifest`,
+  );
+}
+
+if (problems.length > 0) {
+  console.error("WBV2-014 VIOLATION: vendored bot-interop has drifted from the shared contract.\n");
+  for (const problem of problems) console.error(`  ${problem}`);
+  console.error(
+    `\nThe canonical source set must stay byte-identical across ${PEERS.join(" and ")}. ` +
+      "Port the change to every peer, regenerate with --write, and commit the same " +
+      "manifest in each repo.",
+  );
+  process.exit(1);
+}
+
+process.stdout.write(
+  `${JSON.stringify({
+    ok: true,
+    invariant: "WBV2-014",
+    set_digest: setDigest,
+    files: Object.keys(files).length,
+    shared_contracts: Object.keys(sharedContracts).length,
+    peers: manifest.peers ?? PEERS,
+  })}\n`,
+);

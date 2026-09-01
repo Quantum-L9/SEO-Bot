@@ -2,7 +2,8 @@
 # ADR-0013: SEOContentBlueprint and Strategic Content Compiler
 
 ## Status
-Accepted.
+Accepted, naming updated by Website-Bot ADR-0018 (WebsiteBuildBlueprintV2).
+SEO-Bot's authority under this ADR is unchanged.
 
 ## Date
 2026-08-14
@@ -30,9 +31,10 @@ For every route it defines at minimum:
 - prohibited unsupported claims;
 - SEO acceptance tests.
 
-Website-Bot combines SEOContentBlueprint, WebsiteBuildBlueprint, and verified
+Website-Bot combines SEOContentBlueprint, WebsiteBuildBlueprintV2, and verified
 business facts into the canonical PageContentContract (deterministic compilation,
-no LLM).
+no LLM — WBV2-012). The blueprint is Website-Bot's alone; SEO-Bot contributes the
+SEOContentBlueprint and never sees the blueprint side of that merge.
 
 SEO-Bot then performs **exactly one** authoritative page-content generation
 operation against that contract and returns StructuredContentPackage.
