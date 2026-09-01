@@ -30,14 +30,14 @@ function canonicalSourceSet() {
 }
 
 function digestOf(name) {
-  return createHash("sha256").update(readFileSync(resolve(SRC_DIR, name))).digest("hex");
+  return createHash("sha256")
+    .update(readFileSync(resolve(SRC_DIR, name)))
+    .digest("hex");
 }
 
 const files = Object.fromEntries(canonicalSourceSet().map((name) => [name, digestOf(name)]));
 /** One digest over the whole set, so a single value identifies the contract. */
-const setDigest = createHash("sha256")
-  .update(JSON.stringify(files))
-  .digest("hex");
+const setDigest = createHash("sha256").update(JSON.stringify(files)).digest("hex");
 
 if (process.argv.includes("--write")) {
   const manifest = {
@@ -52,8 +52,19 @@ if (process.argv.includes("--write")) {
     set_digest: setDigest,
     files,
   };
-  writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-  process.stdout.write(`${JSON.stringify({ ok: true, wrote: MANIFEST_PATH, set_digest: setDigest })}\n`);
+  // Emitted in the shape SEO-Bot's biome formatter produces (expand: "auto"
+  // collapses a short array onto one line), so `--write` is idempotent in a repo
+  // that lints JSON and does not fight its formatter on every regeneration.
+  // Website-Bot has no JSON formatter, so this shape is simply carried there —
+  // and the two committed manifests stay byte-identical, which is the point.
+  const serialized = JSON.stringify(manifest, null, 2).replace(
+    /"peers": \[\n(?:\s+"[^"]*",?\n)+\s*\]/,
+    `"peers": [${PEERS.map((peer) => JSON.stringify(peer)).join(", ")}]`,
+  );
+  writeFileSync(MANIFEST_PATH, `${serialized}\n`, "utf8");
+  process.stdout.write(
+    `${JSON.stringify({ ok: true, wrote: MANIFEST_PATH, set_digest: setDigest })}\n`,
+  );
   process.exit(0);
 }
 
@@ -71,7 +82,9 @@ for (const [name, digest] of Object.entries(expected)) {
   if (!(name in files)) {
     problems.push(`MISSING  ${name} — manifest expects it, this repo does not ship it`);
   } else if (files[name] !== digest) {
-    problems.push(`DRIFT    ${name}\n           expected ${digest}\n           observed ${files[name]}`);
+    problems.push(
+      `DRIFT    ${name}\n           expected ${digest}\n           observed ${files[name]}`,
+    );
   }
 }
 for (const name of Object.keys(files)) {

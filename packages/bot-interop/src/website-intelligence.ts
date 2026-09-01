@@ -768,7 +768,7 @@ export function assertPaletteNonAuthority(authority: PaletteAuthority): void {
  */
 export function assertProvenanceCompleteness(provenance: BlueprintProvenance): void {
   const ref = provenance.competitive_landscape_ref;
-  if (!ref || ref.artifact_type !== "competitive_landscape" || !ref.artifact_id || !ref.payload_digest) {
+  if (ref?.artifact_type !== "competitive_landscape" || !ref.artifact_id || !ref.payload_digest) {
     throw new BlueprintContractError(
       "BLUEPRINT_PROVENANCE_INCOMPLETE",
       "provenance.competitive_landscape_ref must be a complete competitive_landscape ArtifactRef",

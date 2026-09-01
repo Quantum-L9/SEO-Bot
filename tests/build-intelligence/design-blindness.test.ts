@@ -86,7 +86,9 @@ describe("SEO-Bot design blindness", () => {
     ) as { files: Record<string, string> };
     const dir = resolve(__dirname, "../../packages/bot-interop/src");
     for (const [name, expected] of Object.entries(manifest.files)) {
-      const digest = createHash("sha256").update(readFileSync(join(dir, name))).digest("hex");
+      const digest = createHash("sha256")
+        .update(readFileSync(join(dir, name)))
+        .digest("hex");
       expect(digest, `${name} has drifted from the shared contract`).toBe(expected);
     }
   });

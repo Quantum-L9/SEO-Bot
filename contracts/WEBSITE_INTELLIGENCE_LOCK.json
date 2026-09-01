@@ -4,9 +4,7 @@
   "locked_at": "2026-09-01",
   "protocol": "l9.website-intelligence",
   "protocol_version": "1.0",
-  "mode_scope": [
-    "REDESIGN_IMPROVE"
-  ],
+  "mode_scope": ["REDESIGN_IMPROVE"],
   "copy_mode": {
     "behavior_change_allowed": false,
     "existing_content_generation_preserved": true,
@@ -21,10 +19,7 @@
       "parity_manifest": "contracts/BOT_INTEROP_PARITY.json",
       "parity_validator": "scripts/validate-interop-parity.mjs",
       "canonical_source_set": "packages/bot-interop/src/*.ts",
-      "peers": [
-        "Quantum-L9/Website-Bot",
-        "Quantum-L9/SEO-Bot"
-      ],
+      "peers": ["Quantum-L9/Website-Bot", "Quantum-L9/SEO-Bot"],
       "comment": "Distribution-only fields (publishConfig) are outside the canonical set; the contract source is what must be identical. Both peers commit this identical lock."
     },
     "@quantum-l9/llm-router": {
@@ -36,18 +31,13 @@
     "competitive_landscape": {
       "version": 1,
       "producer": "SEO-Bot",
-      "consumers": [
-        "Website-Bot",
-        "SEO-Bot"
-      ]
+      "consumers": ["Website-Bot", "SEO-Bot"]
     },
     "website_build_blueprint": {
       "version": 2,
       "schema": "l9://website-intelligence/website-build-blueprint/v2",
       "producer": "Website-Bot",
-      "consumers": [
-        "Website-Bot"
-      ],
+      "consumers": ["Website-Bot"],
       "semantic_inputs": {
         "ClientVision": "Website-Bot",
         "DesignReferenceIntelligence": "Website-Bot",
@@ -87,26 +77,18 @@
     "seo_content_blueprint": {
       "version": 1,
       "producer": "SEO-Bot",
-      "consumers": [
-        "Website-Bot",
-        "SEO-Bot"
-      ]
+      "consumers": ["Website-Bot", "SEO-Bot"]
     },
     "page_content_contract": {
       "version": 1,
       "producer": "Website-Bot",
       "producer_kind": "DETERMINISTIC_COMPILER",
-      "consumers": [
-        "Website-Bot",
-        "SEO-Bot"
-      ]
+      "consumers": ["Website-Bot", "SEO-Bot"]
     },
     "structured_content_package": {
       "version": 1,
       "producer": "SEO-Bot",
-      "consumers": [
-        "Website-Bot"
-      ]
+      "consumers": ["Website-Bot"]
     }
   },
   "authority": {
