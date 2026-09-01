@@ -6,7 +6,12 @@ if (!databaseUrl) {
 }
 
 export default {
-  schema: ["./src/core/database/schema.ts", "./src/core/database/schema-extensions.ts"],
+  schema: [
+    "./src/core/database/schema.ts",
+    "./src/core/database/schema-extensions.ts",
+    "./src/core/database/schema-reporting.ts",
+    "./src/core/database/schema-intelligence.ts",
+  ],
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {

@@ -21,11 +21,12 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { getConfig } from "../core/config.js";
 import { getDb, schema } from "../core/database/index.js";
 import { createModuleLogger } from "../core/logger.js";
-import { getScheduler } from "../core/scheduler.js";
+import { getScheduler, isTriggerableJob, TRIGGERABLE_JOBS } from "../core/scheduler.js";
 import { getLlmService } from "../services/llm.js";
 import { registerBuildIntelligenceRoutes } from "./build-intelligence.js";
 import { registerClientRoutes } from "./clients/register.js";
 import { registerDashboard } from "./dashboard.js";
+import { registerReportingRoutes } from "./reporting.js";
 import { registerApiSecurity } from "./security.js";
 
 const logger = createModuleLogger("api");
@@ -90,6 +91,7 @@ export async function buildApiServer(): Promise<FastifyInstance> {
   await registerDashboard(app);
   await registerClientRoutes(app);
   await registerBuildIntelligenceRoutes(app);
+  await registerReportingRoutes(app);
 
   app.get("/health", async () => {
     const db = getDb();
@@ -288,20 +290,11 @@ export async function buildApiServer(): Promise<FastifyInstance> {
       const { clientId } = request.params;
       const { module } = request.body as { module?: string };
       const scheduler = getScheduler();
-      const validModules = [
-        "serp:check-rankings",
-        "serp:competitor-analysis",
-        "serp:generate-surpass-plan",
-        "vitals:check-all-sources",
-        "aeo:check-citations",
-        "aeo:optimize-faqs",
-        "links:discover-prospects",
-        "links:process-outreach",
-        "behavior:pull-engagement",
-        "behavior:generate-insights",
-      ];
-      if (!module || !validModules.includes(module))
-        return { error: `Invalid module. Valid: ${validModules.join(", ")}` };
+      // Single allow-list, shared with the intelligence plane's action planner
+      // (src/core/scheduler.ts). Two copies of this list is how the gated
+      // live-site job ends up reachable from one caller but not the other.
+      if (!module || !isTriggerableJob(module))
+        return { error: `Invalid module. Valid: ${TRIGGERABLE_JOBS.join(", ")}` };
       const db = getDb();
       const [client] = await db
         .select()

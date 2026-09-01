@@ -175,6 +175,34 @@ This captures:
 | `/api/clients/:id/report` | GET | Weekly performance report |
 | `/api/clients/:id/trigger` | POST | Manually trigger a module |
 | `/api/token-budget` | GET | Token usage status |
+| `/api/reporting/views` | GET | Named queries the calling audience may run |
+| `/api/reporting/query` | POST | Run one named query (see below) |
+| `/api/reporting/refresh-status` | GET | Freshness of the materialized views |
+
+### Reporting queries
+
+Cross-client, date-range, and join questions that the endpoints above do not
+expose are served by the reporting SQL plane (ADR-0015) — not by handing out a
+database connection string. A caller names a view and supplies validated
+filters; it never supplies SQL, a column, or an ORDER BY.
+
+```bash
+curl -s https://bot.example/api/reporting/query \
+  -H "Authorization: Bearer $OPERATOR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"view":"keyword_drops_7d","filters":{"min_delta":10},"limit":25}'
+```
+
+Two audiences, chosen by the credential presented, never by the request body:
+
+| Credential | Audience | Sees |
+|---|---|---|
+| `OPERATOR_API_KEY` | operator | Client names, domains, contact details |
+| `REPORTING_AGENT_API_KEY` | agent | Masked projections only — no client identity, no PII, no credentials |
+
+The agent surface is opt-in: leave `REPORTING_AGENT_API_KEY` unset and agents
+have no access. `GET /api/reporting/views` returns the filter, ordering, and row
+limit contract for everything the caller can reach, so no schema dump is needed.
 
 ---
 
@@ -191,8 +219,16 @@ This captures:
 | Outreach processing | Daily 10 AM | ~3000 strategic |
 | Behavior data pull | Daily midnight | 0 (API only) |
 | Behavior insights | Weekly Friday | ~4000 strategic |
+| Intelligence triage | Daily 7:30 AM | 0 (deterministic SQL) |
+| Outcome attribution | Daily 4 AM | 0 (deterministic SQL) |
+| Policy state refresh | Every 4 hours | 0 (deterministic SQL) |
+| Reporting view refresh | Every 6 hours | 0 (deterministic SQL) |
 
 **Estimated monthly token cost per client: ~$2-5**
+
+The intelligence plane adds no token cost of its own: extraction, scoring, and
+the policy gate are deterministic. Tokens are spent only by the module jobs it
+queues, under those jobs' existing budgets.
 
 ---
 

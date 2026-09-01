@@ -317,7 +317,11 @@ export type ModuleName =
   | "link-building"
   | "behavior-intelligence"
   | "memory"
-  | "build-intelligence";
+  | "build-intelligence"
+  /** Intelligence plane: signal extraction, scoring, decisions, attribution (ADR-0016). */
+  | "intelligence"
+  /** Reporting plane: materialized-view refresh (ADR-0015). */
+  | "reporting";
 
 export interface TokenBudget {
   maxFastTokensPerRun: number;
