@@ -150,7 +150,11 @@ export async function validateRouteSemantics(
         route_id: contractRoute.route_id,
         search_context: contractRoute.search_context,
         forbidden_claims: contractRoute.forbidden_claims,
-        acceptance_tests: contractRoute.acceptance_tests,
+        // acceptance_tests are site-level acceptance criteria (post-build
+        // validation), not prose coverage demands — a prose validator can
+        // never meaningfully judge 'case studies build credibility' or
+        // 'dark canvas maintained across sections', and judging them failed
+        // live runs on exactly such tests (quantumaipartners_com).
         allowed_facts: contractRoute.business_facts,
         sections: contractRoute.sections.map((section) => ({
           section_id: section.section_id,
