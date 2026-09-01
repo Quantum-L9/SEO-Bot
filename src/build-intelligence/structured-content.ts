@@ -798,18 +798,28 @@ export function applyDeterministicRemediation(
 
   const facts = new Map(contractRoute.business_facts.map((f) => [f.key, f.value]));
   const biz = String(facts.get("business_name") ?? contractRoute.route_id);
-  const locality = String(facts.get("locality") ?? "the local area");
   // Number("") is 0 — an absent years fact must not read as "0 years".
   const years = Number(facts.get("years_local_experience") ?? NaN);
   const fillerYearsPhrase =
-    Number.isFinite(years) && years > 0 ? ` with ${years} years of local roofing experience` : "";
-  const hours = String(facts.get("hours") ?? "24/7");
+    Number.isFinite(years) && years > 0 ? ` with ${years} years of local experience` : "";
   // c. Substantive-content floor: scrubbing (or a lazy model) can leave a
   //    section under the 10-word threshold. Fill thin sections with a
-  //    fact-derived paragraph so the deterministic check passes honestly.
-  const filler =
-    `${biz} serves ${locality} and the surrounding areas${fillerYearsPhrase}` +
-    `. ${biz} is fully insured and available ${hours}; contact us for a free inspection.`;
+  //    STRICTLY fact-derived paragraph. The previous filler hardcoded a
+  //    local-business template ("serves the local area and the surrounding
+  //    areas", "fully insured", "24/7", "free inspection") — phrases its own
+  //    grounding layer then scrubbed as ungrounded, leaving the recurring
+  //    fragments that failed live runs (quantumaipartners_com).
+  const vertical = String(facts.get("vertical") ?? "professional");
+  const states = String(facts.get("states_served") ?? "");
+  const phone = String(facts.get("phone") ?? "");
+  const siteUrl = String(facts.get("site_url") ?? "");
+  const filler = [
+    `${biz} provides ${vertical} services${states ? ` across ${states}` : ""}${fillerYearsPhrase}.`,
+    phone ? `${biz} can be reached at ${phone}.` : "",
+    siteUrl ? `Learn more at ${siteUrl}.` : "",
+  ]
+    .filter((part) => part.length > 0)
+    .join(" ");
   for (const section of route.sections ?? []) {
     const words = (section.blocks ?? [])
       .flatMap((block) =>
@@ -835,8 +845,6 @@ export function applyDeterministicRemediation(
     if (entity) entities.push(entity);
     else if (topic) topics.push(topic);
   }
-  const topicYearsPhrase =
-    Number.isFinite(years) && years > 0 ? ` with ${years} years of local experience` : "";
   const sentences: string[] = [];
   const pushUnique = (text: string) => {
     const existing = collectRouteText(route);
@@ -846,14 +854,11 @@ export function applyDeterministicRemediation(
   // tokens (and entities must appear literally), so stating them verbatim
   // covers EVERY stem the deterministic check derives from them. All
   // missed labels share ONE sentence — one per failure reads as duplicated
-  // boilerplate (golden run #48), and a "provides X" entity template reads
-  // as nonsense for non-service entities ("provides storm damage" — golden
-  // run #49).
+  // boilerplate (golden run #48). The sentence tail is the strictly
+  // fact-derived filler — never a local-business template.
   const labels = [...new Set([...topics, ...entities])];
   if (labels.length > 0) {
-    pushUnique(
-      `Regarding ${labels.join(" and ")}: ${biz} serves ${locality} and the surrounding areas${topicYearsPhrase}.`,
-    );
+    pushUnique(`Regarding ${labels.join(" and ")}: ${filler}`);
   }
 
   if (sentences.length > 0) {
