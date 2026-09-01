@@ -110,6 +110,11 @@ vi.mock("../../src/core/config.js", () => ({
     INTELLIGENCE_MEASUREMENT_DAYS: 28,
     INTELLIGENCE_OPPORTUNITY_EXPIRY_DAYS: 30,
     INTELLIGENCE_SIGNAL_COOLDOWN_DAYS: 7,
+    // The sweep queues a non-outreach follow-up job, which needs the routing rung.
+    INTELLIGENCE_MODE: "route_safe",
+    INTELLIGENCE_LLM_PLANNING_ENABLED: false,
+    INTELLIGENCE_ALLOW_OUTREACH_ROUTING: false,
+    INTELLIGENCE_ALLOW_SITE_MUTATION: false,
   }),
 }));
 
@@ -336,7 +341,17 @@ describe("sweepApprovedActions", () => {
     expect(pickups).toHaveLength(1);
     expect(rowsFor("action_outcomes")).toHaveLength(1);
     expect(rowsFor("experiments")).toHaveLength(1);
-    expect(addJob).toHaveBeenCalledWith("serp:generate-surpass-plan", { clientId: CLIENT });
+    // The third argument is the dedupe key. It is asserted rather than ignored
+    // because it is the whole of the retry protection: a sweep that re-runs must
+    // present the SAME id, and an id derived from anything but the outcome row
+    // (a timestamp, a random value) would silently stop deduplicating.
+    expect(addJob).toHaveBeenCalledWith(
+      "serp:generate-surpass-plan",
+      { clientId: CLIENT },
+      { jobId: expect.stringContaining("serp:generate-surpass-plan") },
+    );
+    const jobId = addJob.mock.calls[0][2]?.jobId as string;
+    expect(jobId).toContain(CLIENT);
   });
 
   it("anchors the baseline to the approval, not to the sweep", async () => {

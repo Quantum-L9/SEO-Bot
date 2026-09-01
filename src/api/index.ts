@@ -24,6 +24,7 @@ import { createModuleLogger } from "../core/logger.js";
 import { getScheduler, isTriggerableJob, TRIGGERABLE_JOBS } from "../core/scheduler.js";
 import { getLlmService } from "../services/llm.js";
 import { registerBuildIntelligenceRoutes } from "./build-intelligence.js";
+import { projectClientForApi } from "./client-projection.js";
 import { registerClientRoutes } from "./clients/register.js";
 import { registerDashboard } from "./dashboard.js";
 import { registerReportingRoutes } from "./reporting.js";
@@ -139,6 +140,11 @@ export async function buildApiServer(): Promise<FastifyInstance> {
   });
 
   // Column allow-list — NEVER serialize posthogApiKey / posthogProjectId.
+  //
+  // `config` is included because it is operator-facing configuration, but it is
+  // a JSONB blob and a column allow-list cannot see inside one: it carries
+  // `site_deployment.githubToken` and `.vercelDeployHook`. Every response below
+  // passes the row through `projectClientForApi`, which redacts those.
   const publicClientColumns = {
     id: schema.clients.id,
     name: schema.clients.name,
@@ -160,7 +166,7 @@ export async function buildApiServer(): Promise<FastifyInstance> {
       .from(schema.clients)
       .where(eq(schema.clients.active, true))
       .orderBy(schema.clients.name);
-    return { clients };
+    return { clients: clients.map(projectClientForApi) };
   });
 
   app.get<{ Params: { clientId: string } }>("/api/clients/:clientId", async (request) => {
@@ -208,7 +214,14 @@ export async function buildApiServer(): Promise<FastifyInstance> {
       .where(eq(schema.aeoCitations.clientId, clientId))
       .orderBy(desc(schema.aeoCitations.checkedAt))
       .limit(10);
-    return { client, rankings, vitals, engagement, prospects, citations };
+    return {
+      client: projectClientForApi(client),
+      rankings,
+      vitals,
+      engagement,
+      prospects,
+      citations,
+    };
   });
 
   app.get<{ Params: { clientId: string } }>("/api/clients/:clientId/report", async (request) => {

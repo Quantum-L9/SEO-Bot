@@ -14,6 +14,10 @@
 
 import * as dotenv from "dotenv";
 import { z } from "zod";
+// The rollout ladder's single definition. `mode.ts` is dependency-free, so this
+// import cannot cycle — and keeping the list beside the rank logic that reads it
+// is what stops the enum and the ladder drifting apart.
+import { INTELLIGENCE_MODES } from "../intelligence/mode.js";
 
 dotenv.config();
 
@@ -111,6 +115,37 @@ const envSchema = z.object({
   // Attribution windows: how long before/after an action is measured.
   INTELLIGENCE_BASELINE_DAYS: z.coerce.number().int().min(1).max(90).default(14),
   INTELLIGENCE_MEASUREMENT_DAYS: z.coerce.number().int().min(1).max(180).default(28),
+
+  // Rollout ladder for the intelligence plane (hardening contract C5). Installing
+  // the plane and ENABLING it are two decisions, and this is the second one, so a
+  // production cutover is staged rather than a deploy that turns everything on at
+  // the moment the image starts.
+  //
+  // Defaults to `off`: a fresh install reasons about nothing until an operator
+  // says otherwise. That is the conservative direction — the failure mode of the
+  // wrong default here is "the bot did nothing", not "the bot acted on a database
+  // it had never seen before".
+  //
+  // See src/intelligence/mode.ts for what each rung grants. `full` deliberately
+  // does NOT grant outreach or site mutation; both need their own flag below.
+  INTELLIGENCE_MODE: z.enum(INTELLIGENCE_MODES).default("off"),
+  // Out-of-ladder capability: queueing the outreach follow-up job, which sends
+  // mail to third parties. Irreversible, so it is never implied by a mode.
+  //
+  // Matches INTELLIGENCE_LLM_PLANNING_ENABLED's shape, and for the same reason:
+  // `z.coerce.boolean()` treats every non-empty string as true, so
+  // `INTELLIGENCE_ALLOW_OUTREACH_ROUTING=false` in an env file would ENABLE it.
+  INTELLIGENCE_ALLOW_OUTREACH_ROUTING: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+  // Out-of-ladder capability: queueing work that writes to a client's live site.
+  // The live-write job stays off TRIGGERABLE_JOBS regardless (AGENTS §9); this
+  // flag is the second lock, not a replacement for the first.
+  INTELLIGENCE_ALLOW_SITE_MUTATION: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
 
   // Email Outreach
   SMTP_HOST: z.string().default("smtp.sendgrid.net"),

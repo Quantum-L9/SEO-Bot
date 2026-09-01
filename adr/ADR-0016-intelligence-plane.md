@@ -237,3 +237,51 @@ deterministic proposal exactly as it was.
   work leaves the problem in place and the next cycle has to be free to try
   something else. `inconclusive` moves nothing. Operators retain the override
   they always had — a status is a column, not a state machine locked in code.
+
+## Amendment — contract C5: the rollout ladder
+
+The plane as decided above reasons and acts end-to-end. What the original
+decision did not settle is how it gets TURNED ON, and the implicit answer —
+everything, at the moment the image starts — is the wrong one for a system whose
+whole design premise is that its judgment must be earned and measured.
+
+`INTELLIGENCE_MODE` makes enablement a staged decision separate from deployment:
+`off` → `observe` → `recommend` → `route_safe` → `route_llm` → `full`. Each rung
+is a superset of the one before, and the capability predicates are rank
+comparisons rather than set membership, so a rung added later cannot silently
+grant a capability to one below it.
+
+**Two capabilities are deliberately NOT on the ladder.** Outreach routing sends
+mail to third parties and site mutation writes to a live client site; both are
+irreversible in a way no mode name should imply. Each needs the routing rung AND
+its own flag, so neither can be reached by moving one dial. `full` is the top of
+the ladder and still grants neither.
+
+The gate is applied three times, and the middle one is the load-bearing choice.
+Registration disables jobs that must not run, so they cannot fire and then
+decline. The queue is checked again at the enqueue itself. But in the runner the
+gate narrows the **execution decision** before `logAction` rather than skipping
+work after it — because writing `auto_executed` to `action_log` and then
+declining to execute would make a withheld action indistinguishable from a
+performed one in the operator's own record. That is the same class of
+healthy-looking-but-false state that made C3 necessary, and it would have been
+introduced by the control meant to prevent harm.
+
+`reporting:refresh-materialized` is not gated on this mode. The reporting plane
+stands on its own and serves the operator dashboard; coupling it to the
+intelligence mode would mean turning the bot's reasoning off silently staled
+every report in the product.
+
+**Rejected alternatives.** A boolean `INTELLIGENCE_ENABLED` (the interesting
+states are all in the middle — reasoning without proposing, proposing without
+queueing — and a boolean has none of them). Independent per-capability flags
+with no ladder (nothing then prevents routing enabled while proposing is not,
+i.e. a plane that acts without having reasoned). Gating only at registration
+(the manual-trigger path bypasses cron entirely). Putting outreach on the ladder
+(it would then be implied by `full`, and the flag would be decorative).
+
+**Consequence worth stating:** the default is `off`, so an existing deployment
+that upgrades to this version stops reasoning until an operator sets the mode.
+That is deliberate — the failure mode of the opposite default is a plane acting
+on a database it has never seen — but it means the upgrade is not transparent
+and the runbook's cutover section is the required reading, not optional.

@@ -126,6 +126,11 @@ vi.mock("../../src/core/database/index.js", () => {
   return { getDb: () => instance, schema: tables };
 });
 
+const rollout = vi.hoisted(() => ({
+  mode: "route_safe" as string,
+  allowOutreachRouting: false,
+}));
+
 vi.mock("../../src/core/config.js", () => ({
   getConfig: () => ({
     DEFAULT_CLIENT_MONTHLY_BUDGET: 200,
@@ -135,6 +140,17 @@ vi.mock("../../src/core/config.js", () => ({
     INTELLIGENCE_SIGNAL_COOLDOWN_DAYS: 7,
     INTELLIGENCE_BASELINE_DAYS: 14,
     INTELLIGENCE_MEASUREMENT_DAYS: 28,
+    // These tests exercise the plan/act path, so they must declare the rung that
+    // grants it. `route_safe` rather than `full` on purpose: it is the LOWEST
+    // rung that may queue a non-outreach follow-up job, so these assertions also
+    // pin that route_safe genuinely routes rather than merely proposing.
+    // Read through a mutable holder so a test can exercise a different rung.
+    // Defaults to `route_safe`, the lowest rung that routes, so the assertions
+    // above pin routing behavior rather than the permissiveness of `full`.
+    INTELLIGENCE_MODE: rollout.mode,
+    INTELLIGENCE_LLM_PLANNING_ENABLED: false,
+    INTELLIGENCE_ALLOW_OUTREACH_ROUTING: rollout.allowOutreachRouting,
+    INTELLIGENCE_ALLOW_SITE_MUTATION: false,
   }),
 }));
 
@@ -162,6 +178,9 @@ beforeEach(() => {
   db.executeRows = new Map();
   db.executed = [];
   addJob.mockClear();
+  // Reset the rung between tests so one that raises or lowers it cannot leak.
+  rollout.mode = "route_safe";
+  rollout.allowOutreachRouting = false;
 });
 
 /**
@@ -327,10 +346,14 @@ describe("runClientTriage — the boundary it must not cross", () => {
     await runClientTriage(CLIENT, "cron", scheduler);
 
     expect(addJob).toHaveBeenCalledTimes(1);
-    const [jobName, payload] = addJob.mock.calls[0];
+    const [jobName, payload, opts] = addJob.mock.calls[0];
     expect(jobName).toBe("serp:generate-surpass-plan");
     expect(jobName).not.toBe("serp:execute-surpass-plans");
     expect(payload).toEqual({ clientId: CLIENT });
+    // Enqueue carries a deterministic dedupe key, so a retried run re-queues
+    // nothing. Derived from the outcome row and the client, never from a clock.
+    expect(opts?.jobId).toContain(CLIENT);
+    expect(opts?.jobId).toContain("serp:generate-surpass-plan");
   });
 
   it("still records the run when no scheduler is available, and queues nothing", async () => {
@@ -415,5 +438,79 @@ describe("attributionEntity", () => {
     expect(attributionEntity("serp_position", opportunity({ targetKeyword: null }))).toBeNull();
     expect(attributionEntity("page_exit_rate", opportunity({ targetUrl: null }))).toBeNull();
     expect(attributionEntity("aeo_citation_rate", opportunity())).toBeNull();
+  });
+});
+
+// ─── The rollout gate (hardening contract C5) ────────────────────────────────
+
+describe("runClientTriage — the rollout gate", () => {
+  it("records opportunities but proposes NOTHING in observe mode", async () => {
+    rollout.mode = "observe";
+    seedCompoundCase();
+
+    const summary = await runClientTriage(CLIENT, "cron", scheduler);
+
+    // Reasoning is the point of observe: the operator can read what the bot
+    // would have acted on before granting it the right to act.
+    expect(summary.opportunities).toBeGreaterThan(0);
+    expect(rowsFor("opportunities").length).toBeGreaterThan(0);
+
+    // And nothing beyond it.
+    expect(summary.proposals).toBe(0);
+    expect(summary.autoExecuted).toBe(0);
+    expect(summary.jobsQueued).toBe(0);
+    expect(rowsFor("decisions")).toHaveLength(0);
+    expect(rowsFor("action_log")).toHaveLength(0);
+    expect(rowsFor("action_outcomes")).toHaveLength(0);
+    expect(rowsFor("experiments")).toHaveLength(0);
+    expect(addJob).not.toHaveBeenCalled();
+  });
+
+  it("writes the decision record but queues nothing in recommend mode", async () => {
+    rollout.mode = "recommend";
+    seedCompoundCase();
+
+    const summary = await runClientTriage(CLIENT, "cron", scheduler);
+
+    expect(summary.proposals).toBeGreaterThan(0);
+    expect(rowsFor("decisions").length).toBeGreaterThan(0);
+    expect(summary.autoExecuted).toBe(0);
+    expect(summary.jobsQueued).toBe(0);
+    expect(addJob).not.toHaveBeenCalled();
+    // No measurement window either: nothing happened, so there is nothing whose
+    // effect could honestly be measured.
+    expect(rowsFor("experiments")).toHaveLength(0);
+  });
+
+  it("records a withheld action as awaiting approval, never as executed", async () => {
+    // The load-bearing assertion of the whole gate. Logging "auto-executed" for
+    // an action the gate declined to run would make a withheld action
+    // indistinguishable from a performed one in the operator's own record — the
+    // healthy-looking-but-false state this codebase treats as a defect class.
+    rollout.mode = "recommend";
+    seedCompoundCase();
+
+    await runClientTriage(CLIENT, "cron", scheduler);
+
+    const logged = rowsFor("action_log");
+    expect(logged.length).toBeGreaterThan(0);
+    for (const row of logged) {
+      expect(row.status).not.toBe("auto_executed");
+    }
+  });
+
+  it("proposes and queues nothing in off mode", async () => {
+    // Named for what it asserts. A direct call in `off` still extracts signals —
+    // cron cannot reach it, because registration disables the job at this rung
+    // (see registration.test.ts); this covers the manual-trigger path.
+    rollout.mode = "off";
+    seedCompoundCase();
+
+    const summary = await runClientTriage(CLIENT, "cron", scheduler);
+
+    expect(summary.proposals).toBe(0);
+    expect(summary.jobsQueued).toBe(0);
+    expect(rowsFor("decisions")).toHaveLength(0);
+    expect(addJob).not.toHaveBeenCalled();
   });
 });

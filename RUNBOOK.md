@@ -199,6 +199,256 @@ Fingerprint suppression (`INTELLIGENCE_SIGNAL_COOLDOWN_DAYS`, default 7) should 
 2. Raise `INTELLIGENCE_MIN_OPPORTUNITY_SCORE` to be more selective.
 3. Lower `INTELLIGENCE_MAX_ACTIONS_PER_RUN` to bound the per-run volume.
 
+## Intelligence Plane — Staged Cutover
+
+Installing the plane and enabling it are two decisions. `INTELLIGENCE_MODE` is
+the second one: a ladder where each rung is a superset of the one before, raised
+one step at a time and lowered in one step.
+
+**Rollback at any point is one environment variable plus a restart.** No code
+change, no migration, no data loss:
+
+```bash
+# In .env
+INTELLIGENCE_MODE=off
+./scripts/deploy.sh restart
+```
+
+### The ladder
+
+| Mode | The plane may | It may not |
+|---|---|---|
+| `off` | nothing — installed and inert | anything |
+| `observe` | record signals and opportunities | propose, queue, or spend |
+| `recommend` | write proposals and decisions | queue any job |
+| `route_safe` | queue non-outreach follow-up jobs; open measurement windows | reach a model; send outreach |
+| `route_llm` | rank remedies a pack already permits | author an action; send outreach |
+| `full` | everything on the ladder | **still not** outreach or site mutation |
+
+Two capabilities are **outside** the ladder, each behind its own flag, because
+both are irreversible and neither should follow from a mode name:
+
+| Flag | Grants | Also requires |
+|---|---|---|
+| `INTELLIGENCE_ALLOW_OUTREACH_ROUTING` | queueing `links:process-outreach` | `route_safe` or above |
+| `INTELLIGENCE_ALLOW_SITE_MUTATION` | queueing live-site writes | `route_safe` or above, plus the job being on `TRIGGERABLE_JOBS` — it is not |
+
+`INTELLIGENCE_LLM_PLANNING_ENABLED` remains decisive at every mode: unset or
+`false` stops all token spend, and raising the mode never re-enables it.
+
+### Network exposure
+
+Postgres, Redis and ClickHouse bind to `127.0.0.1` and are **not** reachable
+from outside the host. Containers talk to each other over the `l9-network`
+bridge and do not use the published ports, so nothing internal depends on this.
+
+Two consequences worth knowing before you need them:
+
+- **Remote `psql` needs a tunnel.** `ssh -L 5432:127.0.0.1:5432 <host>`, then
+  connect to `localhost:5432` as usual. The same pattern works for Redis (6379)
+  and ClickHouse (8123).
+- **Restoring a backup from your laptop** goes through that tunnel too, or run
+  the restore on the host.
+
+Ports `3100` (bot API and dashboard) and `8000` (PostHog) stay published: they
+are the operator-facing surfaces, they authenticate, and they belong behind your
+reverse proxy. `OPERATOR_API_KEY` and `DASHBOARD_ALLOWED_ORIGINS` are what guard
+them — loopback-binding them instead would take the product down rather than
+harden it.
+
+### Deploying the substrate (mode stays off)
+
+The update path backs up, migrates, and only then starts the new bot, so a
+failed migration aborts with the old container still serving:
+
+```bash
+./scripts/deploy.sh update
+curl -s http://localhost:3100/health
+```
+
+Verify the plane is installed and inert before raising the mode:
+
+```sql
+-- The tables exist and are empty. Nothing has run.
+SELECT count(*) FROM intelligence_runs;
+```
+
+### Phase 1 — observe
+
+```bash
+# .env
+INTELLIGENCE_MODE=observe
+INTELLIGENCE_LLM_PLANNING_ENABLED=false
+INTELLIGENCE_ALLOW_OUTREACH_ROUTING=false
+INTELLIGENCE_ALLOW_SITE_MUTATION=false
+SITE_DEPLOY_DRY_RUN=true
+```
+
+Restart, then let the 07:30 triage run once per client. The plane's jobs are
+scheduled, not manually triggerable — `intel:*` is deliberately absent from
+`TRIGGERABLE_JOBS`, because that list is shared with the action planner and a
+triage job on it could target itself.
+
+What you should see after the first pass:
+
+```sql
+-- Runs completed, zero tokens spent.
+SELECT run_type, status, llm_used, started_at, completed_at
+FROM intelligence_runs ORDER BY started_at DESC LIMIT 10;
+
+-- Signals and opportunities recorded.
+SELECT signal_type, severity, count(*) FROM intelligence_signals
+WHERE client_id = '<client-id>' GROUP BY 1, 2;
+
+SELECT opportunity_type, status, score, title FROM intelligence_opportunities
+WHERE client_id = '<client-id>' ORDER BY score DESC LIMIT 10;
+```
+
+And what must be **empty** — this is the check that proves the gate holds:
+
+```sql
+-- No proposals, no decisions, no measurement windows, nothing executed.
+SELECT count(*) FROM intelligence_decisions WHERE client_id = '<client-id>';
+SELECT count(*) FROM action_log
+WHERE client_id = '<client-id>' AND triggered_by LIKE 'intelligence:%';
+```
+
+Both must be `0`. If either is non-zero in `observe`, stop and investigate
+before raising the mode — the gate is the thing being tested at this stage, not
+the bot's judgment.
+
+Read what the bot concluded at `/dashboard/intelligence`. Stay here until the
+opportunities it surfaces look like problems you agree are problems.
+
+### Phase 2 — recommend
+
+```bash
+INTELLIGENCE_MODE=recommend
+```
+
+Proposals and decisions now appear; nothing is queued. Every withheld action is
+recorded as awaiting approval, never as executed, so `action_log` distinguishes
+"the bot chose not to" from "the rollout gate withheld it":
+
+```sql
+SELECT module, action, status, risk_level, created_at FROM action_log
+WHERE client_id = '<client-id>' AND triggered_by LIKE 'intelligence:%'
+ORDER BY created_at DESC LIMIT 10;
+```
+
+No row should read `auto_executed`. `action_log` records the decision's outcome
+but not its reasoning, so the "why" is on the decision row, prefixed
+`Withheld by rollout gate:`:
+
+```sql
+SELECT d.created_at,
+       d.decision_type,
+       d.policy_basis -> 'execution_policy' ->> 'reason' AS execution_reason
+FROM intelligence_decisions d
+WHERE d.client_id = '<client-id>'
+ORDER BY d.created_at DESC
+LIMIT 10;
+```
+
+### Phase 3 — route safe jobs
+
+```bash
+INTELLIGENCE_MODE=route_safe
+```
+
+Auto-executed proposals now open measurement windows and queue their follow-up
+jobs. `links:process-outreach` is still blocked, and blocked visibly — a log
+line naming the job and the flag, not a silent skip.
+
+Wait for at least one full measurement window (`INTELLIGENCE_MEASUREMENT_DAYS`,
+default 28) before going further. The point of this phase is to find out whether
+the bot's remedies actually work, and that answer does not exist sooner:
+
+```sql
+-- The verdict lives in `result`, not in a column of its own; `status` moves off
+-- 'measuring' once a window has been judged.
+SELECT e.target_metric,
+       e.status,
+       e.result ->> 'verdict'   AS verdict,
+       e.result ->> 'learnings' AS learnings,
+       e.measurement_end
+FROM intelligence_experiments e
+WHERE e.client_id = '<client-id>'
+  AND e.status <> 'measuring'
+ORDER BY e.measurement_end DESC;
+```
+
+### Phase 4 — LLM planning
+
+```bash
+INTELLIGENCE_MODE=route_llm
+INTELLIGENCE_LLM_PLANNING_ENABLED=true
+```
+
+The model ranks remedies the evidence pack already permits; it cannot author an
+action. Watch spend against the job's budget for a week before proceeding.
+
+### Phase 5 — limited autonomy
+
+Only after Phase 3 has produced measured outcomes you trust:
+
+```bash
+INTELLIGENCE_ALLOW_OUTREACH_ROUTING=true
+```
+
+Leave these as they are. Live-site mutation is a separate decision with its own
+operator sign-off, and the live-write job is not on `TRIGGERABLE_JOBS`:
+
+```bash
+INTELLIGENCE_ALLOW_SITE_MUTATION=false
+SITE_DEPLOY_DRY_RUN=true
+```
+
+### After every phase — run the invariant pack
+
+Each phase above ends by verifying what the database actually holds, not what
+the logs said. The pack asks the questions a phase gate depends on: did every
+run finish, did anything auto-execute outside the plane's vocabulary, did the
+live-write job ever run, did any statistic get published below the anonymity
+floor.
+
+```bash
+DATABASE_URL=postgres://... npx tsx scripts/intelligence/verify-invariants.ts
+# or, from a checkout with the env already loaded:
+npm run verify:intelligence
+```
+
+Every invariant is phrased so that **rows mean a violation** — there is no
+expected count to interpret. Exit codes: `0` clean, `1` at least one violation,
+`2` the pack itself could not run. A query that ERRORS is reported as a finding,
+never as a pass: a check against a relation that does not exist must never read
+as "nothing wrong".
+
+The session is read-only twice over — every query is keyword-checked before it
+is sent, and the connection sets `default_transaction_read_only`. It is safe to
+run against production.
+
+Add `--json` for machine-readable output, or `--only=INTEL-04` to re-run one
+check after a fix. Each finding prints its id; `INTEL-04` and `INTEL-05` are the
+approval-boundary checks, `INTEL-06` is the live-write check, and `REPORT-01`
+and `REPORT-02` are the two levels of the k-anonymity floor.
+
+**Do not advance a phase with an open finding.** A violation at any rung means
+the rung below it was not doing what its gate claimed.
+
+### Rolling back
+
+In order, and safe to stop after any step.
+
+1. **Lower the mode.** `INTELLIGENCE_MODE=off` plus a restart stops all plane
+   activity. This is the fast path and needs no deploy.
+2. **Revert the code.** The jobs and views disappear with the code that
+   registers them. Rows already written stay and are simply not read.
+3. **Do not drop the tables to roll back.** They are additive and harmless, and
+   dropping them destroys the forensic record of what the bot concluded — which
+   is exactly what you need to understand why you rolled back. Drop them only
+   after exporting the rows, and only if the schema itself is the problem.
+
 ## Disaster Recovery & Troubleshooting
 
 ### Scenario A: Bot is burning too many tokens
@@ -233,7 +483,9 @@ When a new version of the L9 SEO Bot is pushed to GitHub:
 cd l9-seo-bot
 ./scripts/deploy.sh update
 ```
-This pulls the latest code, rebuilds the Node.js image, and restarts the Bot with zero downtime for PostHog or the database.
+This backs up the database, pulls the latest code, brings up Postgres and Redis, rebuilds the Node.js image, **runs migrations**, and only then restarts the Bot. PostHog and the database stay up throughout.
+
+The migration step runs in a throwaway container built from the new image, so a failed migration aborts the update with the previous bot container still serving — rather than starting new code against a schema it does not match.
 
 ### Backing Up the Database
 Backups are critical. Run a manual backup before any major update:
@@ -267,6 +519,9 @@ not from committed files. Names below match `src/core/config.ts` and `.env.examp
 | `TELEGRAM_CHAT_ID` | No | Emergency alerts |
 | `OPERATOR_API_KEY` | Yes | Operator API/dashboard auth; also the operator audience on `/api/reporting/*` |
 | `REPORTING_AGENT_API_KEY` | No | Opt-in agent audience for `/api/reporting/*` (masked projections only). Must differ from `OPERATOR_API_KEY` — startup fails if they match |
+| `INTELLIGENCE_MODE` | No | Default `off`. Rollout ladder: `off` / `observe` / `recommend` / `route_safe` / `route_llm` / `full`. See **Intelligence Plane — Staged Cutover** |
+| `INTELLIGENCE_ALLOW_OUTREACH_ROUTING` | No | Default off. Permits queueing `links:process-outreach`. Needs `route_safe`+ as well; no mode grants it alone. Only `true`/`1` enable |
+| `INTELLIGENCE_ALLOW_SITE_MUTATION` | No | Default off. Permits queueing live-site writes. Needs `route_safe`+ as well; the live-write job is separately excluded from `TRIGGERABLE_JOBS`. Only `true`/`1` enable |
 | `INTELLIGENCE_MIN_OPPORTUNITY_SCORE` | No | Default `20`. Minimum score eligible to become a proposal |
 | `INTELLIGENCE_MAX_ACTIONS_PER_RUN` | No | Default `3`. Per-client proposal ceiling per run; `0` stops proposals, keeps observation |
 | `INTELLIGENCE_SIGNAL_COOLDOWN_DAYS` | No | Default `7`. Fingerprint suppression window (CRITICAL findings are never suppressed) |
