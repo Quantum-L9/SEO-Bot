@@ -309,7 +309,11 @@ export async function logAction(
       riskLevel: proposal.riskLevel,
       reversible: proposal.reversible,
       status: decision.execute ? "auto_executed" : "pending_approval",
-      options: proposal.options ? JSON.stringify(proposal.options) : null,
+      // `options` is a jsonb column, so Drizzle serializes the value itself.
+      // JSON.stringify()-ing first stored a JSON *string* inside a JSON column:
+      // reading it back yielded "[{\"id\":...}]" rather than an array, so every
+      // consumer had to know to parse twice. Pass the array through.
+      options: proposal.options ?? null,
       aiRecommendation: proposal.aiRecommendation,
       aiConfidence: proposal.aiConfidence,
       estimatedImpact: proposal.estimatedImpact ?? null,

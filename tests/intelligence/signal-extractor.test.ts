@@ -41,6 +41,89 @@ import { SIGNAL_TYPES, type SignalCandidate } from "../../src/intelligence/types
 
 const CLIENT = "3f1b0c4e-8a2d-4f6b-9c1e-2a7d5b3e9f04";
 
+/**
+ * Render a Drizzle `sql` template to its statement text plus bound parameters.
+ *
+ * The extractors' judgment halves are tested against row shapes below, and
+ * their SQL halves against real Postgres in tests/live. That leaves one gap
+ * this helper closes: a WHERE clause can be syntactically valid, run without
+ * error, and still match nothing forever. Live tests seed rows to match the
+ * query, so they agree with it rather than checking it against the writer.
+ */
+function renderSql(statement: unknown): { text: string; params: unknown[] } {
+  const text: string[] = [];
+  const params: unknown[] = [];
+  const walk = (chunk: unknown): void => {
+    if (chunk === null || chunk === undefined) return;
+    if (typeof chunk !== "object") {
+      params.push(chunk);
+      return;
+    }
+    if (Array.isArray(chunk)) {
+      for (const item of chunk) walk(item);
+      return;
+    }
+    const node = chunk as Record<string, unknown>;
+    if (Array.isArray(node.queryChunks)) {
+      for (const item of node.queryChunks as unknown[]) walk(item);
+      return;
+    }
+    if (Array.isArray(node.value)) {
+      text.push((node.value as unknown[]).join(""));
+      return;
+    }
+    if ("value" in node) {
+      params.push(node.value);
+      return;
+    }
+  };
+  walk(statement);
+  return { text: text.join(""), params };
+}
+
+describe("prospect_high_dr_ready filters the statuses link-building actually writes", () => {
+  // REGRESSION. This extractor filtered `status = 'discovered'` — the schema
+  // default, and therefore the obvious guess. But `discoverProspects` always
+  // overwrites status on insert with 'ready' or 'needs_email', so no row is ever
+  // left in the default state: the query matched nothing and the signal never
+  // fired. Nothing caught it, because the judgment half was tested against
+  // hand-written rows and the live suite seeded rows to match the query.
+  const STATUSES_WRITTEN_BY_DISCOVERY = ["ready", "needs_email"] as const;
+  const STATUS_MEANING_ALREADY_CONTACTED = "outreach_queued";
+
+  it("selects every pre-contact status", () => {
+    const { text } = renderSql(prospectReadyExtractor.query(CLIENT));
+    for (const status of STATUSES_WRITTEN_BY_DISCOVERY) {
+      expect(text, `must count prospects in the '${status}' state`).toContain(`'${status}'`);
+    }
+  });
+
+  it("does not filter on a status nothing ever writes", () => {
+    const { text } = renderSql(prospectReadyExtractor.query(CLIENT));
+    expect(text).not.toContain("'discovered'");
+  });
+
+  it("excludes prospects already contacted", () => {
+    // Counting these would inflate the batch and invite duplicate outreach.
+    const { text } = renderSql(prospectReadyExtractor.query(CLIENT));
+    expect(text).not.toContain(`'${STATUS_MEANING_ALREADY_CONTACTED}'`);
+  });
+
+  it("keeps the client filter as a bound parameter", () => {
+    const { text, params } = renderSql(prospectReadyExtractor.query(CLIENT));
+    expect(params).toContain(CLIENT);
+    expect(text).not.toContain(CLIENT);
+  });
+
+  it("still separates contactable prospects from addressless ones", () => {
+    // Both states are counted so `with_contact` stays a real distinction; the
+    // severity ladder depends on it. Narrowing to 'ready' alone would make
+    // with_contact equal count and flatten the ladder.
+    const { text } = renderSql(prospectReadyExtractor.query(CLIENT));
+    expect(text).toContain("FILTER (WHERE contact_email IS NOT NULL)");
+  });
+});
+
 describe("row coercion", () => {
   it("parses the numeric strings pg returns", () => {
     // pg sends numeric/bigint as text to protect precision.
