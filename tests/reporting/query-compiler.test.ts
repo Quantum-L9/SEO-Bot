@@ -22,6 +22,7 @@ import { compileReportingQuery, ReportingQueryError } from "../../src/reporting/
 import {
   AGENT_FORBIDDEN_COLUMNS,
   assertRegistryIdentifiersAreSafe,
+  BENCHMARK_K_ANONYMITY_FLOOR,
   getReportingView,
   listReportingViews,
   REPORTING_VIEWS,
@@ -285,6 +286,94 @@ describe("compileReportingQuery — defaults", () => {
         expect(compiled.text).toContain(view.relation);
         expect(compiled.params).toHaveLength(1);
       }
+    }
+  });
+
+  // ─── The `token` filter kind (contract C1) ─────────────────────────────────
+  //
+  // Industry and state are open sets — whatever client registration recorded —
+  // so an enum cannot enumerate them. The value is a bound parameter either way,
+  // so these assertions are not about injection; they are about a caller string
+  // never reaching the audit row unbounded, and a malformed dimension being a
+  // rejection rather than an empty result that reads like "no such cohort".
+
+  it("binds a token filter as a parameter and never as SQL text", () => {
+    const compiled = compileReportingQuery(
+      { view: "portfolio_benchmarks", filters: { industry: "legal" } },
+      "agent",
+    );
+    expect(compiled.text).toContain("industry = $1");
+    expect(compiled.text).not.toContain("legal");
+    expect(compiled.params[0]).toBe("legal");
+  });
+
+  it("lower-cases and trims a token to match the view's normalized dimensions", () => {
+    // The view COALESCEs and lower-cases its cohort dimensions so "Legal" and
+    // "legal" are one cohort; a filter that did not would silently miss it.
+    const compiled = compileReportingQuery(
+      { view: "portfolio_benchmarks", filters: { industry: "  Legal  " } },
+      "agent",
+    );
+    expect(compiled.params[0]).toBe("legal");
+    expect(compiled.appliedFilters.industry).toBe("legal");
+  });
+
+  it("rejects an empty, oversized, or hostile token", () => {
+    for (const hostile of [
+      "",
+      "   ",
+      "legal'; DROP TABLE clients--",
+      "legal OR 1=1",
+      "x".repeat(81),
+      42,
+      ["legal"],
+    ]) {
+      expect(
+        () =>
+          compileReportingQuery(
+            { view: "portfolio_benchmarks", filters: { industry: hostile } },
+            "agent",
+          ),
+        String(hostile),
+      ).toThrow(ReportingQueryError);
+    }
+  });
+
+  it("treats a null token as an omitted filter, not a rejection", () => {
+    // Established compiler behavior for every filter kind: null/undefined means
+    // "no filter", so a caller may pass an absent dimension without branching.
+    const compiled = compileReportingQuery(
+      { view: "portfolio_benchmarks", filters: { industry: null } },
+      "agent",
+    );
+    expect(compiled.text).not.toContain("WHERE");
+    expect(compiled.appliedFilters).toEqual({});
+  });
+
+  it("refuses to ask for a cohort below the anonymity floor", () => {
+    // Below the floor there is nothing to return, and an empty result reads
+    // like "no such cohort" rather than "suppressed" — so it is a rejection.
+    expect(() =>
+      compileReportingQuery(
+        { view: "portfolio_benchmarks", filters: { min_cohort_size: 2 } },
+        "agent",
+      ),
+    ).toThrow(ReportingQueryError);
+
+    expect(() =>
+      compileReportingQuery(
+        { view: "portfolio_benchmarks", filters: { min_cohort_size: BENCHMARK_K_ANONYMITY_FLOOR } },
+        "agent",
+      ),
+    ).not.toThrow();
+  });
+
+  it("gives the agent audience the full benchmark projection and no identity", () => {
+    const compiled = compileReportingQuery({ view: "portfolio_benchmarks" }, "agent");
+    expect(compiled.columns).toContain("citation_rate_p50");
+    for (const forbidden of ["client_id", "client_name", "domain"]) {
+      expect(compiled.columns).not.toContain(forbidden);
+      expect(compiled.text).not.toContain(forbidden);
     }
   });
 });

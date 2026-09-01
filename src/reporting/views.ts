@@ -55,7 +55,15 @@ export type FilterSpec =
       maxSelected: number;
       description: string;
     }
-  | { kind: "recentDays"; column: string; min: number; max: number; description: string };
+  | { kind: "recentDays"; column: string; min: number; max: number; description: string }
+  /**
+   * Bounded free text, for an open-set dimension an enum cannot enumerate —
+   * `industry` and `state` are whatever client registration recorded. The value
+   * is a bound parameter either way, so this is not an injection boundary; the
+   * charset and length cap keep unbounded caller strings out of the audit row
+   * and make a typo a rejection rather than an empty result set.
+   */
+  | { kind: "token"; column: string; operator: "="; maxLength: number; description: string };
 
 export interface ReportingViewDefinition {
   /** Stable public name callers pass as `view`. */
@@ -83,6 +91,51 @@ const CLIENT_FILTER: FilterSpec = {
   operator: "=",
   description: "Restrict to a single tenant.",
 };
+
+/**
+ * Minimum number of distinct clients a cohort must contain before any statistic
+ * about it may be published (ADR-0015, contract C1).
+ *
+ * The number that actually governs disclosure lives in migration 0004, as a
+ * literal repeated at every guard — a function or a setting could be changed at
+ * runtime, whereas lowering the floor in a view definition is a migration
+ * someone has to review. This constant exists so the TypeScript side can state
+ * the same number, and `plane-contract.test.ts` reads the migration's literals
+ * back and refuses any that fall below it.
+ *
+ * Five, not two or three: with two clients in a cohort each derives the other's
+ * numbers exactly from the aggregate and its own, and with three or four,
+ * closely enough to be a disclosure.
+ */
+export const BENCHMARK_K_ANONYMITY_FLOOR = 5;
+
+/**
+ * Cohort dimensions plus the distribution. No client id, name, or domain — the
+ * whole point of the plane is that this can be read without one.
+ */
+const PORTFOLIO_BENCHMARK_COLUMNS: readonly string[] = [
+  "industry",
+  "country",
+  "state",
+  "period",
+  "cohort_size",
+  "position_clients",
+  "position_p25",
+  "position_p50",
+  "position_p75",
+  "lcp_clients",
+  "lcp_p25",
+  "lcp_p50",
+  "lcp_p75",
+  "exit_rate_clients",
+  "exit_rate_p25",
+  "exit_rate_p50",
+  "exit_rate_p75",
+  "citation_rate_clients",
+  "citation_rate_p25",
+  "citation_rate_p50",
+  "citation_rate_p75",
+];
 
 export const REPORTING_VIEWS: readonly ReportingViewDefinition[] = [
   {
@@ -521,6 +574,342 @@ export const REPORTING_VIEWS: readonly ReportingViewDefinition[] = [
     maxLimit: 500,
   },
   {
+    name: "portfolio_benchmarks",
+    relation: '"reporting"."mv_portfolio_benchmarks"',
+    description:
+      "Cross-client cohort statistics by industry × geography × month. Suppressed below the " +
+      "k-anonymity floor, at both cohort and per-metric level. Carries no client identity.",
+    projections: {
+      operator: PORTFOLIO_BENCHMARK_COLUMNS,
+      // Identical to the operator projection, deliberately: a cohort statistic
+      // that cleared the floor is not client data, and there is nothing here for
+      // an agent projection to have to strip.
+      agent: PORTFOLIO_BENCHMARK_COLUMNS,
+    },
+    filters: {
+      industry: {
+        kind: "token",
+        column: "industry",
+        operator: "=",
+        maxLength: 80,
+        description: "Cohort industry, lower-cased ('unknown' where the client has none).",
+      },
+      state: {
+        kind: "token",
+        column: "state",
+        operator: "=",
+        maxLength: 80,
+        description: "Cohort state or region, lower-cased ('unknown' where absent).",
+      },
+      country: {
+        kind: "token",
+        column: "country",
+        operator: "=",
+        maxLength: 80,
+        description: "Cohort country, lower-cased ('unknown' where absent).",
+      },
+      days: {
+        kind: "recentDays",
+        column: "period",
+        min: 1,
+        max: 1095,
+        description: "Only cohort periods starting within this many days.",
+      },
+      min_cohort_size: {
+        kind: "int",
+        column: "cohort_size",
+        operator: ">=",
+        min: BENCHMARK_K_ANONYMITY_FLOOR,
+        max: 10_000,
+        // The minimum is the floor itself: a caller asking for smaller cohorts
+        // is asking for suppressed ones, and the answer is a rejection rather
+        // than an empty result that reads like "no such cohort".
+        description: `Only cohorts of at least this many clients (never below ${BENCHMARK_K_ANONYMITY_FLOOR}).`,
+      },
+    },
+    orderBy: {
+      period_desc: "period DESC, industry ASC",
+      cohort_size_desc: "cohort_size DESC, period DESC",
+      industry_asc: "industry ASC, period DESC",
+    },
+    defaultOrderBy: "period_desc",
+    defaultLimit: 100,
+    maxLimit: 500,
+  },
+  {
+    name: "portfolio_cohort_coverage",
+    relation: '"reporting"."mv_portfolio_cohort_coverage"',
+    description:
+      "Which cohorts exist and which cleared the anonymity floor. Answers why a benchmark came " +
+      "back empty. Size is published only for cohorts above the floor.",
+    projections: {
+      operator: ["industry", "country", "state", "period", "meets_anonymity_floor", "cohort_size"],
+      agent: ["industry", "country", "state", "period", "meets_anonymity_floor", "cohort_size"],
+    },
+    filters: {
+      industry: {
+        kind: "token",
+        column: "industry",
+        operator: "=",
+        maxLength: 80,
+        description: "Cohort industry, lower-cased.",
+      },
+      days: {
+        kind: "recentDays",
+        column: "period",
+        min: 1,
+        max: 1095,
+        description: "Only cohort periods starting within this many days.",
+      },
+    },
+    orderBy: {
+      period_desc: "period DESC, industry ASC",
+      industry_asc: "industry ASC, period DESC",
+    },
+    defaultOrderBy: "period_desc",
+    defaultLimit: 200,
+    maxLimit: 1000,
+  },
+  {
+    name: "intelligence_opportunities_live",
+    relation: '"reporting"."intelligence_opportunities_live"',
+    description:
+      "Open and actioned opportunities, highest score first. The bot's current work list.",
+    projections: {
+      operator: [
+        "opportunity_id",
+        "client_id",
+        "client_name",
+        "domain",
+        "opportunity_type",
+        "title",
+        "description",
+        "target_url",
+        "target_keyword",
+        "score",
+        "urgency",
+        "confidence",
+        "status",
+        "created_at",
+        "updated_at",
+      ],
+      // `title` and `description` are composed from the scorer's own templates
+      // and the signal evidence, so they carry no identity — but `target_url`
+      // does, and it stays out.
+      agent: [
+        "opportunity_type",
+        "target_keyword",
+        "score",
+        "urgency",
+        "confidence",
+        "status",
+        "created_at",
+      ],
+    },
+    filters: {
+      client_id: CLIENT_FILTER,
+      status: {
+        kind: "enumIn",
+        column: "status",
+        values: ["open", "actioned"],
+        maxSelected: 2,
+        description: "Lifecycle status. Resolved and expired work is not on this view.",
+      },
+      min_score: {
+        kind: "number",
+        column: "score",
+        operator: ">=",
+        min: 0,
+        max: 100_000,
+        description: "Only opportunities at or above this score.",
+      },
+    },
+    orderBy: {
+      score_desc: "score DESC, created_at DESC",
+      created_at_desc: "created_at DESC",
+    },
+    defaultOrderBy: "score_desc",
+    defaultLimit: 25,
+    maxLimit: 250,
+  },
+  {
+    name: "intelligence_decisions_recent",
+    relation: '"reporting"."intelligence_decisions_recent"',
+    description:
+      "What the bot decided in the last 30 days and why. Rationale is model-authored free text.",
+    projections: {
+      operator: [
+        "decision_id",
+        "client_id",
+        "client_name",
+        "domain",
+        "decision_type",
+        "decision",
+        "rationale",
+        "requires_approval",
+        "action_log_id",
+        "opportunity_title",
+        "opportunity_status",
+        "blockers",
+        "opportunity_score",
+        "created_at",
+      ],
+      agent: [
+        "decision_type",
+        "decision",
+        "opportunity_status",
+        "blockers",
+        "opportunity_score",
+        "created_at",
+      ],
+    },
+    filters: {
+      client_id: CLIENT_FILTER,
+      decision: {
+        kind: "enumIn",
+        column: "decision",
+        values: [
+          "propose_action",
+          "defer_budget",
+          "suppress_duplicate",
+          "escalate_to_operator",
+          "run_diagnostic",
+          "no_action",
+        ],
+        maxSelected: 6,
+        description: "The policy engine's verdict.",
+      },
+      days: {
+        kind: "recentDays",
+        column: "created_at",
+        min: 1,
+        max: 30,
+        description: "Only decisions taken within this many days.",
+      },
+    },
+    orderBy: {
+      created_at_desc: "created_at DESC",
+      score_desc: "opportunity_score DESC NULLS LAST, created_at DESC",
+    },
+    defaultOrderBy: "created_at_desc",
+    defaultLimit: 25,
+    maxLimit: 250,
+  },
+  {
+    name: "intelligence_experiments_pending",
+    relation: '"reporting"."intelligence_experiments_pending"',
+    description: "Attribution windows still open, with days remaining before they can be judged.",
+    projections: {
+      operator: [
+        "experiment_id",
+        "client_id",
+        "client_name",
+        "domain",
+        "hypothesis",
+        "target_metric",
+        "entity_type",
+        "entity_id",
+        "measurement_start",
+        "measurement_end",
+        "days_remaining",
+        "status",
+        "created_at",
+      ],
+      // `entity_id` is a keyword, page path, or platform — a page path is a
+      // client's own URL structure, so it stays operator-only.
+      agent: [
+        "target_metric",
+        "entity_type",
+        "measurement_start",
+        "measurement_end",
+        "days_remaining",
+        "status",
+      ],
+    },
+    filters: {
+      client_id: CLIENT_FILTER,
+      metric: {
+        kind: "enum",
+        column: "target_metric",
+        operator: "=",
+        values: ["serp_position", "page_exit_rate", "aeo_citation_rate"],
+        description: "Metric the experiment measures.",
+      },
+    },
+    orderBy: {
+      soonest_first: "measurement_end ASC",
+      created_at_desc: "created_at DESC",
+    },
+    defaultOrderBy: "soonest_first",
+    defaultLimit: 25,
+    maxLimit: 250,
+  },
+  {
+    name: "intelligence_outcomes_measured",
+    relation: '"reporting"."intelligence_outcomes_measured"',
+    description:
+      "Did it work? Measured experiments with their verdict and the learning the memory " +
+      "promoter reads. Learnings are model-authored free text.",
+    projections: {
+      operator: [
+        "experiment_id",
+        "client_id",
+        "client_name",
+        "domain",
+        "target_metric",
+        "entity_id",
+        "status",
+        "verdict",
+        "baseline",
+        "measured",
+        "delta",
+        "module",
+        "action",
+        "success",
+        "learnings",
+        "executed_at",
+        "measured_at",
+      ],
+      agent: [
+        "target_metric",
+        "status",
+        "verdict",
+        "baseline",
+        "measured",
+        "delta",
+        "module",
+        "action",
+        "success",
+        "executed_at",
+        "measured_at",
+      ],
+    },
+    filters: {
+      client_id: CLIENT_FILTER,
+      verdict: {
+        kind: "enumIn",
+        column: "verdict",
+        values: ["improved", "declined", "unchanged", "inconclusive"],
+        maxSelected: 4,
+        description: "How the experiment resolved.",
+      },
+      metric: {
+        kind: "enum",
+        column: "target_metric",
+        operator: "=",
+        values: ["serp_position", "page_exit_rate", "aeo_citation_rate"],
+        description: "Metric the experiment measured.",
+      },
+    },
+    orderBy: {
+      measured_at_desc: "measured_at DESC NULLS LAST, executed_at DESC",
+      executed_at_desc: "executed_at DESC",
+    },
+    defaultOrderBy: "measured_at_desc",
+    defaultLimit: 25,
+    maxLimit: 250,
+  },
+  {
     name: "link_prospects_uncontacted",
     relation: '"reporting"."link_prospects_uncontacted"',
     description: "Discovered link prospects not yet contacted. Operator-only: carries contact PII.",
@@ -671,6 +1060,17 @@ export const AGENT_FORBIDDEN_COLUMNS: ReadonlySet<string> = new Set([
   "client_name",
   "name",
   "domain",
+  // Model-authored free text that quotes the evidence it was reasoning over,
+  // including target URLs and keywords. Redacting it per-value is not something
+  // a column projection can do, so no agent projection carries it.
+  "rationale",
+  "learnings",
+  "hypothesis",
+  "description",
+  "title",
+  "opportunity_title",
+  "entity_id",
+  "target_url",
   "contact_email",
   "contact_name",
   "posthog_api_key",

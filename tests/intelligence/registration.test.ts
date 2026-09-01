@@ -25,6 +25,12 @@ const hooks = vi.hoisted(() => ({
   measured: [] as { experimentId: string; verdict: string }[],
   triageCalls: [] as unknown[],
   policyRefreshCount: 0,
+  approvedPickups: [] as unknown[],
+  expiredCount: 0,
+  lifecycleConfigChecked: [] as unknown[],
+  portfolioRuns: 0,
+  synthesisLimits: [] as number[],
+  synthesisOutcomes: [] as { actionLogId: string; clientId: string; optionCount: number }[],
 }));
 
 vi.mock("../../src/reporting/refresh.js", () => ({
@@ -32,6 +38,24 @@ vi.mock("../../src/reporting/refresh.js", () => ({
 }));
 vi.mock("../../src/intelligence/outcome-attributor.js", () => ({
   measureDueExperiments: async () => hooks.measured,
+}));
+vi.mock("../../src/intelligence/plan-synthesizer.js", () => ({
+  synthesizePendingProposals: async (limit: number) => {
+    hooks.synthesisLimits.push(limit);
+    return hooks.synthesisOutcomes;
+  },
+}));
+vi.mock("../../src/intelligence/portfolio.js", () => ({
+  runPortfolioBenchmark: async () => {
+    hooks.portfolioRuns += 1;
+    return {
+      runId: "run-1",
+      publishedCohorts: 0,
+      suppressedCohorts: 3,
+      periods: 0,
+      anonymityFloor: 5,
+    };
+  },
 }));
 vi.mock("../../src/intelligence/runner.js", () => ({
   runClientTriage: async (...args: unknown[]) => {
@@ -45,6 +69,28 @@ vi.mock("../../src/intelligence/runner.js", () => ({
 }));
 vi.mock("../../src/core/logger.js", () => ({
   createModuleLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }),
+}));
+// Registration asserts the lifecycle config invariant (expiry must outlast the
+// signal cooldown), which reaches the real loader — and the real loader calls
+// process.exit on an unpopulated environment. Registration is what is under
+// test here, not env parsing, so the two values are stubbed like every other
+// dependency in this suite.
+vi.mock("../../src/core/config.js", () => ({
+  getConfig: () => ({
+    INTELLIGENCE_OPPORTUNITY_EXPIRY_DAYS: 30,
+    INTELLIGENCE_SIGNAL_COOLDOWN_DAYS: 7,
+    INTELLIGENCE_SYNTHESIS_BATCH_SIZE: 10,
+  }),
+}));
+vi.mock("../../src/intelligence/lifecycle.js", () => ({
+  assertLifecycleConfig: (config: {
+    INTELLIGENCE_OPPORTUNITY_EXPIRY_DAYS: number;
+    INTELLIGENCE_SIGNAL_COOLDOWN_DAYS: number;
+  }) => {
+    hooks.lifecycleConfigChecked.push(config);
+  },
+  sweepApprovedActions: async () => hooks.approvedPickups,
+  expireStaleOpportunities: async () => hooks.expiredCount,
 }));
 
 import { INTELLIGENCE_JOBS, registerIntelligenceHandlers } from "../../src/intelligence/index.js";
@@ -78,6 +124,12 @@ beforeEach(() => {
   hooks.measured = [];
   hooks.triageCalls = [];
   hooks.policyRefreshCount = 0;
+  hooks.approvedPickups = [];
+  hooks.expiredCount = 0;
+  hooks.lifecycleConfigChecked = [];
+  hooks.portfolioRuns = 0;
+  hooks.synthesisLimits = [];
+  hooks.synthesisOutcomes = [];
   scheduler = fakeScheduler();
   registerIntelligenceHandlers(scheduler as unknown as never);
 });
@@ -90,10 +142,17 @@ describe("job definitions", () => {
     expect(declared).toEqual([...Object.values(INTELLIGENCE_JOBS)].sort());
   });
 
-  it("declares a zero token budget on every job", () => {
-    // Reasoning is deterministic. A non-zero budget here would mean the plane
-    // itself started spending on every client, every day, forever.
+  it("declares a zero token budget on every job but the one that is allowed to spend", () => {
+    // Reasoning is deterministic. A non-zero budget on a REASONING job would
+    // mean the plane started spending on every client, every day, forever.
+    //
+    // Plan synthesis (contract C2) genuinely spends, so the invariant is pinned
+    // as a named list of one rather than relaxed to "most jobs": a second
+    // budgeted job then has to be added HERE to pass, which is the point.
+    const BUDGETED = [INTELLIGENCE_JOBS.planSynthesis];
+
     for (const definition of scheduler.definitions) {
+      if (BUDGETED.includes(definition.name)) continue;
       expect(definition.tokenBudget, definition.name).toEqual({
         maxFastTokensPerRun: 0,
         maxStrategicTokensPerRun: 0,
@@ -102,12 +161,50 @@ describe("job definitions", () => {
     }
   });
 
+  it("bounds the one budgeted job rather than leaving it open-ended", () => {
+    const synthesis = scheduler.definitions.find(
+      (definition) => definition.name === INTELLIGENCE_JOBS.planSynthesis,
+    );
+    expect(synthesis?.tokenBudget.maxStrategicTokensPerRun).toBeGreaterThan(0);
+    // A cooldown is what stops a retried or manually-triggered job from
+    // reaching a model back-to-back.
+    expect(synthesis?.tokenBudget.cooldownMinutes).toBeGreaterThan(0);
+  });
+
+  it("synthesizes after triage has produced the day's proposals", () => {
+    // Before it, the sweep would rank yesterday's leftovers and today's
+    // proposals would wait a full day for their options.
+    const byName = new Map(scheduler.definitions.map((d) => [d.name, d]));
+    const hourOf = (name: string) => Number(byName.get(name)?.cron.split(" ")[1]);
+    expect(hourOf(INTELLIGENCE_JOBS.planSynthesis)).toBeGreaterThan(
+      hourOf(INTELLIGENCE_JOBS.dailyTriage),
+    );
+  });
+
   it("scopes triage per client and leaves the sweeps global", () => {
     const byName = new Map(scheduler.definitions.map((d) => [d.name, d]));
     expect(byName.get(INTELLIGENCE_JOBS.dailyTriage)?.clientScoped).toBe(true);
     expect(byName.get(INTELLIGENCE_JOBS.outcomeAttribution)?.clientScoped).toBe(false);
     expect(byName.get(INTELLIGENCE_JOBS.policyRefresh)?.clientScoped).toBe(false);
+    expect(byName.get(INTELLIGENCE_JOBS.lifecycleSweep)?.clientScoped).toBe(false);
+    // The portfolio run is the one run type with no client at all: fanning it
+    // out per client would produce N identical cross-client snapshots.
+    expect(byName.get(INTELLIGENCE_JOBS.portfolioBenchmark)?.clientScoped).toBe(false);
     expect(byName.get(INTELLIGENCE_JOBS.reportingRefresh)?.clientScoped).toBe(false);
+  });
+
+  it("runs the lifecycle sweep hourly, not once a day", () => {
+    // An operator who approves a CRITICAL action at 09:00 should not wait for
+    // the overnight pass before its follow-up job is queued.
+    const sweep = scheduler.definitions.find((d) => d.name === INTELLIGENCE_JOBS.lifecycleSweep);
+    expect(sweep?.cron.split(" ")[1]).toBe("*");
+  });
+
+  it("proves the expiry window outlasts the signal cooldown at registration", () => {
+    // The two are set independently by environment. Crossing them makes routine
+    // signal suppression look like the problem going away, and live
+    // opportunities expire — with nothing failing to say so.
+    expect(hooks.lifecycleConfigChecked).toHaveLength(1);
   });
 
   it("runs triage after the overnight collection jobs, not before them", () => {
@@ -156,6 +253,27 @@ describe("handlers", () => {
     ];
     const handler = scheduler.handlers.get(INTELLIGENCE_JOBS.reportingRefresh);
     await expect(handler?.({} as Job)).resolves.toBeUndefined();
+  });
+
+  it("runs the lifecycle sweep: approved pickups and expiry together", async () => {
+    hooks.approvedPickups = [{ actionLogId: "a1" }];
+    hooks.expiredCount = 2;
+    const handler = scheduler.handlers.get(INTELLIGENCE_JOBS.lifecycleSweep);
+    await expect(handler?.({} as Job)).resolves.toBeUndefined();
+  });
+
+  it("passes the configured batch size to the synthesis sweep", async () => {
+    // The sweep is the plane's only token-spending step; an unbounded one after
+    // an unusual day is where a deterministic system produces a surprising bill.
+    const handler = scheduler.handlers.get(INTELLIGENCE_JOBS.planSynthesis);
+    await expect(handler?.({} as Job)).resolves.toBeUndefined();
+    expect(hooks.synthesisLimits).toEqual([10]);
+  });
+
+  it("records a portfolio benchmark run", async () => {
+    const handler = scheduler.handlers.get(INTELLIGENCE_JOBS.portfolioBenchmark);
+    await expect(handler?.({} as Job)).resolves.toBeUndefined();
+    expect(hooks.portfolioRuns).toBe(1);
   });
 
   it("runs the attribution and policy sweeps", async () => {

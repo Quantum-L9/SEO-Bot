@@ -14,7 +14,13 @@ export type SeoImproveLlmOperation =
   | "SEO_CONTENT_BLUEPRINT"
   | "STRUCTURED_CONTENT_GENERATION"
   | "CONTENT_VALIDATION"
-  | "FRESH_WEB_EVIDENCE";
+  | "FRESH_WEB_EVIDENCE"
+  /**
+   * Intelligence plane (ADR-0016, contract C2): rank the actions an evidence
+   * pack already permits. SCORING, not generation — the model chooses among a
+   * fixed allow-list and never authors an action name.
+   */
+  | "INTELLIGENCE_ACTION_SELECTION";
 
 type PolicyEntry = Omit<TaskDescriptor, "clientId" | "description">;
 
@@ -54,6 +60,16 @@ export const SEO_IMPROVE_LLM_POLICY: Record<SeoImproveLlmOperation, PolicyEntry>
     requiresReasoning: false,
     requiresSearch: true,
   },
+  // Small on purpose. The input is one redacted evidence pack and the output is
+  // a ranking of at most a handful of allow-listed action strings, so a large
+  // output budget here would only buy prose nobody reads.
+  INTELLIGENCE_ACTION_SELECTION: {
+    type: TaskType.SCORING,
+    complexity: TaskComplexity.MEDIUM,
+    expectedOutputTokens: 1200,
+    requiresReasoning: true,
+    requiresSearch: false,
+  },
 };
 
 export function seoImproveTask(
@@ -78,6 +94,10 @@ export function assertSeoImprovePolicy(): void {
     "SEO_CONTENT_BLUEPRINT",
     "STRUCTURED_CONTENT_GENERATION",
     "CONTENT_VALIDATION",
+    // The pack IS the evidence. A search provider here would let the model
+    // reason from the open web about a client it is deliberately not told the
+    // identity of — which is both a worse decision and a redaction leak.
+    "INTELLIGENCE_ACTION_SELECTION",
   ];
 
   for (const operation of forbiddenSearchOperations) {

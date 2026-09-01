@@ -36,6 +36,7 @@ import { createModuleLogger } from "../core/logger.js";
 import type { Scheduler } from "../core/scheduler.js";
 import { type PlannedDecision, planOpportunity } from "./action-planner.js";
 import { buildEvidencePack } from "./evidence-pack.js";
+import { ACTIVE_OPPORTUNITY_STATUSES, markOpportunityActioned } from "./lifecycle.js";
 import { buildOpportunities } from "./opportunity-scorer.js";
 import { openExperiment } from "./outcome-attributor.js";
 import { loadPolicyState, refreshPolicyState } from "./policy-state.js";
@@ -222,7 +223,7 @@ async function executeCycle(
 
   // ── Plan / Act ────────────────────────────────────────────────────────────
   const policyState = await refreshPolicyState(clientId);
-  const openFingerprints = await loadOpenOpportunityFingerprints(clientId, runId, cooldownStart);
+  const openFingerprints = await loadOpenOpportunityFingerprints(clientId, runId);
 
   let actionsTaken = 0;
   let proposals = 0;
@@ -283,6 +284,14 @@ async function executeCycle(
 
     proposals += 1;
     actionsTaken += 1;
+
+    // A proposal exists for this opportunity, so it is no longer merely `open`.
+    // The transition happens whether the execution policy auto-executed it or
+    // parked it for approval: in both cases the bot has committed a remedy and
+    // must not re-propose the same one next cycle. What separates them is
+    // measurement, below — and, for the approval path, the lifecycle sweep.
+    const opportunityId = opportunityIds.get(opportunity.fingerprint);
+    if (opportunityId) await markOpportunityActioned(opportunityId);
 
     if (planned.execution?.execute) {
       autoExecuted += 1;
@@ -434,23 +443,24 @@ async function loadRecentFingerprints(
 }
 
 /**
- * Opportunity fingerprints recently raised for this client, excluding the ones
- * this run just wrote — otherwise every opportunity would suppress itself.
+ * Fingerprints of this client's LIVE opportunities, excluding the ones this run
+ * just wrote — otherwise every opportunity would suppress itself.
  *
- * The `since` bound is load-bearing, not a performance tweak. `status` has no
- * transition yet (nothing closes an opportunity — see ADR-0016, and the
- * lifecycle contract in docs/seo-sql/CONTRACTS.md), so an unbounded
- * `status = 'open'` filter matches every opportunity ever recorded. That would
- * make suppression PERMANENT: a problem acted on once and not actually fixed
- * would be re-detected by the extractors, re-grouped into the same fingerprint,
- * and then silently discarded on every subsequent run, forever. Bounding the
- * window to the same cooldown that governs signals means a recurring problem
- * comes back after the cooldown instead of disappearing.
+ * "Live" is `open` or `actioned` (contract C3). Before the lifecycle existed,
+ * `status` never transitioned, so an unbounded `status = 'open'` filter matched
+ * every opportunity ever recorded and suppression was PERMANENT: a problem acted
+ * on once and not actually fixed would be re-detected, re-grouped into the same
+ * fingerprint, and silently discarded on every later run. The cooldown bound
+ * that used to sit here was a holding measure against exactly that.
+ *
+ * It is gone now because status carries the meaning instead, and carries it
+ * better: a `resolved` or `expired` opportunity no longer suppresses anything,
+ * while an `actioned` one whose remedy is still being measured correctly does —
+ * a bound on age could only ever approximate that distinction.
  */
 async function loadOpenOpportunityFingerprints(
   clientId: string,
   runId: string,
-  since: Date,
 ): Promise<Set<string>> {
   const db = getDb();
   const rows = await db
@@ -459,8 +469,7 @@ async function loadOpenOpportunityFingerprints(
     .where(
       and(
         eq(schema.intelligenceOpportunities.clientId, clientId),
-        eq(schema.intelligenceOpportunities.status, "open"),
-        gte(schema.intelligenceOpportunities.createdAt, since),
+        inArray(schema.intelligenceOpportunities.status, [...ACTIVE_OPPORTUNITY_STATUSES]),
         sql`${schema.intelligenceOpportunities.runId} IS DISTINCT FROM ${runId}::uuid`,
       ),
     );

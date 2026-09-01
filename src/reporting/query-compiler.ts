@@ -97,6 +97,36 @@ function requireUuid(filterName: string, raw: unknown): string {
   return raw.toLowerCase();
 }
 
+/**
+ * A bounded, lower-cased token for an open-set dimension.
+ *
+ * The value is a bound parameter regardless, so this is not the injection
+ * boundary — the charset is here so an unbounded caller string cannot land in
+ * the audit row, and so a malformed dimension is a 400 rather than a query that
+ * quietly returns nothing. Lower-casing matches the view, which normalizes its
+ * cohort dimensions so "Legal" and "legal" are one cohort.
+ */
+const TOKEN_PATTERN = /^[a-z0-9][a-z0-9 &._/-]*$/;
+
+function requireToken(filterName: string, raw: unknown, maxLength: number): string {
+  if (typeof raw !== "string") {
+    throw new ReportingQueryError(`Filter "${filterName}" must be a string`);
+  }
+  const value = raw.trim().toLowerCase();
+  if (value === "") {
+    throw new ReportingQueryError(`Filter "${filterName}" must not be empty`);
+  }
+  if (value.length > maxLength) {
+    throw new ReportingQueryError(`Filter "${filterName}" must be at most ${maxLength} characters`);
+  }
+  if (!TOKEN_PATTERN.test(value)) {
+    throw new ReportingQueryError(
+      `Filter "${filterName}" may contain only letters, digits, spaces and & . _ / -`,
+    );
+  }
+  return value;
+}
+
 function requireEnum(filterName: string, raw: unknown, values: readonly string[]): string {
   if (typeof raw !== "string" || !values.includes(raw)) {
     throw new ReportingQueryError(`Filter "${filterName}" must be one of: ${values.join(", ")}`);
@@ -173,6 +203,14 @@ function compilePredicate(
         sql: `${spec.column} IN (${placeholders.join(", ")})`,
         params: values,
         applied: values,
+      };
+    }
+    case "token": {
+      const value = requireToken(filterName, raw, spec.maxLength);
+      return {
+        sql: `${spec.column} ${spec.operator} $${nextParamIndex}`,
+        params: [value],
+        applied: value,
       };
     }
     case "recentDays": {

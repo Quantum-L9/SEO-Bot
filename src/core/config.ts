@@ -86,6 +86,28 @@ const envSchema = z.object({
   // Days a signal fingerprint stays suppressed after being observed, so the same
   // observation does not regenerate the same opportunity every cycle.
   INTELLIGENCE_SIGNAL_COOLDOWN_DAYS: z.coerce.number().int().min(0).max(90).default(7),
+  // Age at which an opportunity that has stopped recurring is marked `expired`
+  // (ADR-0016 contract C3). MUST exceed INTELLIGENCE_SIGNAL_COOLDOWN_DAYS: inside
+  // the cooldown a repeat observation is suppressed and writes no new opportunity
+  // row, so a shorter window would read ordinary suppression as the problem
+  // having gone away. `assertLifecycleConfig` enforces the relationship.
+  INTELLIGENCE_OPPORTUNITY_EXPIRY_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+  // Intelligence plane contract C2. When false, the plane reasons entirely
+  // deterministically and every proposal keeps the action its static template
+  // chose. This is the only switch that makes the plane spend tokens of its own,
+  // and turning it off must never stop the bot reasoning — availability of a
+  // model is not allowed to be a dependency of the loop.
+  // Matches TRUST_PROXY's shape, and for the same reason: `z.coerce.boolean()`
+  // treats every non-empty string as true, so `=false` in an env file would
+  // ENABLE the one feature here that spends money.
+  INTELLIGENCE_LLM_PLANNING_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+  // Per-sweep ceiling on proposals sent for model ranking. This is the plane's
+  // only token-spending step; an unbounded sweep after an unusual day is the one
+  // place a deterministic-by-design system could produce a surprising bill.
+  INTELLIGENCE_SYNTHESIS_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(10),
   // Attribution windows: how long before/after an action is measured.
   INTELLIGENCE_BASELINE_DAYS: z.coerce.number().int().min(1).max(90).default(14),
   INTELLIGENCE_MEASUREMENT_DAYS: z.coerce.number().int().min(1).max(180).default(28),
