@@ -156,6 +156,55 @@ describe("classifyAction — taxonomy + fallback (GAP-001)", () => {
   });
 });
 
+describe("logAction — options reach a jsonb column as JSON, not as a string", () => {
+  it("passes the options array through rather than JSON.stringify-ing it", async () => {
+    // REGRESSION. `action_log.options` is declared jsonb, so Drizzle serializes
+    // the value itself. Stringifying first stored a JSON *string* inside a JSON
+    // column — a read returned "[{\"id\":...}]" rather than an array, so every
+    // consumer had to know to parse twice, and `options->>'id'` in SQL matched
+    // nothing. Nothing caught it because no test asserted the written shape.
+    const options = [
+      {
+        id: "opt-a",
+        label: "Rewrite the intro",
+        description: "Tighten the first paragraph",
+        riskLevel: "low" as const,
+        reversible: true,
+        recommended: true,
+        confidence: 0.8,
+      },
+    ];
+    const p = createProposal({
+      clientId: "c1",
+      module: "serp-intelligence",
+      action: "meta_title_update",
+      description: "d",
+      rationale: "r",
+      triggeredBy: "test",
+      options,
+    });
+    await logAction(p, evaluateExecution(p));
+
+    const written = insertValuesMock.mock.calls[0][0] as { options: unknown };
+    expect(typeof written.options).not.toBe("string");
+    expect(Array.isArray(written.options)).toBe(true);
+    expect(written.options).toEqual(options);
+  });
+
+  it("writes null when a proposal carries no options", async () => {
+    const p = createProposal({
+      clientId: "c1",
+      module: "serp-intelligence",
+      action: "meta_title_update",
+      description: "d",
+      rationale: "r",
+      triggeredBy: "test",
+    });
+    await logAction(p, evaluateExecution(p));
+    expect((insertValuesMock.mock.calls[0][0] as { options: unknown }).options).toBeNull();
+  });
+});
+
 describe("logAction — persisted status reflects the decision (GAP-001)", () => {
   it("persists pending_approval when execution is denied (critical)", async () => {
     const p = createProposal({
