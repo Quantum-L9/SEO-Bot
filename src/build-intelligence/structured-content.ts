@@ -645,7 +645,12 @@ async function generateRoute(
     "requirements. When a proof requirement cannot be backed by an allowed fact " +
     "(quantifiable achievements, third-party validation, or credentials the contract " +
     "does not support), satisfy it with an honest methodological or commitment " +
-    "statement — never fabricate the proof itself. Produce a metadata title and " +
+    "statement — never fabricate the proof itself. " +
+    "NEVER write any of these phrases — the grounding layer removes them " +
+    "deterministically and broken fragments would remain: " +
+    `${[...CREDENTIAL_CLAIM_TOKENS, ...MAGNITUDE_PHRASES].join(", ")}. ` +
+    "If a concept needs expression, write a complete grammatical sentence that " +
+    "avoids the banned wording entirely. Produce a metadata title and " +
     "description that satisfy their " +
     "requirements. Produce exactly one section object per contract section_id (same " +
     "ids), plus faqs, internal links (including every required internal-link target), " +
