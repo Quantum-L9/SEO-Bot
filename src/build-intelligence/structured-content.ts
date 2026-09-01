@@ -642,7 +642,11 @@ async function generateRoute(
     "the supplied contract and allowed facts. Never invent facts or claims; every " +
     "claim must be backed by an allowed fact. Respect forbidden claims. Cover the " +
     "required topics/entities, answer the required questions, and satisfy the proof " +
-    "requirements. Produce a metadata title and description that satisfy their " +
+    "requirements. When a proof requirement cannot be backed by an allowed fact " +
+    "(quantifiable achievements, third-party validation, or credentials the contract " +
+    "does not support), satisfy it with an honest methodological or commitment " +
+    "statement — never fabricate the proof itself. Produce a metadata title and " +
+    "description that satisfy their " +
     "requirements. Produce exactly one section object per contract section_id (same " +
     "ids), plus faqs, internal links (including every required internal-link target), " +
     "and schema_content_inputs.\n\n" +

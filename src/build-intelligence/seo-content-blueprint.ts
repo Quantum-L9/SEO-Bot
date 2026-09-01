@@ -352,7 +352,8 @@ export async function createSEOContentBlueprintWithEvidence(
                   required_topics: "string[]",
                   required_entities: "string[]",
                   questions: "string[]",
-                  proof_needed: "string[]",
+                  proof_needed:
+                    "string[] — only proof the verified business facts or honest methodology can support; never demand quantifiable achievements, third-party validation, client names, or credentials the facts cannot back",
                   required: "boolean",
                 },
                 competitive_gaps: [

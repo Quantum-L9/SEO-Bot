@@ -131,7 +131,10 @@ export async function validateRouteSemantics(
     "content satisfies the contract: required topics covered, entities handled, " +
     "questions answered, proof requirements respected, search intent aligned, and " +
     "no unsupported or forbidden claims. A claim is unsupported if it is not backed " +
-    "by an allowed fact. Do not rewrite content. Respond with ONLY a JSON object: " +
+    "by an allowed fact. A proof requirement is satisfied by honest methodological " +
+    "or commitment content when no allowed fact supports factual proof — never " +
+    "require fabricated metrics, clients, or credentials. Do not rewrite content. " +
+    "Respond with ONLY a JSON object: " +
     '{"seo_blueprint_passed":bool,"contract_passed":bool,"unsupported_claims":[...],' +
     '"failed_requirements":[...]} — no prose, no markdown fences.';
 
