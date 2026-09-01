@@ -22,6 +22,14 @@ import { resolve } from "node:path";
 const SRC_DIR = resolve("packages/bot-interop/src");
 const MANIFEST_PATH = resolve("contracts/BOT_INTEROP_PARITY.json");
 const PEERS = ["Quantum-L9/Website-Bot", "Quantum-L9/SEO-Bot"];
+/**
+ * Shared contract documents every peer must commit byte-identically. The lock
+ * asserts in its own text that both peers commit the identical file; nothing
+ * checked that, and it silently drifted when one repo's JSON formatter reflowed
+ * it. A claim no gate enforces is a comment, so it is checked here. The
+ * manifest itself is excluded — it cannot contain its own digest.
+ */
+const SHARED_CONTRACTS = ["contracts/WEBSITE_INTELLIGENCE_LOCK.json"];
 
 function canonicalSourceSet() {
   return readdirSync(SRC_DIR)
@@ -36,8 +44,18 @@ function digestOf(name) {
 }
 
 const files = Object.fromEntries(canonicalSourceSet().map((name) => [name, digestOf(name)]));
+const sharedContracts = Object.fromEntries(
+  SHARED_CONTRACTS.map((path) => [
+    path,
+    createHash("sha256")
+      .update(readFileSync(resolve(path)))
+      .digest("hex"),
+  ]),
+);
 /** One digest over the whole set, so a single value identifies the contract. */
-const setDigest = createHash("sha256").update(JSON.stringify(files)).digest("hex");
+const setDigest = createHash("sha256")
+  .update(JSON.stringify({ files, shared_contracts: sharedContracts }))
+  .digest("hex");
 
 if (process.argv.includes("--write")) {
   const manifest = {
@@ -51,6 +69,7 @@ if (process.argv.includes("--write")) {
     algorithm: "sha256",
     set_digest: setDigest,
     files,
+    shared_contracts: sharedContracts,
   };
   // Emitted in the shape SEO-Bot's biome formatter produces (expand: "auto"
   // collapses a short array onto one line), so `--write` is idempotent in a repo
@@ -92,6 +111,15 @@ for (const name of Object.keys(files)) {
     problems.push(`EXTRA    ${name} — present here but absent from the shared manifest`);
   }
 }
+for (const [path, digest] of Object.entries(manifest.shared_contracts ?? {})) {
+  if (!(path in sharedContracts)) {
+    problems.push(`MISSING  ${path} — manifest expects it, this repo does not ship it`);
+  } else if (sharedContracts[path] !== digest) {
+    problems.push(
+      `DRIFT    ${path}\n           expected ${digest}\n           observed ${sharedContracts[path]}`,
+    );
+  }
+}
 if (manifest.set_digest !== setDigest && problems.length === 0) {
   problems.push(
     `SET_DIGEST expected ${manifest.set_digest}, observed ${setDigest} — regenerate the manifest`,
@@ -115,6 +143,7 @@ process.stdout.write(
     invariant: "WBV2-014",
     set_digest: setDigest,
     files: Object.keys(files).length,
+    shared_contracts: Object.keys(sharedContracts).length,
     peers: manifest.peers ?? PEERS,
   })}\n`,
 );
