@@ -24,10 +24,9 @@ vi.mock("../../../src/core/logger.js", () => ({
 }));
 
 import {
-  capabilitiesForMode,
-  type IntelligenceMode,
+  type IntelligenceCapabilities,
   resolveCapabilities,
-} from "../../../src/modules/intelligence/modes.js";
+} from "../../../src/modules/intelligence/capabilities.js";
 import {
   evaluateIntelligenceAction,
   type PolicyGateInput,
@@ -36,26 +35,33 @@ import {
 
 const CLIENT = { id: "client-a", active: true };
 
-const ALL_FLAGS_ON = {
-  llmPlanningEnabled: true,
-  allowSafeJobRouting: true,
-  allowOutreachRouting: true,
-  allowSiteMutation: true,
-};
+function caps(overrides: Record<string, unknown> = {}): IntelligenceCapabilities {
+  return resolveCapabilities({
+    INTELLIGENCE_ENABLED: true,
+    INTELLIGENCE_LLM_PLANNING_ENABLED: true,
+    INTELLIGENCE_AUTO_ROUTE_LOW_RISK: true,
+    INTELLIGENCE_PORTFOLIO_BENCHMARK_ENABLED: false,
+    INTELLIGENCE_MAX_OPPORTUNITIES_PER_CLIENT: 10,
+    INTELLIGENCE_MIN_SCORE_TO_PLAN: 50,
+    INTELLIGENCE_SIGNAL_STALE_DAYS: 14,
+    ...overrides,
+  } as never);
+}
 
 function input(overrides: Partial<PolicyGateInput> = {}): PolicyGateInput {
-  const mode: IntelligenceMode = overrides.mode ?? "full";
   return {
     clientId: "client-a",
     action: "intelligence_run_competitor_analysis",
-    mode,
-    capabilities: resolveCapabilities(mode, ALL_FLAGS_ON),
+    capabilities: caps(),
     client: CLIENT,
+    score: 80,
     llmBudgetExhausted: false,
     rankingCircuitBreakerOpen: false,
     outreachVelocityExhausted: false,
     siteDeploymentReady: true,
     siteDeployDryRun: false,
+    duplicateActionPending: false,
+    measurementWindowActive: false,
     requiresLlm: false,
     ...overrides,
   };
@@ -83,12 +89,32 @@ describe("baseline", () => {
 });
 
 describe("each gate blocks", () => {
-  it("blocks when mode is off", () => {
+  it("blocks when the module is disabled", () => {
     const decision = evaluateIntelligenceAction(
-      input({ mode: "off", capabilities: capabilitiesForMode("off") }),
+      input({ capabilities: caps({ INTELLIGENCE_ENABLED: false }) }),
     );
     expect(decision.allowed).toBe(false);
-    expect(decision.reasons.join(" ")).toMatch(/INTELLIGENCE_MODE=off/);
+    expect(decision.reasons.join(" ")).toMatch(/INTELLIGENCE_ENABLED=false/);
+  });
+
+  it("blocks an opportunity scoring below the plan threshold", () => {
+    const decision = evaluateIntelligenceAction(input({ score: 41 }));
+    expect(decision.allowed).toBe(false);
+    expect(decision.reasons.join(" ")).toMatch(/below INTELLIGENCE_MIN_SCORE_TO_PLAN/);
+  });
+
+  it("blocks a duplicate action already pending for the opportunity", () => {
+    const decision = evaluateIntelligenceAction(input({ duplicateActionPending: true }));
+    expect(decision.allowed).toBe(false);
+    expect(decision.reasons.join(" ")).toMatch(/already pending/);
+  });
+
+  it("blocks while a measurement window is open", () => {
+    // Acting again mid-window destroys the attribution: the second action's
+    // effect is indistinguishable from the first's.
+    const decision = evaluateIntelligenceAction(input({ measurementWindowActive: true }));
+    expect(decision.allowed).toBe(false);
+    expect(decision.reasons.join(" ")).toMatch(/measurement window/);
   });
 
   it("blocks when the client is inactive", () => {
@@ -113,16 +139,15 @@ describe("each gate blocks", () => {
     expect(decision.reasons.join(" ")).toMatch(/daily spend cap/);
   });
 
-  it("blocks LLM planning when the mode/flag does not permit it", () => {
+  it("blocks LLM planning when its flag is off", () => {
     const decision = evaluateIntelligenceAction(
       input({
-        mode: "route_safe",
-        capabilities: resolveCapabilities("route_safe", ALL_FLAGS_ON),
+        capabilities: caps({ INTELLIGENCE_LLM_PLANNING_ENABLED: false }),
         requiresLlm: true,
       }),
     );
     expect(decision.allowed).toBe(false);
-    expect(decision.reasons.join(" ")).toMatch(/LLM planning not permitted/);
+    expect(decision.reasons.join(" ")).toMatch(/INTELLIGENCE_LLM_PLANNING_ENABLED=false/);
   });
 
   it("blocks outreach when the velocity allowance is spent", () => {
@@ -161,26 +186,25 @@ describe("each gate blocks", () => {
     expect(decision.reasons.join(" ")).toMatch(/SITE_DEPLOY_DRY_RUN/);
   });
 
-  it("blocks safe job routing when the flag is off", () => {
+  it("blocks analysis routing when auto-route is off", () => {
     const decision = evaluateIntelligenceAction(
-      input({
-        capabilities: resolveCapabilities("full", { ...ALL_FLAGS_ON, allowSafeJobRouting: false }),
-      }),
+      input({ capabilities: caps({ INTELLIGENCE_AUTO_ROUTE_LOW_RISK: false }) }),
     );
     expect(decision.allowed).toBe(false);
-    expect(decision.reasons.join(" ")).toMatch(/safe job routing not permitted/);
+    expect(decision.reasons.join(" ")).toMatch(/INTELLIGENCE_AUTO_ROUTE_LOW_RISK=false/);
   });
 
-  it("blocks outreach in route_safe even with the outreach flag on", () => {
+  it("still permits a proposal-only action when auto-route is off", () => {
+    // Recording a recommendation causes nothing downstream, so the routing flag
+    // must not suppress it — otherwise turning routing off would also blind the
+    // operator to what the loop noticed.
     const decision = evaluateIntelligenceAction(
       input({
-        mode: "route_safe",
-        capabilities: resolveCapabilities("route_safe", ALL_FLAGS_ON),
-        action: "intelligence_queue_outreach",
+        action: "intelligence_generate_recommendation",
+        capabilities: caps({ INTELLIGENCE_AUTO_ROUTE_LOW_RISK: false }),
       }),
     );
-    expect(decision.allowed).toBe(false);
-    expect(decision.reasons.join(" ")).toMatch(/outreach routing not permitted/);
+    expect(decision.allowed).toBe(true);
   });
 });
 
@@ -193,18 +217,12 @@ describe("unknown actions fail closed", () => {
     expect(decision.reasons.join(" ")).toMatch(/not in the intelligence vocabulary/);
   });
 
-  it("blocks an unknown action even in full mode with every flag on", () => {
-    const decision = evaluateIntelligenceAction(
-      input({
-        action: "definitely_not_real",
-        mode: "full",
-        capabilities: resolveCapabilities("full", ALL_FLAGS_ON),
-      }),
-    );
+  it("blocks an unknown action even with every flag on", () => {
+    const decision = evaluateIntelligenceAction(input({ action: "definitely_not_real" }));
     expect(decision.allowed).toBe(false);
   });
 
-  it("never auto-allows a critical action, whatever the mode", () => {
+  it("never auto-allows a critical action, whatever the config", () => {
     const decision = evaluateIntelligenceAction(
       input({ action: "intelligence_execute_site_change", siteDeployDryRun: false }),
     );
@@ -217,19 +235,19 @@ describe("all reasons are collected, not just the first", () => {
   it("reports every failing rule at once", () => {
     const decision = evaluateIntelligenceAction(
       input({
-        mode: "off",
-        capabilities: capabilitiesForMode("off"),
+        capabilities: caps({ INTELLIGENCE_ENABLED: false }),
         client: { id: "client-a", active: false },
         action: "intelligence_queue_outreach",
+        score: 10,
         outreachVelocityExhausted: true,
         rankingCircuitBreakerOpen: true,
       }),
     );
     expect(decision.allowed).toBe(false);
     const joined = decision.reasons.join(" | ");
-    expect(joined).toMatch(/INTELLIGENCE_MODE=off/);
+    expect(joined).toMatch(/INTELLIGENCE_ENABLED=false/);
     expect(joined).toMatch(/inactive/);
-    expect(joined).toMatch(/outreach routing not permitted/);
+    expect(joined).toMatch(/below INTELLIGENCE_MIN_SCORE_TO_PLAN/);
     expect(joined).toMatch(/velocity allowance exhausted/);
     expect(joined).toMatch(/circuit breaker/);
     expect(decision.reasons.length).toBeGreaterThanOrEqual(5);

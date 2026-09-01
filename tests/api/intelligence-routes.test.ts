@@ -38,6 +38,7 @@ vi.mock("../../src/core/database/index.js", () => {
       intelligenceRuns: {},
       intelligenceOpportunities: {},
       intelligenceActionLinks: {},
+      intelligenceDecisions: {},
     },
   };
 });
@@ -46,16 +47,15 @@ vi.mock("../../src/core/logger.js", () => ({
   createModuleLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }),
 }));
 
-vi.mock("../../src/modules/intelligence/modes.js", () => ({
-  currentIntelligenceMode: () => "observe",
+vi.mock("../../src/modules/intelligence/capabilities.js", () => ({
   currentCapabilities: () => ({
-    writesSignals: true,
-    writesOpportunities: true,
-    writesProposals: false,
-    routesSafeJobs: false,
+    enabled: true,
     usesLlmPlanner: false,
-    routesOutreach: false,
-    routesSiteMutation: false,
+    autoRouteLowRisk: false,
+    portfolioBenchmark: false,
+    maxOpportunitiesPerClient: 10,
+    minScoreToPlan: 50,
+    signalStaleDays: 14,
   }),
 }));
 
@@ -88,7 +88,7 @@ describe("GET /api/clients/:clientId/intelligence", () => {
     expect(response.json()).toMatchObject({ error: "Client not found" });
   });
 
-  it("returns this client's signals and runs with the active mode", async () => {
+  it("returns this client's signals, runs, and resolved capabilities", async () => {
     dbResults.queue = [
       [{ id: CLIENT_A, domain: "example.com" }],
       [
@@ -97,7 +97,7 @@ describe("GET /api/clients/:clientId/intelligence", () => {
           fingerprint: "fp-1",
           entityKey: "metal roofing",
           severity: "high",
-          strength: 0.6,
+          confidence: 0.6,
           status: "open",
           evidence: { keyword: "metal roofing" },
           firstSeenAt: new Date(),
@@ -121,7 +121,7 @@ describe("GET /api/clients/:clientId/intelligence", () => {
     const body = response.json();
     expect(response.statusCode).toBe(200);
     expect(body.clientId).toBe(CLIENT_A);
-    expect(body.mode).toBe("observe");
+    expect(body.capabilities.enabled).toBe(true);
     expect(body.signals).toHaveLength(1);
     expect(body.runs).toHaveLength(1);
   });
@@ -169,11 +169,12 @@ describe("GET /api/clients/:clientId/opportunities", () => {
           id: "opp-1",
           opportunityType: "recover_keyword_ranking",
           fingerprint: "opp-fp",
-          score: 0.42,
-          impact: 0.75,
+          score: 62,
+          expectedImpact: 75,
           confidence: 0.6,
-          effort: 0.5,
-          risk: 0.2,
+          urgency: 0.8,
+          effort: 0.8,
+          risk: 0.4,
           status: "open",
           rationale: "keyword slipped",
           createdAt: new Date(),
@@ -185,8 +186,8 @@ describe("GET /api/clients/:clientId/opportunities", () => {
           opportunityId: "opp-1",
           action: "intelligence_generate_surpass_plan",
           jobName: "serp:generate-surpass-plan",
-          outcome: "blocked",
-          blockedReason: "safe job routing not permitted",
+          status: "blocked",
+          blockedReason: "INTELLIGENCE_AUTO_ROUTE_LOW_RISK=false",
           createdAt: new Date(),
         },
       ],
@@ -198,8 +199,8 @@ describe("GET /api/clients/:clientId/opportunities", () => {
     const body = response.json();
     expect(body.opportunities).toHaveLength(1);
     // A blocked route is visible to the operator, with its reason.
-    expect(body.links[0].outcome).toBe("blocked");
-    expect(body.links[0].blockedReason).toMatch(/not permitted/);
+    expect(body.links[0].status).toBe("blocked");
+    expect(body.links[0].blockedReason).toMatch(/AUTO_ROUTE_LOW_RISK/);
   });
 
   it("does not leak client secrets on the opportunities route either", async () => {
@@ -217,11 +218,109 @@ describe("GET /api/clients/:clientId/opportunities", () => {
   });
 });
 
+describe("GET /api/clients/:clientId/decisions", () => {
+  it("404s an unknown client", async () => {
+    dbResults.queue = [[]];
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/clients/${CLIENT_A}/decisions`,
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("returns deferrals with their policy basis, not just actions", async () => {
+    // A ledger that records only what happened cannot distinguish "the gate
+    // blocked this correctly" from "the loop never looked at it".
+    dbResults.queue = [
+      [{ id: CLIENT_A }],
+      [
+        {
+          id: "dec-1",
+          opportunityId: "opp-1",
+          decisionType: "intelligence_queue_outreach",
+          decision: "defer",
+          rationale: "ranking circuit breaker is open",
+          policyBasis: { rankingCircuitBreakerOpen: true, score: 41, minScoreToPlan: 50 },
+          evidenceSummary: { opportunityType: "link_building" },
+          requiresApproval: false,
+          actionLogId: null,
+          createdAt: new Date(),
+        },
+      ],
+    ];
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/clients/${CLIENT_A}/decisions`,
+    });
+    const body = response.json();
+    expect(body.decisions).toHaveLength(1);
+    expect(body.decisions[0].decision).toBe("defer");
+    expect(body.decisions[0].policyBasis).toMatchObject({ rankingCircuitBreakerOpen: true });
+  });
+
+  it("does not leak client secrets", async () => {
+    dbResults.queue = [
+      [{ id: CLIENT_A, posthogApiKey: "phc_LEAK", config: { k: "v_SECRET" } }],
+      [],
+    ];
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/clients/${CLIENT_A}/decisions`,
+    });
+    expect(response.body).not.toContain("phc_LEAK");
+    expect(response.body).not.toContain("v_SECRET");
+  });
+});
+
+describe("POST /api/clients/:clientId/intelligence/trigger", () => {
+  it("rejects a phase outside the intelligence allow-list", async () => {
+    // The allow-list is deliberately not derived from the scheduler registry: a
+    // new job must not become externally reachable merely by existing.
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/clients/${CLIENT_A}/intelligence/trigger`,
+      payload: { phase: "serp:execute-surpass-plans" },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toMatch(/Invalid phase/);
+  });
+
+  it("rejects a missing phase", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/clients/${CLIENT_A}/intelligence/trigger`,
+      payload: {},
+    });
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("404s an unknown client before queueing anything", async () => {
+    dbResults.queue = [[]];
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/clients/${CLIENT_A}/intelligence/trigger`,
+      payload: { phase: "intelligence:extract-signals" },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("never exposes the portfolio benchmark as a per-client trigger", async () => {
+    // It is the one cross-client query in the module; triggering it from a
+    // client-scoped route would misrepresent what it reads.
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/clients/${CLIENT_A}/intelligence/trigger`,
+      payload: { phase: "intelligence:portfolio-benchmark" },
+    });
+    expect(response.statusCode).toBe(400);
+  });
+});
+
 describe("GET /api/intelligence/portfolio", () => {
   it("suppresses the benchmark below the anonymity threshold", async () => {
     // With one or two tenants an "anonymous" median is trivially re-identifiable.
     dbResults.queue = [
-      [{ signalType: "keyword_drop", clientCount: 2, signalCount: 9, avgStrength: 0.5 }],
+      [{ signalType: "keyword_drop", clientCount: 2, signalCount: 9, avgConfidence: 0.5 }],
     ];
     const response = await app.inject({ method: "GET", url: "/api/intelligence/portfolio" });
     const body = response.json();
@@ -233,8 +332,8 @@ describe("GET /api/intelligence/portfolio", () => {
   it("returns aggregates once enough clients contribute", async () => {
     dbResults.queue = [
       [
-        { signalType: "keyword_drop", clientCount: 5, signalCount: 40, avgStrength: 0.44 },
-        { signalType: "citation_loss", clientCount: 4, signalCount: 12, avgStrength: 0.61 },
+        { signalType: "keyword_drop", clientCount: 5, signalCount: 40, avgConfidence: 0.44 },
+        { signalType: "citation_loss", clientCount: 4, signalCount: 12, avgConfidence: 0.61 },
       ],
     ];
     const response = await app.inject({ method: "GET", url: "/api/intelligence/portfolio" });
@@ -246,7 +345,7 @@ describe("GET /api/intelligence/portfolio", () => {
 
   it("returns no client identifiers, domains, keywords, or URLs", async () => {
     dbResults.queue = [
-      [{ signalType: "keyword_drop", clientCount: 5, signalCount: 40, avgStrength: 0.44 }],
+      [{ signalType: "keyword_drop", clientCount: 5, signalCount: 40, avgConfidence: 0.44 }],
     ];
     const response = await app.inject({ method: "GET", url: "/api/intelligence/portfolio" });
     const raw = response.body;

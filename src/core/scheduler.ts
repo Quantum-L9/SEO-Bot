@@ -166,29 +166,31 @@ const JOB_DEFINITIONS: JobDefinition[] = [
     enabled: true,
   },
   // ─── Intelligence control loop ─────────────────────────────────────────────
-  // Four phases rather than one job: each has a different blast radius and a
-  // different mode gate, so `observe` can run extraction and scoring forever
-  // without ever loading the code path that enqueues work.
+  // Five phases rather than one job. Each has a different blast radius and a
+  // different gate, so the deterministic phases can run forever without ever
+  // loading the code path that spends tokens or enqueues work.
   //
-  // All four are `enabled: true` here but are only SCHEDULED when
-  // INTELLIGENCE_MODE is not "off" — see `isJobEnabled`. They run after the
-  // morning data-collection jobs (SERP 06:00, vitals/AEO/behavior) so they
-  // score fresh observations rather than yesterday's.
+  // Ordering matters: these run AFTER the morning collectors (behavior 05:00,
+  // SERP 06:00) so they score fresh facts, and BEFORE the day's downstream
+  // work so anything they route still runs today.
+  //
+  // All are `enabled: true` here but are only SCHEDULED when
+  // INTELLIGENCE_ENABLED is set — see `isJobEnabled`.
   {
     name: "intelligence:extract-signals",
     module: "intelligence",
-    cron: "0 8 * * *",
+    cron: "30 6 * * *",
     handler: "extractSignals",
     clientScoped: true,
     // Zero tokens: extraction is pure SQL over operational tables. No LLM may
-    // be introduced here — determinism is the contract (see signal-extractor).
+    // be introduced here — determinism is the contract.
     tokenBudget: { maxFastTokensPerRun: 0, maxStrategicTokensPerRun: 0, cooldownMinutes: 0 },
     enabled: true,
   },
   {
     name: "intelligence:score-opportunities",
     module: "intelligence",
-    cron: "20 8 * * *",
+    cron: "45 6 * * *",
     handler: "scoreOpportunities",
     clientScoped: true,
     // Zero tokens: scoring is arithmetic over signal fields, by contract.
@@ -198,28 +200,45 @@ const JOB_DEFINITIONS: JobDefinition[] = [
   {
     name: "intelligence:plan-actions",
     module: "intelligence",
-    cron: "40 8 * * *",
+    cron: "0 7 * * *",
     handler: "planActions",
     clientScoped: true,
-    // The only intelligence job that spends tokens, and only in route_llm/full.
-    // Strategic-only: the planner picks from a closed vocabulary given an
-    // evidence pack, which is a judgment task, not a fast classification.
+    // The main token consumer, and only when LLM planning is enabled. The
+    // planner receives a compact evidence pack that SQL has already reduced,
+    // never raw rows, so the budget bounds a judgment call rather than a scan.
     tokenBudget: {
-      maxFastTokensPerRun: 0,
+      maxFastTokensPerRun: 1000,
       maxStrategicTokensPerRun: 4000,
       cooldownMinutes: 120,
     },
     enabled: true,
   },
   {
-    name: "intelligence:attribute-outcomes",
+    name: "intelligence:measure-outcomes",
     module: "intelligence",
-    // Weekly: the attribution window is 14 days, so measuring more often than
-    // weekly re-reads the same unchanged before/after pair.
-    cron: "0 9 * * 1",
-    handler: "attributeOutcomes",
+    cron: "30 7 * * *",
+    handler: "measureOutcomes",
     clientScoped: true,
-    tokenBudget: { maxFastTokensPerRun: 0, maxStrategicTokensPerRun: 0, cooldownMinutes: 0 },
+    // A small strategic budget for summarizing what was learned; the
+    // before/after comparison itself is pure SQL.
+    tokenBudget: {
+      maxFastTokensPerRun: 0,
+      maxStrategicTokensPerRun: 1000,
+      cooldownMinutes: 60,
+    },
+    enabled: true,
+  },
+  {
+    name: "intelligence:portfolio-benchmark",
+    module: "intelligence",
+    // Friday, after the week's data has accumulated and before the weekly report.
+    cron: "0 8 * * 5",
+    handler: "portfolioBenchmark",
+    // NOT client-scoped — this is the one cross-client query in the module. It
+    // returns anonymized aggregates only and is off unless
+    // INTELLIGENCE_PORTFOLIO_BENCHMARK_ENABLED is set.
+    clientScoped: false,
+    tokenBudget: { maxFastTokensPerRun: 0, maxStrategicTokensPerRun: 2000, cooldownMinutes: 0 },
     enabled: true,
   },
   {
@@ -239,11 +258,11 @@ const JOB_DEFINITIONS: JobDefinition[] = [
  * Whether a job should be scheduled on this boot.
  *
  * Separate from the static `enabled` flag because the intelligence module's
- * schedule is governed by INTELLIGENCE_MODE, which is deployment config rather
- * than a source-level decision. With `INTELLIGENCE_MODE=off` (the default) its
- * jobs are never placed on a queue at all — the handlers' own mode checks would
- * make them no-ops anyway, but not scheduling them means an operator sees zero
- * intelligence jobs rather than a stream of jobs that do nothing.
+ * schedule is deployment config rather than a source-level decision. With
+ * INTELLIGENCE_ENABLED unset (the default) its jobs are never placed on a queue
+ * at all — the handlers' own checks would make them no-ops anyway, but not
+ * scheduling them means an operator sees zero intelligence jobs rather than a
+ * stream of jobs that do nothing.
  *
  * Config is read here rather than at module load: JOB_DEFINITIONS is evaluated
  * on import, and `getConfig()` exits the process on invalid env, which would
@@ -251,7 +270,15 @@ const JOB_DEFINITIONS: JobDefinition[] = [
  */
 export function isJobEnabled(jobDef: JobDefinition): boolean {
   if (!jobDef.enabled) return false;
-  if (jobDef.module === "intelligence") return getConfig().INTELLIGENCE_MODE !== "off";
+  if (jobDef.module !== "intelligence") return true;
+
+  const config = getConfig();
+  if (config.INTELLIGENCE_ENABLED !== true) return false;
+  // The portfolio benchmark is the only cross-client query in the module, so it
+  // carries its own opt-in on top of the master switch.
+  if (jobDef.name === "intelligence:portfolio-benchmark") {
+    return config.INTELLIGENCE_PORTFOLIO_BENCHMARK_ENABLED === true;
+  }
   return true;
 }
 

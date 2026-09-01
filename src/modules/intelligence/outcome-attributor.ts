@@ -9,64 +9,131 @@
  *
  * Closes the loop: for each routed action, did the thing it targeted improve?
  *
- * ATTRIBUTION IS MEASURED, NOT ASSERTED.
- * The only claim made here is "the metric moved in this direction over this
- * window" - never "this action caused it". SEO has too many confounders for a
- * single-system before/after to establish causation, so `success` records an
- * observation and `learnings` records the window it was observed over. Writing
- * a causal claim into the feedback loop would let one coincidence teach the
- * scorer the wrong lesson permanently.
+ * THE WINDOW IS FIXED BEFORE THE RESULT IS KNOWN.
+ * An experiment row records its baseline and measurement periods when the
+ * action is routed, not when it is measured. That ordering is the whole point:
+ * if the window were chosen at measurement time, the loop could always find a
+ * span that made an action look good, and its own scoring feedback would be
+ * quietly self-confirming.
  *
- * A NULL METRIC IS NOT A FAILURE.
- * When the after-measurement is missing (the keyword fell out of the index,
- * the page has no traffic yet), attribution returns `null` rather than `false`.
- * Recording "no data" as "did not work" would systematically bias the loop
- * against actions on low-traffic pages, which are exactly the ones most likely
- * to need help.
+ * SEO MOVES SLOWLY, SO ONE WINDOW IS NOT ENOUGH.
+ *   0-7 days    early movement only, never a verdict
+ *   7-21 days   the primary measurement
+ *   21-45 days  final attribution for slower categories
+ * Reporting a 3-day result as final is how you conclude that a content refresh
+ * "failed" before Google has recrawled the page.
+ *
+ * ATTRIBUTION IS MEASURED, NOT ASSERTED. The only claim made is "the metric
+ * moved in this direction over this window" — never "this action caused it".
+ * SEO has too many confounders for a single-system before/after to establish
+ * causation, and writing a causal claim into the feedback loop would let one
+ * coincidence teach the scorer a permanent wrong lesson.
+ *
+ * A NULL METRIC IS NOT A FAILURE. When the after-measurement is missing (the
+ * keyword left the tracked set, the page has no traffic yet) attribution
+ * returns null, not false. Recording "no data" as "did not work" would bias the
+ * loop against low-traffic pages — exactly the ones most likely to need help.
  */
 
-import { and, desc, eq, gte } from "drizzle-orm";
-import { getDb, schema } from "../../core/database/index.js";
 import { createModuleLogger } from "../../core/logger.js";
-import { assertClientId } from "./signal-extractor.js";
 
 const logger = createModuleLogger("intelligence:attribution");
 
-/** Days to wait after an action before its effect is measurable. */
-export const ATTRIBUTION_WINDOW_DAYS = 14;
+/** Measurement phases, in days after the action executed. */
+export const ATTRIBUTION_WINDOWS = {
+  early: { start: 0, end: 7 },
+  primary: { start: 7, end: 21 },
+  final: { start: 21, end: 45 },
+} as const;
+
+export type AttributionPhase = keyof typeof ATTRIBUTION_WINDOWS;
+
+/** Days of history before the action that form the baseline. */
+export const BASELINE_DAYS = 14;
+
+export interface AttributionWindow {
+  baselineStart: Date;
+  baselineEnd: Date;
+  measurementStart: Date;
+  measurementEnd: Date;
+}
+
+/**
+ * Compute the fixed window for a phase, from the moment the action executed.
+ * Pure and exported so the router can persist it up front and the measurer can
+ * recompute the identical span later.
+ */
+export function windowFor(executedAt: Date, phase: AttributionPhase): AttributionWindow {
+  const day = 24 * 60 * 60 * 1000;
+  const { start, end } = ATTRIBUTION_WINDOWS[phase];
+  return {
+    baselineStart: new Date(executedAt.getTime() - BASELINE_DAYS * day),
+    baselineEnd: new Date(executedAt.getTime()),
+    measurementStart: new Date(executedAt.getTime() + start * day),
+    measurementEnd: new Date(executedAt.getTime() + end * day),
+  };
+}
+
+/** Which phase, if any, is ready to be measured for an action executed then. */
+export function readyPhase(executedAt: Date, now: Date = new Date()): AttributionPhase | null {
+  const ageDays = (now.getTime() - executedAt.getTime()) / (24 * 60 * 60 * 1000);
+  if (ageDays >= ATTRIBUTION_WINDOWS.final.end) return "final";
+  if (ageDays >= ATTRIBUTION_WINDOWS.primary.end) return "primary";
+  if (ageDays >= ATTRIBUTION_WINDOWS.early.end) return "early";
+  return null;
+}
 
 export interface AttributionInput {
   keyword: string;
   positionBefore: number | null;
   positionAfter: number | null;
+  trafficBefore?: number | null;
+  trafficAfter?: number | null;
+  phase: AttributionPhase;
 }
 
 export interface AttributionResult {
   keyword: string;
+  phase: AttributionPhase;
   positionBefore: number | null;
   positionAfter: number | null;
+  trafficBefore: number | null;
+  trafficAfter: number | null;
   delta: number | null;
-  /** true = improved, false = worsened, null = not measurable. */
+  /** true = improved, false = worsened, null = not measurable or not yet final. */
   success: boolean | null;
   learnings: string;
 }
 
 /**
- * Compare a before/after ranking pair.
+ * Compare a before/after ranking pair for one phase.
  *
  * Lower position numbers are better, so an improvement is a NEGATIVE delta.
- * This is the sign convention that gets inverted most often in ranking code, so
- * `delta` is defined once here (after - before) and every caller reads
- * `success` rather than re-deriving the comparison.
+ * That sign convention is the most commonly inverted comparison in ranking
+ * code, so `delta` is defined once here (after - before) and callers read
+ * `success` rather than re-deriving it.
+ *
+ * The `early` phase never returns a verdict, only an observation: seven days is
+ * not enough for a ranking change to settle, and letting it set `success` would
+ * feed noise straight into scoring.
  */
 export function attributeRankingChange(input: AttributionInput): AttributionResult {
-  const { keyword, positionBefore, positionAfter } = input;
+  const { keyword, positionBefore, positionAfter, phase } = input;
+  const trafficBefore = input.trafficBefore ?? null;
+  const trafficAfter = input.trafficAfter ?? null;
+
+  const base = {
+    keyword,
+    phase,
+    positionBefore,
+    positionAfter,
+    trafficBefore,
+    trafficAfter,
+  };
 
   if (positionBefore === null || positionAfter === null) {
     return {
-      keyword,
-      positionBefore,
-      positionAfter,
+      ...base,
       delta: null,
       success: null,
       learnings: "Not measurable: a before or after position was unavailable.",
@@ -74,108 +141,47 @@ export function attributeRankingChange(input: AttributionInput): AttributionResu
   }
 
   const delta = positionAfter - positionBefore;
-  if (delta === 0) {
+  const windowLabel = `${ATTRIBUTION_WINDOWS[phase].start}-${ATTRIBUTION_WINDOWS[phase].end}d`;
+
+  if (phase === "early") {
     return {
-      keyword,
-      positionBefore,
-      positionAfter,
+      ...base,
       delta,
       success: null,
-      learnings: `No movement over ${ATTRIBUTION_WINDOW_DAYS} days (position ${positionAfter}).`,
+      learnings:
+        `Early movement over ${windowLabel}: position ${positionBefore} -> ${positionAfter} ` +
+        `(delta ${delta}). Too soon for a verdict; recorded as observation only.`,
+    };
+  }
+
+  if (delta === 0) {
+    return {
+      ...base,
+      delta,
+      success: null,
+      learnings: `No movement over ${windowLabel} (position ${positionAfter}).`,
     };
   }
 
   const improved = delta < 0;
   return {
-    keyword,
-    positionBefore,
-    positionAfter,
+    ...base,
     delta,
     success: improved,
     learnings:
       `Position moved ${positionBefore} -> ${positionAfter} ` +
-      `(${improved ? "improved" : "worsened"} by ${Math.abs(delta)}) ` +
-      `over ${ATTRIBUTION_WINDOW_DAYS} days. Correlation only; not a causal claim.`,
+      `(${improved ? "improved" : "worsened"} by ${Math.abs(delta)}) over ${windowLabel}. ` +
+      `Correlation only; not a causal claim.`,
   };
 }
 
-/**
- * Attribute outcomes for one client's recently-routed keyword actions.
- *
- * Reads the current ranking for each keyword the loop acted on and records the
- * comparison in action_outcomes, the existing feedback table - rather than
- * inventing a second one, so the weekly report and any future scorer tuning
- * read from a single place.
- */
-export async function attributeOutcomes(clientId: string): Promise<AttributionResult[]> {
-  assertClientId(clientId);
-  const db = getDb();
-
-  const windowStart = new Date(Date.now() - ATTRIBUTION_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-
-  const signals = await db
-    .select()
-    .from(schema.intelligenceSignals)
-    .where(
-      and(
-        eq(schema.intelligenceSignals.clientId, clientId),
-        eq(schema.intelligenceSignals.signalType, "keyword_drop"),
-        gte(schema.intelligenceSignals.firstSeenAt, windowStart),
-      ),
-    )
-    .limit(200);
-
-  if (signals.length === 0) return [];
-
-  const rankings = await db
-    .select()
-    .from(schema.serpRankings)
-    .where(eq(schema.serpRankings.clientId, clientId))
-    .orderBy(desc(schema.serpRankings.checkedAt))
-    .limit(500);
-
-  const latestByKeyword = new Map<string, (typeof rankings)[number]>();
-  for (const row of rankings) {
-    if (!latestByKeyword.has(row.keyword)) latestByKeyword.set(row.keyword, row);
-  }
-
-  const results: AttributionResult[] = [];
-
-  for (const signal of signals) {
-    const evidence = (signal.evidence ?? {}) as Record<string, unknown>;
-    const keyword = typeof evidence.keyword === "string" ? evidence.keyword : signal.entityKey;
-    const before = typeof evidence.currentPosition === "number" ? evidence.currentPosition : null;
-    const after = latestByKeyword.get(keyword)?.position ?? null;
-
-    const result = attributeRankingChange({
-      keyword,
-      positionBefore: before,
-      positionAfter: after,
-    });
-    results.push(result);
-
-    await db.insert(schema.actionOutcomes).values({
-      clientId,
-      module: "intelligence",
-      action: "intelligence_generate_surpass_plan",
-      executedAt: signal.firstSeenAt,
-      measuredAt: new Date(),
-      positionBefore: result.positionBefore,
-      positionAfter: result.positionAfter,
-      success: result.success,
-      learnings: result.learnings,
-    });
-  }
-
-  logger.info(
-    {
-      clientId,
-      measured: results.length,
-      improved: results.filter((r) => r.success === true).length,
-      unmeasurable: results.filter((r) => r.success === null).length,
-    },
-    "Outcome attribution complete",
-  );
-
-  return results;
+export function summarizeAttribution(results: AttributionResult[]): Record<string, number> {
+  const summary = {
+    measured: results.length,
+    improved: results.filter((r) => r.success === true).length,
+    worsened: results.filter((r) => r.success === false).length,
+    inconclusive: results.filter((r) => r.success === null).length,
+  };
+  logger.debug(summary, "Attribution summary");
+  return summary;
 }

@@ -66,27 +66,37 @@ function stripControlChars(input: string): string {
  * omitting the new field until a human adds it here.
  */
 const EVIDENCE_ALLOW_LIST: Record<string, readonly string[]> = {
-  keyword_drop: ["keyword", "currentPosition", "previousPosition", "delta"],
-  bad_lcp_high_exit: ["path", "lcp", "exitRate", "avgTimeOnPage", "uniqueVisitors", "device"],
-  citation_loss: ["platform", "query", "competitorCited"],
-  prospect_ready: ["targetUrl", "domainRating", "relevanceScore", "tactic"],
+  keyword_drop: ["keyword", "url", "current_position", "previous_position", "position_delta"],
+  bad_lcp_high_exit: ["path", "lcp", "exit_rate", "avg_time_on_page", "unique_visitors", "device"],
+  citation_loss: ["platform", "query", "competitor_cited"],
+  prospect_ready: ["target_url", "domain_rating", "relevance_score", "tactic"],
+  // Operational signals carry no third-party text at all, only numbers the
+  // operator already sees. They are included so the planner can tell "this
+  // client is over budget" apart from "no budget information".
+  llm_budget_pressure: ["spend_today", "daily_cap", "ratio"],
+  job_failure_cluster: ["job_name", "failure_count", "window_hours"],
 };
 
 /** Fields whose content originated outside the system and must be marked. */
 const UNTRUSTED_FIELDS = new Set([
   "keyword",
   "path",
+  "url",
   "query",
-  "competitorCited",
-  "targetUrl",
+  "competitor_cited",
+  "target_url",
   "title",
   "snippet",
+  // A job name is repo-controlled, but `last_error` is not — it can carry a
+  // provider's response body verbatim. It is not allow-listed at all, but the
+  // name is kept here so re-adding it would inherit the untrusted treatment.
+  "last_error",
 ]);
 
 export interface EvidencePackSignal {
   signalType: string;
   severity: string;
-  strength: number;
+  confidence: number;
   /** Allow-listed, sanitized evidence fields. */
   facts: Record<string, unknown>;
   /** Subset of `facts` that came from outside the system. */
@@ -95,9 +105,13 @@ export interface EvidencePackSignal {
 
 export interface EvidencePackOpportunity {
   opportunityType: string;
+  title: string;
+  targetUrl: string | null;
+  targetKeyword: string | null;
   score: number;
-  impact: number;
+  expectedImpact: number;
   confidence: number;
+  urgency: number;
   risk: number;
   signals: EvidencePackSignal[];
 }
@@ -107,9 +121,16 @@ export interface EvidencePack {
   /** Domain only - never the client's config blob or API keys. */
   clientDomain: string;
   industry: string;
-  mode: string;
+  market: string;
   /** The closed set the planner must choose from. */
   allowedActions: readonly string[];
+  /**
+   * Named explicitly rather than left implicit. Stating what is off-limits
+   * gives the model a reason to decline instead of reaching for the nearest
+   * allowed action when none really fits — and makes an attempted violation
+   * legible in the response rather than silent.
+   */
+  forbiddenActions: readonly string[];
   opportunities: EvidencePackOpportunity[];
 }
 
@@ -159,8 +180,9 @@ export interface BuildPackInput {
   clientId: string;
   clientDomain: string;
   industry: string;
-  mode: string;
+  market: string;
   allowedActions: readonly string[];
+  forbiddenActions: readonly string[];
   opportunities: ScoredOpportunity[];
   /** Signals keyed by fingerprint, for resolving each opportunity's cluster. */
   signalsByFingerprint: Map<string, ExtractedSignal>;
@@ -199,7 +221,7 @@ export function buildEvidencePack(input: BuildPackInput): EvidencePack {
       signals.push({
         signalType: signal.signalType,
         severity: signal.severity,
-        strength: signal.strength,
+        confidence: signal.confidence,
         facts,
         untrusted,
       });
@@ -207,9 +229,13 @@ export function buildEvidencePack(input: BuildPackInput): EvidencePack {
 
     opportunities.push({
       opportunityType: opportunity.opportunityType,
+      title: sanitizeText(opportunity.title),
+      targetUrl: opportunity.targetUrl ? sanitizeText(opportunity.targetUrl) : null,
+      targetKeyword: opportunity.targetKeyword ? sanitizeText(opportunity.targetKeyword) : null,
       score: opportunity.score,
-      impact: opportunity.impact,
+      expectedImpact: opportunity.expectedImpact,
       confidence: opportunity.confidence,
+      urgency: opportunity.urgency,
       risk: opportunity.risk,
       signals,
     });
@@ -219,8 +245,9 @@ export function buildEvidencePack(input: BuildPackInput): EvidencePack {
     clientId: input.clientId,
     clientDomain: sanitizeText(input.clientDomain),
     industry: sanitizeText(input.industry),
-    mode: input.mode,
+    market: sanitizeText(input.market),
     allowedActions: input.allowedActions,
+    forbiddenActions: input.forbiddenActions,
     opportunities,
   };
 }

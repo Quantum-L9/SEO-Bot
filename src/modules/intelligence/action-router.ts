@@ -49,31 +49,39 @@ export interface RoutableScheduler {
  * Downstream jobs each opportunity type may route to.
  *
  * Every job named here is READ-ONLY analysis except `links:process-outreach`,
- * which is gated separately by `routesOutreach`. `serp:execute-surpass-plans`
- * is deliberately absent: it mutates live sites, is disabled in the scheduler
- * registry, and intelligence must not be the thing that turns it on. Site
- * changes go through `intelligence_request_site_fix` into the existing
- * plan-executor approval path instead.
+ * which the policy gate holds against the link-velocity governor and the
+ * ranking circuit breaker. `serp:execute-surpass-plans` is deliberately absent:
+ * it mutates live sites, ships disabled in the scheduler registry, and
+ * intelligence must never be the thing that turns it on. Site changes reach it
+ * only through `intelligence_request_site_fix`, which files a proposal a human
+ * approves.
  */
 export const ROUTE_MAP: Record<
   string,
   ReadonlyArray<{ jobName: string; action: string; outreach?: boolean }>
 > = {
-  recover_keyword_ranking: [
+  content_refresh: [
     { jobName: "serp:competitor-analysis", action: "intelligence_run_competitor_analysis" },
     { jobName: "serp:generate-surpass-plan", action: "intelligence_generate_surpass_plan" },
   ],
-  fix_slow_exit_page: [
+  technical_seo_fix: [
     { jobName: "vitals:check-all-sources", action: "intelligence_run_competitor_analysis" },
+    // Proposal only: the fix itself is a site change, which a human approves.
     { jobName: "", action: "intelligence_request_site_fix" },
   ],
-  recover_citation: [
+  aeo_answer_block: [
     { jobName: "aeo:check-citations", action: "intelligence_run_competitor_analysis" },
-    { jobName: "aeo:optimize-faqs", action: "intelligence_optimize_faq_draft" },
+    { jobName: "aeo:optimize-faqs", action: "intelligence_optimize_faq" },
   ],
-  acquire_backlink: [
+  link_building: [
     { jobName: "links:process-outreach", action: "intelligence_queue_outreach", outreach: true },
   ],
+  // The loop cannot fix its own spend or its own plumbing. Both escalate to a
+  // human rather than routing work — an autonomous retry storm against a
+  // failing provider, or more LLM calls when the budget is already strained,
+  // makes each situation worse rather than better.
+  budget_risk: [{ jobName: "", action: "intelligence_escalate_operator" }],
+  job_reliability: [{ jobName: "", action: "intelligence_escalate_operator" }],
 };
 
 /**
@@ -102,7 +110,8 @@ export interface RouteResult {
   jobName: string | null;
   jobId: string | null;
   actionLogId: string | null;
-  outcome: "queued" | "proposed" | "blocked" | "deduped";
+  decisionId: string | null;
+  outcome: "queued" | "proposed" | "blocked" | "deduped" | "pending_approval";
   blockedReason: string | null;
 }
 
@@ -112,20 +121,35 @@ export interface RouteDeps {
   recordLink(link: {
     clientId: string;
     opportunityId: string;
+    decisionId: string | null;
     jobName: string | null;
     jobId: string | null;
     actionLogId: string | null;
     action: string;
-    outcome: string;
+    status: string;
     blockedReason: string | null;
   }): Promise<boolean>;
   /** Policy gate, injected so the router is testable without config. */
   evaluate(action: string, outreach: boolean): PolicyGateDecision;
+  /**
+   * Records why the loop acted or declined, returning the decision row id.
+   * Called for EVERY route, allowed or blocked: "considered and declined" must
+   * be distinguishable from "never looked".
+   */
+  recordDecision(entry: {
+    clientId: string;
+    opportunityId: string;
+    decisionType: string;
+    decision: "act" | "defer" | "escalate";
+    rationale: string;
+    policyBasis: Record<string, unknown>;
+    evidenceSummary: Record<string, unknown>;
+    requiresApproval: boolean;
+    actionLogId: string | null;
+  }): Promise<string | null>;
   /** Client row data attached to every queued job, matching existing handlers. */
   clientDomain: string;
   clientConfig: unknown;
-  /** True when proposals may be written (mode >= recommend). */
-  writesProposals: boolean;
 }
 
 /**
@@ -143,19 +167,41 @@ export async function routeOpportunity(
   const routes = ROUTE_MAP[opportunity.opportunityType] ?? [];
   const results: RouteResult[] = [];
 
+  const evidenceSummary: Record<string, unknown> = {
+    opportunityType: opportunity.opportunityType,
+    score: opportunity.score,
+    expectedImpact: opportunity.expectedImpact,
+    confidence: opportunity.confidence,
+    urgency: opportunity.urgency,
+    signalFingerprints: opportunity.signalFingerprints,
+  };
+
   for (const route of routes) {
     const decision = deps.evaluate(route.action, route.outreach === true);
 
+    // ── Blocked ────────────────────────────────────────────────────────────
     if (!decision.allowed) {
       const reason = decision.reasons.join("; ");
+      const decisionId = await deps.recordDecision({
+        clientId: opportunity.clientId,
+        opportunityId: opportunity.id,
+        decisionType: route.action,
+        decision: "defer",
+        rationale: reason,
+        policyBasis: decision.policyBasis,
+        evidenceSummary,
+        requiresApproval: decision.requiresApproval,
+        actionLogId: null,
+      });
       await deps.recordLink({
         clientId: opportunity.clientId,
         opportunityId: opportunity.id,
+        decisionId,
         jobName: route.jobName || null,
         jobId: null,
         actionLogId: null,
         action: route.action,
-        outcome: "blocked",
+        status: "blocked",
         blockedReason: reason,
       });
       results.push({
@@ -164,70 +210,97 @@ export async function routeOpportunity(
         jobName: route.jobName || null,
         jobId: null,
         actionLogId: null,
+        decisionId,
         outcome: "blocked",
         blockedReason: reason,
       });
       continue;
     }
 
-    // Proposal first: the action_log row is the operator-visible record, and it
-    // must exist whether or not a downstream job is enqueued.
-    let actionLogId: string | null = null;
-    if (deps.writesProposals) {
-      const proposal = createProposal({
-        clientId: opportunity.clientId,
-        module: "intelligence",
-        action: route.action,
-        description: `Intelligence routed ${route.action} for ${opportunity.opportunityType}`,
-        rationale: opportunity.rationale,
-        triggeredBy: `intelligence:opportunity:${opportunity.fingerprint.slice(0, 12)}`,
-        estimatedImpact: String(opportunity.impact),
-        metadata: {
-          opportunityType: opportunity.opportunityType,
-          score: opportunity.score,
-          signalFingerprints: opportunity.signalFingerprints,
-        },
-      });
-      const executionDecision = evaluateExecution(proposal);
-      actionLogId = await logAction(proposal, executionDecision);
+    // ── Proposal ───────────────────────────────────────────────────────────
+    // The action_log row is the operator-visible record and is written whether
+    // or not a downstream job follows.
+    const proposal = createProposal({
+      clientId: opportunity.clientId,
+      module: "intelligence",
+      action: route.action,
+      description: `${opportunity.title} (${opportunity.opportunityType})`,
+      rationale: opportunity.rationale,
+      triggeredBy: `intelligence:opportunity:${opportunity.fingerprint.slice(0, 12)}`,
+      estimatedImpact: String(opportunity.expectedImpact),
+      metadata: {
+        opportunityType: opportunity.opportunityType,
+        score: opportunity.score,
+        targetUrl: opportunity.targetUrl,
+        targetKeyword: opportunity.targetKeyword,
+        signalFingerprints: opportunity.signalFingerprints,
+      },
+    });
+    const executionDecision = evaluateExecution(proposal);
+    const actionLogId = await logAction(proposal, executionDecision);
 
-      // The proposal-level gate is independent of the policy gate above: a
-      // critical action reaching here is still held for approval rather than
-      // enqueued, no matter what mode says.
-      if (!executionDecision.execute) {
-        await deps.recordLink({
-          clientId: opportunity.clientId,
-          opportunityId: opportunity.id,
-          jobName: route.jobName || null,
-          jobId: null,
-          actionLogId,
-          action: route.action,
-          outcome: "blocked",
-          blockedReason: executionDecision.reason,
-        });
-        results.push({
-          opportunityFingerprint: opportunity.fingerprint,
-          action: route.action,
-          jobName: route.jobName || null,
-          jobId: null,
-          actionLogId,
-          outcome: "blocked",
-          blockedReason: executionDecision.reason,
-        });
-        continue;
-      }
+    // The proposal-level gate is independent of the policy gate above: a
+    // critical action reaching here is still held for approval, whatever the
+    // configuration said.
+    if (!executionDecision.execute) {
+      const decisionId = await deps.recordDecision({
+        clientId: opportunity.clientId,
+        opportunityId: opportunity.id,
+        decisionType: route.action,
+        decision: "escalate",
+        rationale: executionDecision.reason,
+        policyBasis: decision.policyBasis,
+        evidenceSummary,
+        requiresApproval: true,
+        actionLogId,
+      });
+      await deps.recordLink({
+        clientId: opportunity.clientId,
+        opportunityId: opportunity.id,
+        decisionId,
+        jobName: route.jobName || null,
+        jobId: null,
+        actionLogId,
+        action: route.action,
+        status: "pending_approval",
+        blockedReason: executionDecision.reason,
+      });
+      results.push({
+        opportunityFingerprint: opportunity.fingerprint,
+        action: route.action,
+        jobName: route.jobName || null,
+        jobId: null,
+        actionLogId,
+        decisionId,
+        outcome: "pending_approval",
+        blockedReason: executionDecision.reason,
+      });
+      continue;
     }
 
-    // Proposal-only route (no downstream job).
+    const decisionId = await deps.recordDecision({
+      clientId: opportunity.clientId,
+      opportunityId: opportunity.id,
+      decisionType: route.action,
+      decision: "act",
+      rationale: opportunity.rationale,
+      policyBasis: decision.policyBasis,
+      evidenceSummary,
+      requiresApproval: false,
+      actionLogId,
+    });
+
+    // ── Proposal-only route (no downstream job) ────────────────────────────
     if (!route.jobName) {
       await deps.recordLink({
         clientId: opportunity.clientId,
         opportunityId: opportunity.id,
+        decisionId,
         jobName: null,
         jobId: null,
         actionLogId,
         action: route.action,
-        outcome: "proposed",
+        status: "proposed",
         blockedReason: null,
       });
       results.push({
@@ -236,27 +309,30 @@ export async function routeOpportunity(
         jobName: null,
         jobId: null,
         actionLogId,
+        decisionId,
         outcome: "proposed",
         blockedReason: null,
       });
       continue;
     }
 
+    // ── Queue ──────────────────────────────────────────────────────────────
     const jobId = routedJobId(opportunity.clientId, opportunity.fingerprint, route.jobName);
 
     // Claim the link BEFORE enqueuing. If the unique constraint rejects it,
     // this opportunity already routed to this job on a previous attempt and we
     // must not enqueue again. Doing it in this order means a crash between the
     // two leaves a link with no job (recoverable, visible) rather than a job
-    // with no link (invisible duplicate risk).
+    // with no link (an invisible duplicate risk).
     const claimed = await deps.recordLink({
       clientId: opportunity.clientId,
       opportunityId: opportunity.id,
+      decisionId,
       jobName: route.jobName,
       jobId,
       actionLogId,
       action: route.action,
-      outcome: "queued",
+      status: "queued",
       blockedReason: null,
     });
 
@@ -271,6 +347,7 @@ export async function routeOpportunity(
         jobName: route.jobName,
         jobId,
         actionLogId,
+        decisionId,
         outcome: "deduped",
         blockedReason: null,
       });
@@ -284,7 +361,11 @@ export async function routeOpportunity(
         clientDomain: deps.clientDomain,
         clientConfig: deps.clientConfig,
         triggeredBy: "intelligence",
+        opportunityId: opportunity.id,
         opportunityFingerprint: opportunity.fingerprint,
+        targetUrl: opportunity.targetUrl,
+        targetKeyword: opportunity.targetKeyword,
+        reason: opportunity.rationale,
       },
       { jobId },
     );
@@ -295,6 +376,7 @@ export async function routeOpportunity(
       jobName: route.jobName,
       jobId,
       actionLogId,
+      decisionId,
       outcome: "queued",
       blockedReason: null,
     });

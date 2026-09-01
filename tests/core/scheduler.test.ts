@@ -73,6 +73,7 @@ vi.mock("../../src/core/database/index.js", () => ({
 import {
   fanoutChildJobId,
   getScheduler,
+  isJobEnabled,
   jobDefinitions,
   Scheduler,
 } from "../../src/core/scheduler.js";
@@ -119,11 +120,18 @@ describe("Scheduler.start — schedules only enabled jobs on their cron (GAP-006
     await new Scheduler().start();
 
     const repeatAdds = bull.queueAdds.filter((a) => a.opts?.repeat);
-    const enabled = jobDefinitions.filter((j) => j.enabled);
-    expect(repeatAdds.length).toBe(enabled.length);
+    // `isJobEnabled` — not the raw `enabled` flag — is the predicate the
+    // scheduler actually uses. The intelligence module's jobs carry
+    // `enabled: true` but are additionally gated on INTELLIGENCE_ENABLED, so
+    // asserting against the flag alone would now over-count.
+    const schedulable = jobDefinitions.filter(isJobEnabled);
+    expect(repeatAdds.length).toBe(schedulable.length);
 
     // The disabled site-mutating job must NOT be scheduled.
     expect(repeatAdds.some((a) => a.name === "serp:execute-surpass-plans")).toBe(false);
+
+    // Nor may any intelligence job be, while the module is off in config.
+    expect(repeatAdds.some((a) => a.name.startsWith("intelligence:"))).toBe(false);
 
     // Each enabled job carries its authored cron pattern.
     const vitals = repeatAdds.find((a) => a.name === "vitals:check-all-sources");

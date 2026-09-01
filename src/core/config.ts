@@ -120,37 +120,53 @@ const envSchema = z.object({
   // serp:execute-surpass-plans job is enabled. All optional so startup never
   // fails when the feature is off; validated here so typos surface clearly.
   // ─── Intelligence Control Loop ──────────────────────────────────────────────
-  // The intelligence module is a control loop, not a feature: it observes,
-  // scores, and can route real work. Every capability is off by default and
-  // must be turned on one stage at a time (see docs/INTELLIGENCE_MODES.md).
+  // The intelligence substrate is a closed-loop controller: it derives signals
+  // from SQL, ranks opportunities, gates them against policy, and routes work
+  // into the EXISTING scheduler jobs. It never mutates SEO state directly.
   //
-  // INTELLIGENCE_MODE is the master switch. The ALLOW_* flags are a second,
-  // independent axis: a capability runs only when BOTH the mode permits it AND
-  // its flag is on. Mode alone can never enable outreach or site mutation, so a
-  // mistaken `INTELLIGENCE_MODE=full` cannot by itself email a prospect.
-  INTELLIGENCE_MODE: z
-    .enum(["off", "observe", "recommend", "route_safe", "route_llm", "full"])
-    .default("off"),
+  // Master switch. When false the intelligence jobs are never scheduled at all,
+  // rather than scheduled and no-oping — an operator should see zero
+  // intelligence jobs, not a stream of jobs that do nothing.
+  INTELLIGENCE_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+
+  // Per-client ceiling on opportunities considered in one planning run. Bounds
+  // both blast radius and LLM cost: the planner sees at most this many.
+  INTELLIGENCE_MAX_OPPORTUNITIES_PER_CLIENT: z.coerce.number().int().positive().default(10),
+
+  // Opportunities scoring below this are recorded but never planned or routed.
+  // Scores are 0..100 (see opportunity-scorer for the scale of each factor), so
+  // the default acts on roughly the top half.
+  INTELLIGENCE_MIN_SCORE_TO_PLAN: z.coerce.number().min(0).default(50),
+
+  // When false, even LOW-risk analysis jobs are proposed rather than enqueued.
+  // This is the difference between "the loop suggests" and "the loop acts", and
+  // is the flag to turn off first if routing ever misbehaves.
+  INTELLIGENCE_AUTO_ROUTE_LOW_RISK: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+
+  // Gates the LLM planner. With this false the loop is fully deterministic:
+  // SQL signals, arithmetic scoring, and rules-based routing, with no model in
+  // the path and no token spend.
   INTELLIGENCE_LLM_PLANNING_ENABLED: z
     .string()
     .optional()
     .transform((v) => v === "true" || v === "1"),
-  INTELLIGENCE_ALLOW_SAFE_JOB_ROUTING: z
+
+  // Weekly cross-client benchmark. Off by default: it is the only intelligence
+  // query that is not client-scoped, so it stays opt-in even though it returns
+  // anonymized aggregates only.
+  INTELLIGENCE_PORTFOLIO_BENCHMARK_ENABLED: z
     .string()
     .optional()
     .transform((v) => v === "true" || v === "1"),
-  INTELLIGENCE_ALLOW_OUTREACH_ROUTING: z
-    .string()
-    .optional()
-    .transform((v) => v === "true" || v === "1"),
-  INTELLIGENCE_ALLOW_SITE_MUTATION: z
-    .string()
-    .optional()
-    .transform((v) => v === "true" || v === "1"),
-  /** Signals older than this are stale: they stop feeding new opportunities. */
+
+  // Signals not re-observed within this many days stop feeding opportunities.
   INTELLIGENCE_SIGNAL_STALE_DAYS: z.coerce.number().int().positive().default(14),
-  /** Hard ceiling on opportunities routed per run — bounds blast radius. */
-  INTELLIGENCE_MAX_ROUTED_PER_RUN: z.coerce.number().int().positive().default(10),
 
   GITHUB_TOKEN: z.string().optional(),
   VERCEL_DEPLOY_HOOK: z.string().optional(),

@@ -94,7 +94,7 @@ const MAX_ACTIONS = 20;
 export function validatePlannerOutput(
   raw: unknown,
   expectedClientId: string,
-  allowedActions: readonly string[] = INTELLIGENCE_ACTIONS,
+  allowedActions: readonly string[] = plannerActionVocabulary(),
 ): PlannerOutput {
   const reasons: string[] = [];
 
@@ -219,7 +219,7 @@ export interface PlanActionsDeps {
 export async function planActions(
   pack: EvidencePack,
   deps: PlanActionsDeps,
-  allowedActions: readonly string[] = INTELLIGENCE_ACTIONS,
+  allowedActions: readonly string[] = plannerActionVocabulary(),
 ): Promise<PlannerOutput> {
   assertNoSecrets(pack);
 
@@ -250,11 +250,20 @@ export async function planActions(
   }
 }
 
-/** The action vocabulary permitted in a given mode. */
-export function allowedActionsForMode(mode: string): readonly string[] {
-  // Site mutation is only ever offered to the planner in `full`. In every other
-  // mode it is removed from the vocabulary entirely, so the planner cannot even
-  // name it - a stricter guarantee than rejecting it downstream.
-  if (mode === "full") return INTELLIGENCE_ACTIONS;
+/**
+ * The action vocabulary the planner is allowed to choose from.
+ *
+ * `intelligence_execute_site_change` is removed unconditionally. The planner is
+ * never offered live-site mutation at all — not gated on it, not permitted to
+ * name it. Site changes reach the live executor only through
+ * `intelligence_request_site_fix`, which files a proposal that a human approves
+ * and the existing plan-executor path applies.
+ *
+ * Removing it from the vocabulary is a strictly stronger guarantee than
+ * rejecting it downstream: there is no configuration under which the model can
+ * ask for it, so there is no configuration under which a validator bug could
+ * let it through.
+ */
+export function plannerActionVocabulary(): readonly string[] {
   return INTELLIGENCE_ACTIONS.filter((action) => action !== "intelligence_execute_site_change");
 }

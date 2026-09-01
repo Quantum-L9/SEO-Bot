@@ -173,24 +173,29 @@ const INTELLIGENCE_ACTION_CLASSIFICATION: Record<
   string,
   { riskLevel: RiskLevel; reversible: boolean }
 > = {
-  // Observation only — writes a signal/opportunity row, causes nothing.
+  // LOW — observation and read-only analysis. Writes a row or queues a job that
+  // only reads. Nothing outside the system changes.
   intelligence_signal_only: { riskLevel: "low", reversible: true },
-  // Writes a proposal for the operator to read. No downstream effect.
   intelligence_generate_recommendation: { riskLevel: "low", reversible: true },
-  // Queues read-only analysis jobs (SERP/vitals/citations). No mutation.
   intelligence_run_competitor_analysis: { riskLevel: "low", reversible: true },
-  intelligence_optimize_faq_draft: { riskLevel: "low", reversible: true },
-  // Produces a plan artifact. The plan is NOT executed by this action.
+  intelligence_escalate_operator: { riskLevel: "low", reversible: true },
+
+  // MEDIUM — produces a draft or a plan for a human or another module to act
+  // on. The artifact is created; it is not applied.
   intelligence_generate_surpass_plan: { riskLevel: "medium", reversible: true },
-  // Files a site-change request for the existing plan-executor path to pick up.
+  intelligence_optimize_faq: { riskLevel: "medium", reversible: true },
   intelligence_request_site_fix: { riskLevel: "medium", reversible: true },
-  // Sends email to a third party: irreversible the moment it lands. Kept at
-  // `high` rather than `critical` to match the repo's existing treatment of
-  // outreach (`outreach_email_send`), because the real gates for this action
-  // are INTELLIGENCE_ALLOW_OUTREACH_ROUTING plus the link-velocity governor —
-  // not the approval queue.
+
+  // HIGH — sends email to a third party: irreversible the moment it lands. The
+  // real gates for this are the link-velocity governor and the ranking circuit
+  // breaker in the policy gate, not the approval queue, which is why it is
+  // `high` rather than `critical` (and matches the repo's existing treatment of
+  // `outreach_email_send`).
   intelligence_queue_outreach: { riskLevel: "high", reversible: false },
-  // Mutates the live site. Always operator-approved, in every mode.
+
+  // CRITICAL — mutates the live site. Always operator-approved, in every
+  // configuration. The live-site executor (`serp:execute-surpass-plans`) ships
+  // disabled, and intelligence must never be what turns it on.
   intelligence_execute_site_change: { riskLevel: "critical", reversible: false },
 };
 
@@ -338,7 +343,11 @@ export async function logAction(
       riskLevel: proposal.riskLevel,
       reversible: proposal.reversible,
       status: decision.execute ? "auto_executed" : "pending_approval",
-      options: proposal.options ? JSON.stringify(proposal.options) : null,
+      // `options` is a jsonb column, so Drizzle serializes the value itself.
+      // JSON.stringify()-ing first stored a JSON *string* inside a JSON column
+      // — reading it back gave "[{\"id\":...}]" rather than an array, so every
+      // consumer had to know to parse twice. Pass the array through.
+      options: proposal.options ?? null,
       aiRecommendation: proposal.aiRecommendation,
       aiConfidence: proposal.aiConfidence,
       estimatedImpact: proposal.estimatedImpact ?? null,

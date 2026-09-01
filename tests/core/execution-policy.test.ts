@@ -154,6 +154,54 @@ describe("classifyAction — taxonomy + fallback (GAP-001)", () => {
   });
 });
 
+describe("logAction — options reach a jsonb column as JSON, not as a string", () => {
+  it("passes the options array through rather than JSON.stringify-ing it", async () => {
+    // REGRESSION: `options` is a jsonb column, so Drizzle serializes the value
+    // itself. Stringifying first stored a JSON *string* inside a JSON column —
+    // reading it back yielded "[{\"id\":...}]" rather than an array, so every
+    // consumer had to know to parse twice.
+    const options = [
+      {
+        id: "opt-a",
+        label: "Rewrite the intro",
+        description: "Tighten the first paragraph",
+        riskLevel: "low" as const,
+        reversible: true,
+        recommended: true,
+        confidence: 0.8,
+      },
+    ];
+    const p = createProposal({
+      clientId: "c1",
+      module: "serp",
+      action: "meta_title_update",
+      description: "d",
+      rationale: "r",
+      triggeredBy: "test",
+      options,
+    });
+    await logAction(p, evaluateExecution(p));
+
+    const written = insertValuesMock.mock.calls[0][0] as { options: unknown };
+    expect(Array.isArray(written.options)).toBe(true);
+    expect(written.options).toEqual(options);
+    expect(typeof written.options).not.toBe("string");
+  });
+
+  it("writes null when there are no options", async () => {
+    const p = createProposal({
+      clientId: "c1",
+      module: "serp",
+      action: "meta_title_update",
+      description: "d",
+      rationale: "r",
+      triggeredBy: "test",
+    });
+    await logAction(p, evaluateExecution(p));
+    expect((insertValuesMock.mock.calls[0][0] as { options: unknown }).options).toBeNull();
+  });
+});
+
 describe("logAction — persisted status reflects the decision (GAP-001)", () => {
   it("persists pending_approval when execution is denied (critical)", async () => {
     const p = createProposal({

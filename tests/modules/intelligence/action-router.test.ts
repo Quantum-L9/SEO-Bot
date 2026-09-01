@@ -52,14 +52,20 @@ function opportunity(
   return {
     id: "opp-row-1",
     clientId: CLIENT,
-    opportunityType: "recover_keyword_ranking",
+    opportunityType: "content_refresh",
     fingerprint: "fingerprint-1",
-    score: 0.4,
-    impact: 0.75,
-    confidence: 0.6,
-    effort: 0.5,
-    risk: 0.2,
+    title: "Refresh content for slipping keywords",
+    description: "1 keyword_drop signal",
+    targetUrl: "https://a.com/roofing",
+    targetKeyword: "metal roofing",
+    score: 62,
+    expectedImpact: 75,
+    confidence: 0.8,
+    urgency: 0.9,
+    effort: 0.8,
+    risk: 0.4,
     signalFingerprints: ["fp-1"],
+    evidence: {},
     rationale: "keyword slipped",
     ...overrides,
   };
@@ -70,6 +76,7 @@ const ALLOW: PolicyGateDecision = {
   reasons: [],
   riskLevel: "low",
   requiresApproval: false,
+  policyBasis: {},
 };
 
 /** Typed to match RoutableScheduler so `mock.calls[n][i]` is indexable. */
@@ -89,16 +96,17 @@ function deps(overrides: Partial<RouteDeps> = {}) {
     claimed.add(key);
     return true;
   });
+  const recordDecision = vi.fn(async () => "decision-1");
   const base: RouteDeps = {
     scheduler: { addJob },
     recordLink,
+    recordDecision,
     evaluate: () => ALLOW,
     clientDomain: "example.com",
     clientConfig: {},
-    writesProposals: true,
     ...overrides,
   };
-  return { deps: base, addJob, recordLink };
+  return { deps: base, addJob, recordLink, recordDecision };
 }
 
 beforeEach(() => {
@@ -120,7 +128,7 @@ describe("route map", () => {
   it("routes a slow exit page to a vitals check plus a proposal", async () => {
     const { deps: d, addJob } = deps();
     const results = await routeOpportunity(
-      opportunity({ opportunityType: "fix_slow_exit_page" }),
+      opportunity({ opportunityType: "technical_seo_fix" }),
       d,
     );
     expect(results.map((r) => r.jobName)).toEqual(["vitals:check-all-sources", null]);
@@ -131,13 +139,13 @@ describe("route map", () => {
 
   it("routes a citation loss to a citation check and an FAQ draft", async () => {
     const { deps: d } = deps();
-    const results = await routeOpportunity(opportunity({ opportunityType: "recover_citation" }), d);
+    const results = await routeOpportunity(opportunity({ opportunityType: "aeo_answer_block" }), d);
     expect(results.map((r) => r.jobName)).toEqual(["aeo:check-citations", "aeo:optimize-faqs"]);
   });
 
   it("routes a ready prospect to outreach only", async () => {
     const { deps: d } = deps();
-    const results = await routeOpportunity(opportunity({ opportunityType: "acquire_backlink" }), d);
+    const results = await routeOpportunity(opportunity({ opportunityType: "link_building" }), d);
     expect(results.map((r) => r.jobName)).toEqual(["links:process-outreach"]);
   });
 
@@ -185,6 +193,74 @@ describe("deterministic job ids", () => {
   });
 });
 
+describe("the decision ledger records both outcomes", () => {
+  it("records an `act` decision for an allowed route", async () => {
+    const { deps: d, recordDecision } = deps();
+    await routeOpportunity(opportunity(), d);
+    expect(recordDecision).toHaveBeenCalledWith(
+      expect.objectContaining({ decision: "act", requiresApproval: false }),
+    );
+  });
+
+  it("records a `defer` decision WITH its policy basis when blocked", async () => {
+    // "The gate blocked this correctly" and "the loop never looked" must be
+    // distinguishable months later, which needs the inputs, not just a verdict.
+    const { deps: d, recordDecision } = deps({
+      evaluate: () => ({
+        allowed: false,
+        reasons: ["ranking circuit breaker is open"],
+        riskLevel: "high",
+        requiresApproval: false,
+        policyBasis: { rankingCircuitBreakerOpen: true, score: 62 },
+      }),
+    });
+    await routeOpportunity(opportunity(), d);
+    expect(recordDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: "defer",
+        rationale: expect.stringContaining("circuit breaker"),
+        policyBasis: expect.objectContaining({ rankingCircuitBreakerOpen: true }),
+      }),
+    );
+  });
+
+  it("links every decision to its opportunity and carries the evidence summary", async () => {
+    const { deps: d, recordDecision } = deps();
+    await routeOpportunity(opportunity(), d);
+    expect(recordDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        opportunityId: "opp-row-1",
+        evidenceSummary: expect.objectContaining({ opportunityType: "content_refresh" }),
+      }),
+    );
+  });
+
+  it("passes the decision id onto the link row so the chain is traversable", async () => {
+    const { deps: d, recordLink } = deps();
+    await routeOpportunity(opportunity(), d);
+    expect(recordLink).toHaveBeenCalledWith(expect.objectContaining({ decisionId: "decision-1" }));
+  });
+});
+
+describe("operational opportunities escalate rather than act", () => {
+  it.each(["budget_risk", "job_reliability"])(
+    "%s proposes to a human and enqueues nothing",
+    async (opportunityType) => {
+      // The loop cannot fix its own spend or its own plumbing; an autonomous
+      // retry storm against a failing provider makes things worse.
+      const { deps: d, addJob } = deps();
+      const results = await routeOpportunity(
+        opportunity({ opportunityType: opportunityType as never }),
+        d,
+      );
+      expect(addJob).not.toHaveBeenCalled();
+      expect(results).toHaveLength(1);
+      expect(results[0].action).toBe("intelligence_escalate_operator");
+      expect(results[0].outcome).toBe("proposed");
+    },
+  );
+});
+
 describe("idempotency on retry", () => {
   it("enqueues once when the same opportunity is routed twice", async () => {
     const { deps: d, addJob } = deps();
@@ -198,7 +274,7 @@ describe("idempotency on retry", () => {
 
   it("does not send outreach twice on a retry", async () => {
     const { deps: d, addJob } = deps();
-    const opp = opportunity({ opportunityType: "acquire_backlink" });
+    const opp = opportunity({ opportunityType: "link_building" });
     await routeOpportunity(opp, d);
     await routeOpportunity(opp, d);
     const outreachCalls = addJob.mock.calls.filter((c) => c[0] === "links:process-outreach");
@@ -217,10 +293,10 @@ describe("idempotency on retry", () => {
     await routeOpportunity(opportunity(), {
       scheduler: { addJob },
       recordLink,
+      recordDecision: async () => "decision-1",
       evaluate: () => ALLOW,
       clientDomain: "example.com",
       clientConfig: {},
-      writesProposals: false,
     });
     expect(order[0]).toBe("recordLink");
     expect(order[1]).toBe("addJob");
@@ -232,10 +308,10 @@ describe("idempotency on retry", () => {
     const results = await routeOpportunity(opportunity(), {
       scheduler: { addJob },
       recordLink: async () => false,
+      recordDecision: async () => "decision-1",
       evaluate: () => ALLOW,
       clientDomain: "example.com",
       clientConfig: {},
-      writesProposals: false,
     });
     expect(addJob).not.toHaveBeenCalled();
     expect(results.every((r) => r.outcome === "deduped")).toBe(true);
@@ -251,30 +327,25 @@ describe("gating", () => {
     } = deps({
       evaluate: () => ({
         allowed: false,
-        reasons: ["outreach routing not permitted"],
+        reasons: ["outreach velocity allowance exhausted"],
         riskLevel: "high",
         requiresApproval: false,
+        policyBasis: { outreachVelocityExhausted: true },
       }),
     });
-    const results = await routeOpportunity(opportunity({ opportunityType: "acquire_backlink" }), d);
+    const results = await routeOpportunity(opportunity({ opportunityType: "link_building" }), d);
     expect(addJob).not.toHaveBeenCalled();
     expect(results[0].outcome).toBe("blocked");
-    expect(results[0].blockedReason).toMatch(/outreach routing not permitted/);
+    expect(results[0].blockedReason).toMatch(/velocity allowance exhausted/);
     // A blocked decision is still recorded — "considered and declined" must be
     // distinguishable from "never looked".
     expect(recordLink).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "blocked", blockedReason: expect.any(String) }),
+      expect.objectContaining({ status: "blocked", blockedReason: expect.any(String) }),
     );
   });
 
-  it("writes no action_log proposal when the mode forbids proposals", async () => {
-    const { deps: d } = deps({ writesProposals: false });
-    await routeOpportunity(opportunity(), d);
-    expect(insertValuesMock).not.toHaveBeenCalled();
-  });
-
-  it("writes an action_log proposal when the mode permits it", async () => {
-    const { deps: d } = deps({ writesProposals: true });
+  it("writes an action_log proposal for every allowed route", async () => {
+    const { deps: d } = deps();
     await routeOpportunity(opportunity(), d);
     expect(insertValuesMock).toHaveBeenCalled();
     expect(insertValuesMock.mock.calls[0][0]).toMatchObject({
@@ -287,9 +358,9 @@ describe("gating", () => {
     // The gate says allowed, but the proposal-level policy still classifies the
     // action critical. These are independent checks by design.
     const { deps: d, addJob } = deps();
-    expect(ROUTE_MAP.acquire_backlink[0].action).toBe("intelligence_queue_outreach");
+    expect(ROUTE_MAP.link_building[0].action).toBe("intelligence_queue_outreach");
 
-    const results = await routeOpportunity(opportunity({ opportunityType: "acquire_backlink" }), d);
+    const results = await routeOpportunity(opportunity({ opportunityType: "link_building" }), d);
     // outreach is `high`, so it does auto-execute — asserted explicitly so a
     // future reclassification to `critical` fails here loudly.
     expect(results[0].outcome).toBe("queued");

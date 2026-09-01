@@ -30,6 +30,7 @@ import {
   type ScorableSignal,
   scoreCluster,
   scoreOpportunitiesFromSignals,
+  urgencyFor,
 } from "../../../src/modules/intelligence/opportunity-scorer.js";
 
 const CLIENT_A = "client-a";
@@ -40,10 +41,11 @@ function sig(overrides: Partial<ScorableSignal> = {}): ScorableSignal {
   return {
     clientId: CLIENT_A,
     signalType: "keyword_drop",
-    fingerprint: `fp-${Math.random()}`,
+    entityType: "keyword",
     entityKey: "metal roofing",
+    fingerprint: `fp-${Math.random()}`,
     severity: "high",
-    strength: 0.6,
+    confidence: 0.6,
     evidence: {},
     status: "open",
     observedAt: NOW,
@@ -69,36 +71,36 @@ describe("determinism", () => {
   });
 
   it("fingerprints a cluster independently of member order", () => {
-    expect(opportunityFingerprint(CLIENT_A, "recover_keyword_ranking", ["b", "a"])).toBe(
-      opportunityFingerprint(CLIENT_A, "recover_keyword_ranking", ["a", "b"]),
+    expect(opportunityFingerprint(CLIENT_A, "content_refresh", ["b", "a"])).toBe(
+      opportunityFingerprint(CLIENT_A, "content_refresh", ["a", "b"]),
     );
   });
 
   it("separates tenants observing the same entity", () => {
-    expect(opportunityFingerprint(CLIENT_A, "recover_keyword_ranking", ["a"])).not.toBe(
-      opportunityFingerprint(CLIENT_B, "recover_keyword_ranking", ["a"]),
+    expect(opportunityFingerprint(CLIENT_A, "content_refresh", ["a"])).not.toBe(
+      opportunityFingerprint(CLIENT_B, "content_refresh", ["a"]),
     );
   });
 });
 
 describe("scoreCluster — ranking behaviour", () => {
   it("ranks high impact + high confidence + low risk above the alternatives", () => {
-    const strong = scoreCluster(CLIENT_A, "recover_citation", [
-      sig({ signalType: "citation_loss", severity: "critical", strength: 0.95 }),
+    const strong = scoreCluster(CLIENT_A, "aeo_answer_block", [
+      sig({ signalType: "citation_loss", severity: "critical", confidence: 0.95 }),
     ]);
-    const weak = scoreCluster(CLIENT_A, "recover_citation", [
-      sig({ signalType: "citation_loss", severity: "low", strength: 0.1 }),
+    const weak = scoreCluster(CLIENT_A, "aeo_answer_block", [
+      sig({ signalType: "citation_loss", severity: "low", confidence: 0.1 }),
     ]);
     expect(strong.score).toBeGreaterThan(weak.score);
   });
 
   it("discounts a high-risk remedy even when the signal is strong", () => {
     // Same severity and strength; only the remedy's risk differs.
-    const lowRisk = scoreCluster(CLIENT_A, "recover_citation", [
-      sig({ signalType: "citation_loss", severity: "critical", strength: 0.9 }),
+    const lowRisk = scoreCluster(CLIENT_A, "aeo_answer_block", [
+      sig({ signalType: "citation_loss", severity: "critical", confidence: 0.9 }),
     ]);
-    const highRisk = scoreCluster(CLIENT_A, "acquire_backlink", [
-      sig({ signalType: "prospect_ready", severity: "critical", strength: 0.9 }),
+    const highRisk = scoreCluster(CLIENT_A, "link_building", [
+      sig({ signalType: "prospect_ready", severity: "critical", confidence: 0.9 }),
     ]);
     expect(highRisk.risk).toBeGreaterThan(lowRisk.risk);
     expect(highRisk.score).toBeLessThan(lowRisk.score);
@@ -106,38 +108,38 @@ describe("scoreCluster — ranking behaviour", () => {
 
   it("does not let low confidence be rescued by high impact", () => {
     // Multiplicative scoring is the point: a sum would let impact mask this.
-    const confident = scoreCluster(CLIENT_A, "recover_keyword_ranking", [
-      sig({ severity: "critical", strength: 0.9 }),
+    const confident = scoreCluster(CLIENT_A, "content_refresh", [
+      sig({ severity: "critical", confidence: 0.9 }),
     ]);
-    const unconfident = scoreCluster(CLIENT_A, "recover_keyword_ranking", [
-      sig({ severity: "critical", strength: 0.05 }),
+    const unconfident = scoreCluster(CLIENT_A, "content_refresh", [
+      sig({ severity: "critical", confidence: 0.05 }),
     ]);
-    expect(unconfident.impact).toBe(confident.impact);
+    expect(unconfident.expectedImpact).toBe(confident.expectedImpact);
     expect(unconfident.score).toBeLessThan(confident.score * 0.2);
   });
 
   it("lets the worst signal set impact rather than averaging it away", () => {
-    const oneCritical = scoreCluster(CLIENT_A, "recover_keyword_ranking", [
-      sig({ severity: "critical", strength: 0.5 }),
+    const oneCritical = scoreCluster(CLIENT_A, "content_refresh", [
+      sig({ severity: "critical", confidence: 0.5 }),
     ]);
-    const criticalPlusTrivia = scoreCluster(CLIENT_A, "recover_keyword_ranking", [
-      sig({ severity: "critical", strength: 0.5, fingerprint: "x" }),
-      sig({ severity: "low", strength: 0.5, fingerprint: "y" }),
-      sig({ severity: "low", strength: 0.5, fingerprint: "z" }),
+    const criticalPlusTrivia = scoreCluster(CLIENT_A, "content_refresh", [
+      sig({ severity: "critical", confidence: 0.5, fingerprint: "x" }),
+      sig({ severity: "low", confidence: 0.5, fingerprint: "y" }),
+      sig({ severity: "low", confidence: 0.5, fingerprint: "z" }),
     ]);
     // Averaging severity would DROP impact below the single-critical case.
-    expect(criticalPlusTrivia.impact).toBeGreaterThanOrEqual(oneCritical.impact);
+    expect(criticalPlusTrivia.expectedImpact).toBeGreaterThanOrEqual(oneCritical.expectedImpact);
   });
 
   it("caps impact at 1 despite the corroboration bonus", () => {
     const many = Array.from({ length: 20 }, (_, i) =>
-      sig({ severity: "critical", strength: 1, fingerprint: `f${i}` }),
+      sig({ severity: "critical", confidence: 1, fingerprint: `f${i}` }),
     );
-    expect(scoreCluster(CLIENT_A, "recover_keyword_ranking", many).impact).toBeLessThanOrEqual(1);
+    expect(scoreCluster(CLIENT_A, "content_refresh", many).expectedImpact).toBeLessThanOrEqual(100);
   });
 
   it("scores an empty cluster at zero rather than NaN", () => {
-    const result = scoreCluster(CLIENT_A, "recover_keyword_ranking", []);
+    const result = scoreCluster(CLIENT_A, "content_refresh", []);
     expect(result.score).toBe(0);
     expect(Number.isNaN(result.score)).toBe(false);
   });
@@ -154,7 +156,7 @@ describe("staleness and suppression", () => {
     const old = new Date(NOW.getTime() - 30 * 24 * 60 * 60 * 1000);
     const result = scoreOpportunitiesFromSignals(
       CLIENT_A,
-      [sig({ observedAt: old, severity: "critical", strength: 1 })],
+      [sig({ observedAt: old, severity: "critical", confidence: 1 })],
       { staleDays: 14, now: NOW },
     );
     expect(result).toHaveLength(0);
@@ -164,20 +166,128 @@ describe("staleness and suppression", () => {
     const withSuppressed = scoreOpportunitiesFromSignals(
       CLIENT_A,
       [
-        sig({ fingerprint: "keep", severity: "low", strength: 0.3 }),
-        sig({ fingerprint: "drop", severity: "critical", strength: 1, status: "suppressed" }),
+        sig({ fingerprint: "keep", severity: "low", confidence: 0.3 }),
+        sig({ fingerprint: "drop", severity: "critical", confidence: 1, status: "suppressed" }),
       ],
       { now: NOW },
     );
     const withoutSuppressed = scoreOpportunitiesFromSignals(
       CLIENT_A,
-      [sig({ fingerprint: "keep", severity: "low", strength: 0.3 })],
+      [sig({ fingerprint: "keep", severity: "low", confidence: 0.3 })],
       { now: NOW },
     );
     // If suppression were a post-filter, the critical signal would still have
     // raised peak impact here.
-    expect(withSuppressed[0].impact).toBe(withoutSuppressed[0].impact);
+    expect(withSuppressed[0].expectedImpact).toBe(withoutSuppressed[0].expectedImpact);
     expect(withSuppressed[0].score).toBe(withoutSuppressed[0].score);
+  });
+});
+
+describe("urgency", () => {
+  it("decays with age even at identical severity", () => {
+    // A critical problem seen today and the same problem last seen three weeks
+    // ago have identical impact; only one is worth interrupting today's queue.
+    const fresh = urgencyFor([sig({ severity: "critical", observedAt: NOW })], 14, NOW);
+    const old = urgencyFor(
+      [sig({ severity: "critical", observedAt: new Date(NOW.getTime() - 10 * 86400000) })],
+      14,
+      NOW,
+    );
+    expect(fresh).toBeGreaterThan(old);
+  });
+
+  it("rises with severity at identical age", () => {
+    const low = urgencyFor([sig({ severity: "low" })], 14, NOW);
+    const critical = urgencyFor([sig({ severity: "critical" })], 14, NOW);
+    expect(critical).toBeGreaterThan(low);
+  });
+
+  it("stays within 0..1 and is 0 for an empty cluster", () => {
+    expect(urgencyFor([], 14, NOW)).toBe(0);
+    const u = urgencyFor([sig({ severity: "critical" })], 14, NOW);
+    expect(u).toBeGreaterThanOrEqual(0);
+    expect(u).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("scale and thresholds", () => {
+  it("produces scores on a 0..100 scale so MIN_SCORE_TO_PLAN is meaningful", () => {
+    // A maximal cluster must be able to clear a default threshold of 50;
+    // otherwise the config knob would filter everything and read as "broken".
+    const best = scoreCluster(
+      CLIENT_A,
+      "aeo_answer_block",
+      [sig({ signalType: "citation_loss", severity: "critical", confidence: 1, observedAt: NOW })],
+      { now: NOW },
+    );
+    expect(best.score).toBeGreaterThan(50);
+    expect(best.score).toBeLessThanOrEqual(100);
+  });
+
+  it("the one irreversible path cannot clear the default threshold by itself", () => {
+    // Deliberate: enabling outreach requires an operator to lower
+    // INTELLIGENCE_MIN_SCORE_TO_PLAN on purpose. Not silent — every such block
+    // is written to the decision ledger with the score and the threshold.
+    const best = scoreCluster(
+      CLIENT_A,
+      "link_building",
+      [sig({ signalType: "prospect_ready", severity: "critical", confidence: 1, observedAt: NOW })],
+      { now: NOW },
+    );
+    expect(best.score).toBeLessThan(50);
+  });
+
+  it("the main content path CAN clear the default threshold", () => {
+    // The mirror of the test above: if content_refresh could never reach 50,
+    // the default config would silently disable the primary use case.
+    const best = scoreCluster(
+      CLIENT_A,
+      "content_refresh",
+      [
+        sig({ severity: "critical", confidence: 1, observedAt: NOW, fingerprint: "a" }),
+        sig({ severity: "critical", confidence: 1, observedAt: NOW, fingerprint: "b" }),
+      ],
+      { now: NOW },
+    );
+    expect(best.score).toBeGreaterThan(50);
+  });
+
+  it("effort and risk actually affect the ranking", () => {
+    // The denominator is max(1, effort + risk). With 0..1 scales that max()
+    // would nearly always pick 1 and both factors would silently stop mattering.
+    const cheap = scoreCluster(
+      CLIENT_A,
+      "aeo_answer_block",
+      [sig({ signalType: "citation_loss", severity: "critical", confidence: 1 })],
+      { now: NOW },
+    );
+    const expensive = scoreCluster(
+      CLIENT_A,
+      "link_building",
+      [sig({ signalType: "prospect_ready", severity: "critical", confidence: 1 })],
+      { now: NOW },
+    );
+    expect(expensive.effort + expensive.risk).toBeGreaterThan(1);
+    expect(expensive.score).toBeLessThan(cheap.score);
+  });
+});
+
+describe("target extraction", () => {
+  it("lifts a target keyword and URL out of signal evidence", () => {
+    const result = scoreCluster(
+      CLIENT_A,
+      "content_refresh",
+      [sig({ evidence: { keyword: "metal roofing", url: "https://a.com/roofing" } })],
+      { now: NOW },
+    );
+    expect(result.targetKeyword).toBe("metal roofing");
+    expect(result.targetUrl).toBe("https://a.com/roofing");
+  });
+
+  it("returns null rather than a placeholder when evidence has neither", () => {
+    const result = scoreCluster(CLIENT_A, "budget_risk", [sig({ evidence: {} })], { now: NOW });
+    expect(result.targetKeyword).toBeNull();
+    expect(result.targetUrl).toBeNull();
   });
 });
 
@@ -185,7 +295,7 @@ describe("tenant isolation and clustering", () => {
   it("ignores another client's signals entirely", () => {
     const result = scoreOpportunitiesFromSignals(
       CLIENT_A,
-      [sig({ clientId: CLIENT_B, severity: "critical", strength: 1 })],
+      [sig({ clientId: CLIENT_B, severity: "critical", confidence: 1 })],
       { now: NOW },
     );
     expect(result).toHaveLength(0);
@@ -217,10 +327,10 @@ describe("tenant isolation and clustering", () => {
       { now: NOW },
     );
     expect(result.map((r) => r.opportunityType).sort()).toEqual([
-      "acquire_backlink",
-      "fix_slow_exit_page",
-      "recover_citation",
-      "recover_keyword_ranking",
+      "aeo_answer_block",
+      "content_refresh",
+      "link_building",
+      "technical_seo_fix",
     ]);
   });
 
@@ -231,10 +341,10 @@ describe("tenant isolation and clustering", () => {
         sig({
           signalType: "citation_loss",
           severity: "critical",
-          strength: 0.95,
+          confidence: 0.95,
           fingerprint: "c",
         }),
-        sig({ signalType: "prospect_ready", severity: "low", strength: 0.1, fingerprint: "p" }),
+        sig({ signalType: "prospect_ready", severity: "low", confidence: 0.1, fingerprint: "p" }),
       ],
       { now: NOW },
     );

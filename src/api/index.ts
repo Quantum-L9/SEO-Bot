@@ -307,7 +307,8 @@ export async function buildApiServer(): Promise<FastifyInstance> {
         "intelligence:extract-signals",
         "intelligence:score-opportunities",
         "intelligence:plan-actions",
-        "intelligence:attribute-outcomes",
+        "intelligence:measure-outcomes",
+        "intelligence:portfolio-benchmark",
       ];
       if (!module || !validModules.includes(module))
         return { error: `Invalid module. Valid: ${validModules.join(", ")}` };

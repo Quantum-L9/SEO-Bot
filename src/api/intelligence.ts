@@ -34,7 +34,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { getDb, schema } from "../core/database/index.js";
 import { createModuleLogger } from "../core/logger.js";
-import { currentCapabilities, currentIntelligenceMode } from "../modules/intelligence/modes.js";
+import { currentCapabilities } from "../modules/intelligence/capabilities.js";
 
 const logger = createModuleLogger("api:intelligence");
 
@@ -49,6 +49,20 @@ const PAGE_LIMIT = 200;
  * withholds the statistics.
  */
 const PORTFOLIO_MIN_CLIENTS = 3;
+
+/**
+ * Intelligence phases an operator may trigger by hand.
+ *
+ * Deliberately NOT derived from the scheduler registry: a new job should not
+ * become externally reachable merely by existing. `serp:execute-surpass-plans`
+ * is absent from every trigger surface in this repo for the same reason.
+ */
+const TRIGGERABLE_PHASES: readonly string[] = [
+  "intelligence:extract-signals",
+  "intelligence:score-opportunities",
+  "intelligence:plan-actions",
+  "intelligence:measure-outcomes",
+];
 
 export async function registerIntelligenceRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Params: { clientId: string } }>(
@@ -72,7 +86,9 @@ export async function registerIntelligenceRoutes(app: FastifyInstance): Promise<
             fingerprint: schema.intelligenceSignals.fingerprint,
             entityKey: schema.intelligenceSignals.entityKey,
             severity: schema.intelligenceSignals.severity,
-            strength: schema.intelligenceSignals.strength,
+            entityType: schema.intelligenceSignals.entityType,
+            confidence: schema.intelligenceSignals.confidence,
+            suppressedUntil: schema.intelligenceSignals.suppressedUntil,
             status: schema.intelligenceSignals.status,
             evidence: schema.intelligenceSignals.evidence,
             firstSeenAt: schema.intelligenceSignals.firstSeenAt,
@@ -85,10 +101,12 @@ export async function registerIntelligenceRoutes(app: FastifyInstance): Promise<
         db
           .select({
             runType: schema.intelligenceRuns.runType,
-            mode: schema.intelligenceRuns.mode,
+            triggerSource: schema.intelligenceRuns.triggerSource,
+            durationMs: schema.intelligenceRuns.durationMs,
+            llmUsed: schema.intelligenceRuns.llmUsed,
             status: schema.intelligenceRuns.status,
             error: schema.intelligenceRuns.error,
-            stats: schema.intelligenceRuns.stats,
+            metadata: schema.intelligenceRuns.metadata,
             startedAt: schema.intelligenceRuns.startedAt,
             completedAt: schema.intelligenceRuns.completedAt,
           })
@@ -101,7 +119,6 @@ export async function registerIntelligenceRoutes(app: FastifyInstance): Promise<
       return {
         clientId: client.id,
         domain: client.domain,
-        mode: currentIntelligenceMode(),
         capabilities: currentCapabilities(),
         signals,
         runs,
@@ -128,9 +145,14 @@ export async function registerIntelligenceRoutes(app: FastifyInstance): Promise<
           id: schema.intelligenceOpportunities.id,
           opportunityType: schema.intelligenceOpportunities.opportunityType,
           fingerprint: schema.intelligenceOpportunities.fingerprint,
+          title: schema.intelligenceOpportunities.title,
+          description: schema.intelligenceOpportunities.description,
+          targetUrl: schema.intelligenceOpportunities.targetUrl,
+          targetKeyword: schema.intelligenceOpportunities.targetKeyword,
           score: schema.intelligenceOpportunities.score,
-          impact: schema.intelligenceOpportunities.impact,
+          expectedImpact: schema.intelligenceOpportunities.expectedImpact,
           confidence: schema.intelligenceOpportunities.confidence,
+          urgency: schema.intelligenceOpportunities.urgency,
           effort: schema.intelligenceOpportunities.effort,
           risk: schema.intelligenceOpportunities.risk,
           status: schema.intelligenceOpportunities.status,
@@ -148,7 +170,7 @@ export async function registerIntelligenceRoutes(app: FastifyInstance): Promise<
           opportunityId: schema.intelligenceActionLinks.opportunityId,
           action: schema.intelligenceActionLinks.action,
           jobName: schema.intelligenceActionLinks.jobName,
-          outcome: schema.intelligenceActionLinks.outcome,
+          status: schema.intelligenceActionLinks.status,
           blockedReason: schema.intelligenceActionLinks.blockedReason,
           createdAt: schema.intelligenceActionLinks.createdAt,
         })
@@ -157,7 +179,96 @@ export async function registerIntelligenceRoutes(app: FastifyInstance): Promise<
         .orderBy(desc(schema.intelligenceActionLinks.createdAt))
         .limit(PAGE_LIMIT);
 
-      return { clientId: client.id, mode: currentIntelligenceMode(), opportunities, links };
+      return { clientId: client.id, opportunities, links };
+    },
+  );
+
+  /**
+   * The decision ledger: why the loop acted, or declined to.
+   *
+   * Deferrals are included, not just actions. "The gate blocked this correctly"
+   * and "the loop never looked at it" are different states, and only a ledger
+   * that records both lets an operator tell them apart.
+   */
+  app.get<{ Params: { clientId: string } }>(
+    "/api/clients/:clientId/decisions",
+    async (request, reply) => {
+      const { clientId } = request.params;
+      const db = getDb();
+
+      const [client] = await db
+        .select({ id: schema.clients.id })
+        .from(schema.clients)
+        .where(eq(schema.clients.id, clientId))
+        .limit(1);
+
+      if (!client) return reply.code(404).send({ error: "Client not found" });
+
+      const decisions = await db
+        .select({
+          id: schema.intelligenceDecisions.id,
+          opportunityId: schema.intelligenceDecisions.opportunityId,
+          decisionType: schema.intelligenceDecisions.decisionType,
+          decision: schema.intelligenceDecisions.decision,
+          rationale: schema.intelligenceDecisions.rationale,
+          policyBasis: schema.intelligenceDecisions.policyBasis,
+          evidenceSummary: schema.intelligenceDecisions.evidenceSummary,
+          requiresApproval: schema.intelligenceDecisions.requiresApproval,
+          actionLogId: schema.intelligenceDecisions.actionLogId,
+          createdAt: schema.intelligenceDecisions.createdAt,
+        })
+        .from(schema.intelligenceDecisions)
+        .where(eq(schema.intelligenceDecisions.clientId, clientId))
+        .orderBy(desc(schema.intelligenceDecisions.createdAt))
+        .limit(PAGE_LIMIT);
+
+      return { clientId: client.id, decisions };
+    },
+  );
+
+  /**
+   * Manual trigger for one intelligence phase.
+   *
+   * Separate from the generic /trigger route so the allow-list here can be the
+   * intelligence job names only — an operator cannot reach another module's
+   * jobs through this path, and a new intelligence job is not automatically
+   * exposed by adding it to the scheduler.
+   */
+  app.post<{ Params: { clientId: string }; Body: { phase?: string } }>(
+    "/api/clients/:clientId/intelligence/trigger",
+    async (request, reply) => {
+      const { clientId } = request.params;
+      const { phase } = (request.body ?? {}) as { phase?: string };
+
+      if (!phase || !TRIGGERABLE_PHASES.includes(phase)) {
+        return reply
+          .code(400)
+          .send({ error: `Invalid phase. Valid: ${TRIGGERABLE_PHASES.join(", ")}` });
+      }
+
+      const db = getDb();
+      const [client] = await db
+        .select({
+          id: schema.clients.id,
+          domain: schema.clients.domain,
+          config: schema.clients.config,
+        })
+        .from(schema.clients)
+        .where(eq(schema.clients.id, clientId))
+        .limit(1);
+
+      if (!client) return reply.code(404).send({ error: "Client not found" });
+
+      const { getScheduler } = await import("../core/scheduler.js");
+      await getScheduler().addJob(phase, {
+        clientId: client.id,
+        clientDomain: client.domain,
+        clientConfig: client.config,
+        triggeredBy: "operator",
+      });
+
+      logger.info({ clientId, phase }, "Intelligence phase manually triggered");
+      return { success: true, phase, clientId: client.id };
     },
   );
 
@@ -177,7 +288,7 @@ export async function registerIntelligenceRoutes(app: FastifyInstance): Promise<
         signalType: schema.intelligenceSignals.signalType,
         clientCount: sql<number>`count(distinct ${schema.intelligenceSignals.clientId})::int`,
         signalCount: sql<number>`count(*)::int`,
-        avgStrength: sql<number>`round(avg(${schema.intelligenceSignals.strength})::numeric, 4)::float8`,
+        avgConfidence: sql<number>`round(avg(${schema.intelligenceSignals.confidence})::numeric, 4)::float8`,
       })
       .from(schema.intelligenceSignals)
       .where(eq(schema.intelligenceSignals.status, "open"))
