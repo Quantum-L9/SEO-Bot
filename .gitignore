@@ -24,4 +24,8 @@ validation/runs/
 # phase/release state, PR handoffs. Carries session identifiers and is rewritten
 # per run, so it is never shared branch content. Matches the constellation
 # convention (Website-Bot, l9-ci-core, l9-meta-injector, Cognitive.Engine.Graphs).
-.l9/
+# Ignore the CONTENTS, not the directory: git cannot re-include a file whose
+# parent directory is excluded, and .l9/ci.json must be tracked — it is the
+# consumer-owned CI class declaration org-ci.yml reads (schema l9.ci-consumer/v1).
+.l9/*
+!.l9/ci.json
