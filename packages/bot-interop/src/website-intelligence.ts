@@ -6,7 +6,7 @@ export const WEBSITE_INTELLIGENCE_PROTOCOL_VERSION = "1.0" as const;
 
 export const WEBSITE_INTELLIGENCE_SCHEMAS = {
   competitiveLandscape: "l9://website-intelligence/competitive-landscape/v1",
-  websiteBuildBlueprint: "l9://website-intelligence/website-build-blueprint/v1",
+  websiteBuildBlueprint: "l9://website-intelligence/website-build-blueprint/v2",
   seoContentBlueprint: "l9://website-intelligence/seo-content-blueprint/v1",
   pageContentContract: "l9://website-intelligence/page-content-contract/v1",
   structuredContentPackage: "l9://website-intelligence/structured-content-package/v1",
@@ -131,14 +131,72 @@ export interface CompetitiveLandscapeV1 {
 }
 
 /* ------------------------------------------------------------------ */
-/* WebsiteBuildBlueprint                                              */
+/* WebsiteBuildBlueprint (V2 — the single active blueprint contract)   */
 /* ------------------------------------------------------------------ */
-export interface WebsiteBuildBlueprintV1 {
-  schema: typeof WEBSITE_INTELLIGENCE_SCHEMAS.websiteBuildBlueprint;
-  build_intent: "REDESIGN_IMPROVE";
+
+/**
+ * Where an authoritative palette came from (ADR-0018 §6, WBV2-007).
+ *
+ * Observed source-site, donor-site, competitor-site and design-reference
+ * palettes are NOT sources. A color becomes authoritative only through
+ * explicit client intent or an explicit first-party design requirement.
+ */
+export type PaletteAuthoritySource = "client_vision" | "first_party_design_spec" | "none";
+
+export interface PaletteAuthority {
+  source: PaletteAuthoritySource;
+  /**
+   * Authoritative color tokens. Non-empty only when `source !== "none"`.
+   * When the source is "none" downstream design resolution must ask rather
+   * than inherit an observed palette.
+   */
+  tokens: Record<string, string>;
+  /**
+   * Abstract, explicitly non-authoritative characteristics distilled from
+   * observed evidence — "dark-dominant", "high-contrast", "muted". Never a
+   * concrete color value.
+   */
+  observed_characteristics: string[];
+}
+
+/**
+ * Normalized design principles derived from accepted reference evidence and
+ * client intent. Carries decisions, never raw expression (WBV2-004).
+ */
+export interface BlueprintDesignDirection {
+  principles: string[];
+  desired_attributes: string[];
+  rejected_attributes: string[];
+  reference_pattern_refs: string[];
+  prohibited_transfers: string[];
+  palette_authority: PaletteAuthority;
+}
+
+/**
+ * Sufficient provenance to identify every authoritative semantic input used to
+ * derive the blueprint (WBV2-009). A digest over a well-formed "not declared"
+ * record is complete provenance; a placeholder or empty string is not.
+ */
+export interface BlueprintProvenance {
   competitive_landscape_ref: ArtifactRef;
   baseline_digest: string;
+  client_vision_digest: string;
+  design_reference_intelligence_digest: string;
   pattern_portfolio_digest: string;
+}
+
+/**
+ * The single active website-build-blueprint contract (ADR-0018).
+ *
+ * DECISIONS + PROVENANCE — not raw evidence. Crawls, screenshots, reference
+ * content, donor markup and complete client-vision source material stay with
+ * their owning planes; the blueprint carries normalized decisions plus digests
+ * and content-addressed refs proving where they came from.
+ */
+export interface WebsiteBuildBlueprintV2 {
+  schema: typeof WEBSITE_INTELLIGENCE_SCHEMAS.websiteBuildBlueprint;
+  build_intent: "REDESIGN_IMPROVE";
+  provenance: BlueprintProvenance;
   strategy: {
     experience_attributes: string[];
     differentiation: string[];
@@ -146,6 +204,7 @@ export interface WebsiteBuildBlueprintV1 {
     evolve: string[];
     forbid: string[];
   };
+  design_direction: BlueprintDesignDirection;
   content_guardrails: {
     forbidden_claims: string[];
   };
@@ -156,9 +215,9 @@ export interface WebsiteBuildBlueprintV1 {
   };
   routes: WebsiteBlueprintRoute[];
   /**
-   * Blueprint-owned visual requirement intent (Campaign 7 R11).
-   * The blueprint defines WHY and WHERE imagery is needed; asset planning
-   * only selects WHICH eligible asset satisfies each requirement.
+   * Blueprint-owned visual requirement intent. The blueprint defines WHY and
+   * WHERE imagery is needed; asset planning only selects WHICH eligible asset
+   * satisfies each requirement (WBV2-010).
    */
   visual_requirements: VisualRequirement[];
   acceptance_tests: string[];
@@ -470,7 +529,7 @@ export type CompetitiveLandscapeArtifact = IntelligenceArtifact<
 >;
 export type WebsiteBuildBlueprintArtifact = IntelligenceArtifact<
   "website_build_blueprint",
-  WebsiteBuildBlueprintV1
+  WebsiteBuildBlueprintV2
 >;
 export type SEOContentBlueprintArtifact = IntelligenceArtifact<
   "seo_content_blueprint",
@@ -612,4 +671,177 @@ export function assertIntelligenceArtifactIntegrity(artifact: WebsiteIntelligenc
   if (artifact.artifact_id !== expectedArtifactId) {
     throw new Error("INTEL_ARTIFACT_HASH_MISMATCH: artifact_id does not match payload digest");
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Blueprint V2 law (ADR-0018)                                        */
+/* ------------------------------------------------------------------ */
+
+/** A concrete, renderable color value — the thing an observation must never become. */
+const CONCRETE_COLOR = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|color-mix|lab|lch|oklch|oklab)\s*\(/i;
+/** Raw expression markers: markup, CSS declarations/blocks, and embedded assets. */
+const RAW_MARKUP = /<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^>]*)?>/;
+const RAW_CSS_BLOCK = /\{[^}]*:[^}]*\}/;
+const RAW_CSS_DECLARATION =
+  /\b(?:color|background|background-color|background-image|font-family|font-size|border-radius|box-shadow|letter-spacing|line-height)\s*:/i;
+const RAW_ASSET_REF = /\burl\s*\(|\bdata:[a-z]+\//i;
+
+export class BlueprintContractError extends Error {
+  readonly code: string;
+  constructor(code: string, message: string) {
+    super(`${code}: ${message}`);
+    this.name = "BlueprintContractError";
+    this.code = code;
+  }
+}
+
+function isHexDigest(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+}
+
+/**
+ * WBV2-004: design reference intelligence carries abstracted principles, never
+ * raw donor/reference expression. Rejects markup, CSS declarations and blocks,
+ * concrete color literals, and embedded asset references in any principle
+ * string. Abstract characteristics ("dark-dominant", "generous whitespace")
+ * pass; `background:#0b0b0b` does not.
+ */
+export function assertNoRawExpressionTransfer(values: readonly string[], field: string): void {
+  for (const value of values) {
+    if (typeof value !== "string") {
+      throw new BlueprintContractError(
+        "DESIGN_REFERENCE_RAW_TRANSFER",
+        `${field} entries must be strings`,
+      );
+    }
+    for (const [pattern, kind] of [
+      [RAW_MARKUP, "markup"],
+      [RAW_CSS_BLOCK, "a CSS block"],
+      [RAW_CSS_DECLARATION, "a CSS declaration"],
+      [RAW_ASSET_REF, "an embedded asset reference"],
+      [CONCRETE_COLOR, "a concrete color value"],
+    ] as const) {
+      if (pattern.test(value)) {
+        throw new BlueprintContractError(
+          "DESIGN_REFERENCE_RAW_TRANSFER",
+          `${field} may not transfer ${kind}: ${JSON.stringify(value)}`,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * WBV2-007: observed palettes are never authoritative. An authority declaring
+ * no source may carry no tokens; a declared source must carry at least one; and
+ * an observed characteristic may never be a concrete color value.
+ */
+export function assertPaletteNonAuthority(authority: PaletteAuthority): void {
+  const tokenCount = Object.keys(authority.tokens).length;
+  if (authority.source === "none" && tokenCount > 0) {
+    throw new BlueprintContractError(
+      "PALETTE_AUTHORITY_LEAK",
+      "palette_authority.source is 'none' but authoritative tokens are present; " +
+        "observed source/donor/reference colors may not become redesign theme tokens",
+    );
+  }
+  if (authority.source !== "none" && tokenCount === 0) {
+    throw new BlueprintContractError(
+      "PALETTE_AUTHORITY_EMPTY",
+      `palette_authority.source is '${authority.source}' but no tokens were supplied`,
+    );
+  }
+  for (const characteristic of authority.observed_characteristics) {
+    if (CONCRETE_COLOR.test(characteristic)) {
+      throw new BlueprintContractError(
+        "PALETTE_AUTHORITY_LEAK",
+        `observed_characteristics must be abstract, not concrete colors: ${JSON.stringify(characteristic)}`,
+      );
+    }
+  }
+}
+
+/**
+ * WBV2-009: every sealed blueprint carries provenance for each authoritative
+ * semantic input. Structural completeness only — the compiler additionally
+ * proves each digest equals the digest of the input it claims to describe.
+ */
+export function assertProvenanceCompleteness(provenance: BlueprintProvenance): void {
+  const ref = provenance.competitive_landscape_ref;
+  if (ref?.artifact_type !== "competitive_landscape" || !ref.artifact_id || !ref.payload_digest) {
+    throw new BlueprintContractError(
+      "BLUEPRINT_PROVENANCE_INCOMPLETE",
+      "provenance.competitive_landscape_ref must be a complete competitive_landscape ArtifactRef",
+    );
+  }
+  for (const field of [
+    "baseline_digest",
+    "client_vision_digest",
+    "design_reference_intelligence_digest",
+    "pattern_portfolio_digest",
+  ] as const) {
+    if (!isHexDigest(provenance[field])) {
+      throw new BlueprintContractError(
+        "BLUEPRINT_PROVENANCE_INCOMPLETE",
+        `provenance.${field} must be a sha256 hex digest`,
+      );
+    }
+  }
+}
+
+/** WBV2-002: only Website-Bot may produce a website build blueprint. */
+export function assertWebsiteBuildBlueprintProducer(artifact: WebsiteBuildBlueprintArtifact): void {
+  if (artifact.producer.repo !== "Website-Bot") {
+    throw new BlueprintContractError(
+      "BLUEPRINT_PRODUCER_FORBIDDEN",
+      `WebsiteBuildBlueprint may only be produced by Website-Bot, not ${artifact.producer.repo}`,
+    );
+  }
+}
+
+/**
+ * WBV2-001 / WBV2-015: the sealed blueprint is V2 and only V2. A payload
+ * carrying the retired V1 schema URI — or any other URI — is rejected outright.
+ * There is no downgrade path and no fallback parser.
+ */
+export function assertWebsiteBuildBlueprintV2(artifact: WebsiteBuildBlueprintArtifact): void {
+  assertIntelligenceArtifactIntegrity(artifact);
+  assertWebsiteBuildBlueprintProducer(artifact);
+  const payload = artifact.payload as Partial<WebsiteBuildBlueprintV2>;
+  if (payload.schema !== WEBSITE_INTELLIGENCE_SCHEMAS.websiteBuildBlueprint) {
+    throw new BlueprintContractError(
+      "BLUEPRINT_SCHEMA_REJECTED",
+      `unsupported website-build-blueprint schema ${JSON.stringify(payload.schema)}; ` +
+        `the only active contract is ${WEBSITE_INTELLIGENCE_SCHEMAS.websiteBuildBlueprint}`,
+    );
+  }
+  if (payload.build_intent !== "REDESIGN_IMPROVE") {
+    throw new BlueprintContractError(
+      "BLUEPRINT_SCHEMA_REJECTED",
+      "blueprint build_intent must be REDESIGN_IMPROVE",
+    );
+  }
+  if (!payload.provenance) {
+    throw new BlueprintContractError(
+      "BLUEPRINT_PROVENANCE_INCOMPLETE",
+      "blueprint carries no provenance block",
+    );
+  }
+  assertProvenanceCompleteness(payload.provenance);
+  if (!payload.design_direction) {
+    throw new BlueprintContractError(
+      "BLUEPRINT_SCHEMA_REJECTED",
+      "blueprint carries no design_direction block",
+    );
+  }
+  assertPaletteNonAuthority(payload.design_direction.palette_authority);
+  assertNoRawExpressionTransfer(payload.design_direction.principles, "design_direction.principles");
+  assertNoRawExpressionTransfer(
+    payload.design_direction.desired_attributes,
+    "design_direction.desired_attributes",
+  );
+  assertNoRawExpressionTransfer(
+    payload.design_direction.rejected_attributes,
+    "design_direction.rejected_attributes",
+  );
 }
