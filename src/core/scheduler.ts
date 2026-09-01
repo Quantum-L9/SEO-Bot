@@ -165,6 +165,63 @@ const JOB_DEFINITIONS: JobDefinition[] = [
     },
     enabled: true,
   },
+  // ─── Intelligence control loop ─────────────────────────────────────────────
+  // Four phases rather than one job: each has a different blast radius and a
+  // different mode gate, so `observe` can run extraction and scoring forever
+  // without ever loading the code path that enqueues work.
+  //
+  // All four are `enabled: true` here but are only SCHEDULED when
+  // INTELLIGENCE_MODE is not "off" — see `isJobEnabled`. They run after the
+  // morning data-collection jobs (SERP 06:00, vitals/AEO/behavior) so they
+  // score fresh observations rather than yesterday's.
+  {
+    name: "intelligence:extract-signals",
+    module: "intelligence",
+    cron: "0 8 * * *",
+    handler: "extractSignals",
+    clientScoped: true,
+    // Zero tokens: extraction is pure SQL over operational tables. No LLM may
+    // be introduced here — determinism is the contract (see signal-extractor).
+    tokenBudget: { maxFastTokensPerRun: 0, maxStrategicTokensPerRun: 0, cooldownMinutes: 0 },
+    enabled: true,
+  },
+  {
+    name: "intelligence:score-opportunities",
+    module: "intelligence",
+    cron: "20 8 * * *",
+    handler: "scoreOpportunities",
+    clientScoped: true,
+    // Zero tokens: scoring is arithmetic over signal fields, by contract.
+    tokenBudget: { maxFastTokensPerRun: 0, maxStrategicTokensPerRun: 0, cooldownMinutes: 0 },
+    enabled: true,
+  },
+  {
+    name: "intelligence:plan-actions",
+    module: "intelligence",
+    cron: "40 8 * * *",
+    handler: "planActions",
+    clientScoped: true,
+    // The only intelligence job that spends tokens, and only in route_llm/full.
+    // Strategic-only: the planner picks from a closed vocabulary given an
+    // evidence pack, which is a judgment task, not a fast classification.
+    tokenBudget: {
+      maxFastTokensPerRun: 0,
+      maxStrategicTokensPerRun: 4000,
+      cooldownMinutes: 120,
+    },
+    enabled: true,
+  },
+  {
+    name: "intelligence:attribute-outcomes",
+    module: "intelligence",
+    // Weekly: the attribution window is 14 days, so measuring more often than
+    // weekly re-reads the same unchanged before/after pair.
+    cron: "0 9 * * 1",
+    handler: "attributeOutcomes",
+    clientScoped: true,
+    tokenBudget: { maxFastTokensPerRun: 0, maxStrategicTokensPerRun: 0, cooldownMinutes: 0 },
+    enabled: true,
+  },
   {
     name: "reports:weekly-summary",
     module: "serp-intelligence",
@@ -177,6 +234,26 @@ const JOB_DEFINITIONS: JobDefinition[] = [
 ];
 
 // ─── Scheduler Class ─────────────────────────────────────────────────────────
+
+/**
+ * Whether a job should be scheduled on this boot.
+ *
+ * Separate from the static `enabled` flag because the intelligence module's
+ * schedule is governed by INTELLIGENCE_MODE, which is deployment config rather
+ * than a source-level decision. With `INTELLIGENCE_MODE=off` (the default) its
+ * jobs are never placed on a queue at all — the handlers' own mode checks would
+ * make them no-ops anyway, but not scheduling them means an operator sees zero
+ * intelligence jobs rather than a stream of jobs that do nothing.
+ *
+ * Config is read here rather than at module load: JOB_DEFINITIONS is evaluated
+ * on import, and `getConfig()` exits the process on invalid env, which would
+ * make importing this module for a unit test fatal.
+ */
+export function isJobEnabled(jobDef: JobDefinition): boolean {
+  if (!jobDef.enabled) return false;
+  if (jobDef.module === "intelligence") return getConfig().INTELLIGENCE_MODE !== "off";
+  return true;
+}
 
 export class Scheduler {
   private readonly connection: Redis;
@@ -207,7 +284,23 @@ export class Scheduler {
     logger.debug({ jobName }, "Handler registered");
   }
 
-  async addJob(jobName: string, data: Record<string, unknown>): Promise<void> {
+  /**
+   * Enqueue a job.
+   *
+   * `opts.jobId` supplies a caller-chosen BullMQ job id. BullMQ ignores an
+   * `add` whose id already exists, which makes the id an idempotency key: a
+   * caller that derives it deterministically from the work (rather than from
+   * the attempt) can retry safely. The intelligence action router relies on
+   * this to guarantee a retried route cannot enqueue the same outreach twice.
+   *
+   * Omitting it keeps BullMQ's default behaviour — a fresh generated id per
+   * call — so every existing caller is unaffected.
+   */
+  async addJob(
+    jobName: string,
+    data: Record<string, unknown>,
+    opts?: { jobId?: string },
+  ): Promise<void> {
     const jobDef = JOB_DEFINITIONS.find((j) => j.name === jobName);
     if (!jobDef) {
       throw new Error(`Unknown job: ${jobName}`);
@@ -226,17 +319,18 @@ export class Scheduler {
       {
         removeOnComplete: { count: 100 },
         removeOnFail: { count: 50 },
+        ...(opts?.jobId ? { jobId: opts.jobId } : {}),
       },
     );
     // Log only jobName — data contains clientConfig and may include secrets/PII
-    logger.info({ jobName }, "Manual job queued");
+    logger.info({ jobName, jobId: opts?.jobId }, "Manual job queued");
   }
 
   async start(): Promise<void> {
     logger.info("Starting scheduler...");
 
     for (const jobDef of JOB_DEFINITIONS) {
-      if (!jobDef.enabled) continue;
+      if (!isJobEnabled(jobDef)) continue;
 
       const queueName = `l9-${jobDef.module}`;
 
@@ -286,7 +380,7 @@ export class Scheduler {
     }
 
     logger.info(
-      { queues: this.queues.size, jobs: JOB_DEFINITIONS.filter((j) => j.enabled).length },
+      { queues: this.queues.size, jobs: JOB_DEFINITIONS.filter(isJobEnabled).length },
       "Scheduler started",
     );
   }

@@ -119,6 +119,39 @@ const envSchema = z.object({
   // Site Deployment Transport (C-01 / GAP-08) — only used when the
   // serp:execute-surpass-plans job is enabled. All optional so startup never
   // fails when the feature is off; validated here so typos surface clearly.
+  // ─── Intelligence Control Loop ──────────────────────────────────────────────
+  // The intelligence module is a control loop, not a feature: it observes,
+  // scores, and can route real work. Every capability is off by default and
+  // must be turned on one stage at a time (see docs/INTELLIGENCE_MODES.md).
+  //
+  // INTELLIGENCE_MODE is the master switch. The ALLOW_* flags are a second,
+  // independent axis: a capability runs only when BOTH the mode permits it AND
+  // its flag is on. Mode alone can never enable outreach or site mutation, so a
+  // mistaken `INTELLIGENCE_MODE=full` cannot by itself email a prospect.
+  INTELLIGENCE_MODE: z
+    .enum(["off", "observe", "recommend", "route_safe", "route_llm", "full"])
+    .default("off"),
+  INTELLIGENCE_LLM_PLANNING_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+  INTELLIGENCE_ALLOW_SAFE_JOB_ROUTING: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+  INTELLIGENCE_ALLOW_OUTREACH_ROUTING: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+  INTELLIGENCE_ALLOW_SITE_MUTATION: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+  /** Signals older than this are stale: they stop feeding new opportunities. */
+  INTELLIGENCE_SIGNAL_STALE_DAYS: z.coerce.number().int().positive().default(14),
+  /** Hard ceiling on opportunities routed per run — bounds blast radius. */
+  INTELLIGENCE_MAX_ROUTED_PER_RUN: z.coerce.number().int().positive().default(10),
+
   GITHUB_TOKEN: z.string().optional(),
   VERCEL_DEPLOY_HOOK: z.string().optional(),
   WEBSITE_BOT_REPO: z.string().optional(),

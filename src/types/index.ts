@@ -317,7 +317,8 @@ export type ModuleName =
   | "link-building"
   | "behavior-intelligence"
   | "memory"
-  | "build-intelligence";
+  | "build-intelligence"
+  | "intelligence";
 
 export interface TokenBudget {
   maxFastTokensPerRun: number;

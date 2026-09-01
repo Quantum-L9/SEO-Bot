@@ -13,6 +13,7 @@ import { getScheduler } from "./core/scheduler.js";
 import { hydrateSecretsIfConfigured } from "./core/secrets.js";
 import { registerAeoHandlers } from "./modules/aeo-geo/index.js";
 import { registerBehaviorHandlers } from "./modules/behavior-intelligence/index.js";
+import { registerIntelligenceHandlers } from "./modules/intelligence/index.js";
 import { registerLinkHandlers } from "./modules/link-building/index.js";
 import { registerSerpHandlers } from "./modules/serp-intelligence/index.js";
 import { registerVitalsHandlers } from "./modules/web-vitals/index.js";
@@ -52,6 +53,7 @@ async function main() {
   registerAeoHandlers(scheduler);
   registerLinkHandlers(scheduler);
   registerBehaviorHandlers(scheduler);
+  registerIntelligenceHandlers(scheduler);
   registerPlanExecutorHandlers(scheduler);
   registerMemoryHandlers(scheduler);
   await scheduler.start();

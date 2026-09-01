@@ -26,6 +26,7 @@ import { getLlmService } from "../services/llm.js";
 import { registerBuildIntelligenceRoutes } from "./build-intelligence.js";
 import { registerClientRoutes } from "./clients/register.js";
 import { registerDashboard } from "./dashboard.js";
+import { registerIntelligenceRoutes } from "./intelligence.js";
 import { registerApiSecurity } from "./security.js";
 
 const logger = createModuleLogger("api");
@@ -90,6 +91,7 @@ export async function buildApiServer(): Promise<FastifyInstance> {
   await registerDashboard(app);
   await registerClientRoutes(app);
   await registerBuildIntelligenceRoutes(app);
+  await registerIntelligenceRoutes(app);
 
   app.get("/health", async () => {
     const db = getDb();
@@ -299,6 +301,13 @@ export async function buildApiServer(): Promise<FastifyInstance> {
         "links:process-outreach",
         "behavior:pull-engagement",
         "behavior:generate-insights",
+        // Intelligence phases are triggerable, but the list stays an explicit
+        // allow-list: an operator can run extraction or scoring on demand, and
+        // anything not named here is rejected rather than passed to addJob.
+        "intelligence:extract-signals",
+        "intelligence:score-opportunities",
+        "intelligence:plan-actions",
+        "intelligence:attribute-outcomes",
       ];
       if (!module || !validModules.includes(module))
         return { error: `Invalid module. Valid: ${validModules.join(", ")}` };
