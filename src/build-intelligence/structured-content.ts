@@ -659,7 +659,10 @@ async function generateRoute(
             "Your previous output failed validation. Fix ONLY the items below; " +
             "keep everything else compliant. Any unsupported claims below are BANNED " +
             "phrases: you MUST remove them completely — do not rephrase them, do not " +
-            "include them in any form, in any section, FAQ, title, or description.",
+            "include them in any form, in any section, FAQ, title, or description. " +
+            "When removing a banned phrase, REWRITE the whole sentence so it stays " +
+            "complete and grammatical — never leave fragments like 'fully and " +
+            "available' or 'for a .' behind.",
           schema_failures: repair.schema_failures ?? [],
           failed_requirements: repair.failed_requirements ?? [],
           remove_or_support_unsupported_claims: repair.unsupported_claims ?? [],
