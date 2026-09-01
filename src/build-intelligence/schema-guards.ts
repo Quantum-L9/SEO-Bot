@@ -174,7 +174,9 @@ export const STRUCTURED_CONTENT_OUTPUT_CONTRACT = [
   "- internal_links: array of { target_route_id: string, anchor_text: string } — include every required target.",
   "- schema_content_inputs: object with optional booleans faq, service, local_business.",
   "FORBIDDEN field aliases: content, body, copy, html, paragraphs. Section prose exists",
-  "exclusively inside blocks. Respond with ONLY the JSON object — no markdown fences.",
+  "exclusively inside blocks. sections[].blocks is REQUIRED on EVERY section — never",
+  "omit it, not even on the last section; a section with nothing to say still",
+  "carries blocks: []. Respond with ONLY the JSON object — no markdown fences.",
 ].join("\n");
 
 /** One observed schema/JSON failure, shaped for the bounded repair prompt. */
