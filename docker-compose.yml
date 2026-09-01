@@ -42,7 +42,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-l9_seo_bot}
     ports:
-      - "5432:5432"
+      # Bound to loopback: only this host (and containers on l9-network, which
+      # do not use the published port) may reach Postgres. Use an SSH tunnel
+      # for remote psql: ssh -L 5432:127.0.0.1:5432 <host>
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init.sql
@@ -63,7 +66,8 @@ services:
     restart: unless-stopped
     command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
     ports:
-      - "6379:6379"
+      # Loopback only — Redis has no auth configured here.
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     networks:
@@ -86,8 +90,9 @@ services:
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-posthog}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
     ports:
-      - "8123:8123"
-      - "9000:9000"
+      # Loopback only; PostHog reaches ClickHouse over the l9-network bridge.
+      - "127.0.0.1:8123:8123"
+      - "127.0.0.1:9000:9000"
     volumes:
       - clickhouse_data:/var/lib/clickhouse
     networks:

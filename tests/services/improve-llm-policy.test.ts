@@ -27,6 +27,7 @@ describe("SEO-Bot improve LLM policy", () => {
       "SEO_CONTENT_BLUEPRINT",
       "STRUCTURED_CONTENT_GENERATION",
       "CONTENT_VALIDATION",
+      "INTELLIGENCE_ACTION_SELECTION",
     ] as const) {
       expect(SEO_IMPROVE_LLM_POLICY[op].requiresSearch).toBe(false);
     }
@@ -43,6 +44,14 @@ describe("SEO-Bot improve LLM policy", () => {
     expect(task.description).toBe("blueprint for /home");
     expect(task.type).toBe(TaskType.STRATEGIC_REASONING);
     expect(task.requiresSearch).toBe(false);
+  });
+
+  it("keeps the intelligence action selection on normalized evidence, not search", () => {
+    // The evidence pack IS the evidence. A search provider here would let the
+    // model reason from the open web about a client it is deliberately not told
+    // the identity of — a worse decision and a redaction leak at once.
+    expect(SEO_IMPROVE_LLM_POLICY.INTELLIGENCE_ACTION_SELECTION.requiresSearch).toBe(false);
+    expect(SEO_IMPROVE_LLM_POLICY.INTELLIGENCE_ACTION_SELECTION.type).toBe(TaskType.SCORING);
   });
 
   it("assertSeoImprovePolicy passes for the shipped policy", () => {

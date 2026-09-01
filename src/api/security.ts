@@ -13,7 +13,10 @@
  *   2. Split authentication (shared secret via Basic password or Bearer):
  *      - /api/build-intelligence/* → SEO_BOT_API_KEY machine credential only
  *        (the Website-Bot machine-auth surface);
- *      - other protected routes → OPERATOR_API_KEY only (dashboard/operator).
+ *      - /api/reporting/*          → OPERATOR_API_KEY (operator audience) or
+ *        REPORTING_AGENT_API_KEY (masked agent audience). The credential — not
+ *        the request — decides which column projections are reachable;
+ *      - other protected routes    → OPERATOR_API_KEY only (dashboard/operator).
  *
  * Fail-closed: if the surface's own key is unset, its protected routes return
  * 401. Exempt: /health (liveness) and /api/clients/register (authenticated by
@@ -25,8 +28,20 @@ import { timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { getConfig } from "../core/config.js";
 import { createModuleLogger } from "../core/logger.js";
+import type { ReportingActor } from "../reporting/query-gateway.js";
 
 const logger = createModuleLogger("api:security");
+
+declare module "fastify" {
+  interface FastifyRequest {
+    /**
+     * Set by the reporting auth branch below. Its `audience` is what the query
+     * compiler uses to pick a column projection, so it is resolved once here,
+     * from the credential presented, and never from anything in the request body.
+     */
+    reportingActor?: ReportingActor;
+  }
+}
 
 /** Routes reachable without operator auth. */
 const AUTH_EXEMPT = ["/health", "/api/clients/register"];
@@ -74,9 +89,27 @@ export function parseAuthSecret(header: string | undefined): string | null {
   return null;
 }
 
-/** True when the path is a rate-limited-stricter, expensive/abusable route. */
+/** True when the path belongs to the reporting SQL plane (ADR-0015). */
+export function isReportingSurface(pathname: string): boolean {
+  return pathname === "/api/reporting" || pathname.startsWith("/api/reporting/");
+}
+
+/**
+ * True when the path is a rate-limited-stricter, expensive/abusable route.
+ *
+ * `/api/reporting/query` belongs here on cost, not on trust: each call is a
+ * portfolio-scale read holding a connection for up to its audience's statement
+ * timeout. At the default 120/min an automated caller could hold more database
+ * time per minute than there are minutes, so the cheap listing endpoints
+ * (`/views`, `/refresh-status`) stay on the default cap and only the read is
+ * capped hard.
+ */
 export function isStrictRateLimited(pathname: string): boolean {
-  return pathname === "/api/clients/register" || /^\/api\/clients\/[^/]+\/trigger$/.test(pathname);
+  return (
+    pathname === "/api/clients/register" ||
+    pathname === "/api/reporting/query" ||
+    /^\/api\/clients\/[^/]+\/trigger$/.test(pathname)
+  );
 }
 
 function pathname(url: string): string {
@@ -141,6 +174,47 @@ export function registerApiSecurity(app: FastifyInstance): void {
     if (isAuthExempt(path)) return;
 
     const presented = parseAuthSecret(request.headers.authorization);
+
+    // ── Reporting plane: two audiences, two secrets ──────────────────────────
+    // The operator key resolves to the `operator` audience (client names,
+    // domains, contact PII). The separate REPORTING_AGENT_API_KEY resolves to
+    // the `agent` audience, which only ever reaches masked projections. The
+    // agent surface is opt-in: unset means agents have no access at all.
+    // config.ts fails startup if the two secrets are equal.
+    if (isReportingSurface(path)) {
+      const { OPERATOR_API_KEY: operatorKey, REPORTING_AGENT_API_KEY: agentKey } = getConfig();
+
+      if (!operatorKey && !agentKey) {
+        logger.error({ path }, "No reporting key configured; the reporting plane is locked");
+        reply.header("WWW-Authenticate", 'Basic realm="L9 SEO Bot"');
+        return reply.status(401).send({ error: "authentication not configured" });
+      }
+
+      if (presented !== null && operatorKey && constantTimeEqual(presented, operatorKey)) {
+        request.reportingActor = {
+          id: "operator",
+          type: "human",
+          surface: "api:reporting",
+          audience: "operator",
+        };
+        return;
+      }
+
+      if (presented !== null && agentKey && constantTimeEqual(presented, agentKey)) {
+        request.reportingActor = {
+          id: "reporting-agent",
+          type: "agent",
+          surface: "api:reporting",
+          audience: "agent",
+        };
+        return;
+      }
+
+      logger.warn({ ip: request.ip, path }, "Rejected unauthenticated reporting request");
+      reply.header("WWW-Authenticate", 'Basic realm="L9 SEO Bot"');
+      return reply.status(401).send({ error: "unauthorized" });
+    }
+
     const machine = path.startsWith("/api/build-intelligence/");
 
     const expectedKey = machine ? getConfig().SEO_BOT_API_KEY : getConfig().OPERATOR_API_KEY;

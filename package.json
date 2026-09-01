@@ -27,7 +27,15 @@
     "verify:release": "tsx scripts/validation/cli.ts run --profile release",
     "verify:production": "tsx scripts/validation/cli.ts run --profile production",
     "evidence:clean": "tsx scripts/validation/cli.ts clean",
-    "lockfile:generate": "npm install --package-lock-only --ignore-scripts --no-audit --no-fund"
+    "lockfile:generate": "npm install --package-lock-only --ignore-scripts --no-audit --no-fund",
+    "verify:intelligence": "tsx scripts/intelligence/verify-invariants.ts",
+    "test:intelligence": "vitest run tests/intelligence",
+    "test:reporting": "vitest run tests/reporting",
+    "test:gates": "vitest run tests/migrations tests/core/execution-policy.test.ts tests/core/scheduler.test.ts",
+    "test:api": "vitest run tests/api",
+    "test:live": "vitest run --config vitest.live.config.ts",
+    "live:up": "docker compose -f docker-compose.validation.yml up -d --wait",
+    "live:down": "docker compose -f docker-compose.validation.yml down -v"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.0",

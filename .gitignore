@@ -29,3 +29,33 @@ validation/runs/
 # consumer-owned CI class declaration org-ci.yml reads (schema l9.ci-consumer/v1).
 .l9/*
 !.l9/ci.json
+
+# Governance projections written into this workspace by the Claude Code
+# sessionStart bootstrap. Their SSOT is Quantum-L9/Cursor-Governance, which
+# tracks all three files; a copy here is a duplicate of another repo's source,
+# rewritten on every session. Same reasoning as `.l9/` above.
+#
+# `.claude/rules` is the sharper case: it is a SYMLINK to an absolute path
+# inside the governance clone (`/root/.cursor-governance/...`). Committing it
+# would put a machine-specific path in shared branch content and resolve to
+# nothing on any other checkout.
+#
+# Deliberately NOT a blanket `.claude/` — `.claude/hooks/session-start.sh` is
+# this repository's own file and stays tracked.
+.claude/rules
+.claude/settings.json
+.claude/hooks/merge_gate_wrap.py
+.claude/hooks/session_start_claude_governance.sh
+
+# The projected command and skill trees, same class as the four above. These
+# were hidden only by `.git/info/exclude`, which is machine-local and untracked
+# — so on any other checkout (CI, another contributor, another agent's
+# container) 76 generated files show up untracked and can be committed by
+# accident. A shared ignore is where the rule belongs.
+.claude/commands/
+.claude/skills/
+
+# pnpm's lockfile. This repo's SSOT is package-lock.json (committed, and what
+# CI installs with `npm ci`). A second lockfile drifts silently from the first
+# and changes what a contributor's install resolves.
+pnpm-lock.yaml

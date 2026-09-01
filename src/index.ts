@@ -11,6 +11,7 @@ import { closeDb, getDb, schema } from "./core/database/index.js";
 import { createModuleLogger } from "./core/logger.js";
 import { getScheduler } from "./core/scheduler.js";
 import { hydrateSecretsIfConfigured } from "./core/secrets.js";
+import { registerIntelligenceHandlers } from "./intelligence/index.js";
 import { registerAeoHandlers } from "./modules/aeo-geo/index.js";
 import { registerBehaviorHandlers } from "./modules/behavior-intelligence/index.js";
 import { registerLinkHandlers } from "./modules/link-building/index.js";
@@ -54,6 +55,7 @@ async function main() {
   registerBehaviorHandlers(scheduler);
   registerPlanExecutorHandlers(scheduler);
   registerMemoryHandlers(scheduler);
+  registerIntelligenceHandlers(scheduler);
   await scheduler.start();
   logger.info("All modules registered and scheduler started");
 
@@ -69,7 +71,8 @@ async function main() {
   process.on("SIGINT", () => shutdown("SIGINT"));
 
   logger.info(
-    "L9 SEO Bot operational: SERP | Vitals | AEO/GEO | Links | Behavior | Governed Memory",
+    "L9 SEO Bot operational: SERP | Vitals | AEO/GEO | Links | Behavior | Governed Memory | " +
+      "Intelligence Plane | Reporting Plane",
   );
 }
 

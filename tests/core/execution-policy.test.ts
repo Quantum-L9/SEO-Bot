@@ -49,8 +49,10 @@ import {
   type ActionProposal,
   approveAction,
   classifyAction,
+  classifyActionForOrigin,
   createProposal,
   evaluateExecution,
+  isComposedOrigin,
   logAction,
   type RiskLevel,
   rejectAction,
@@ -196,5 +198,72 @@ describe("approveAction / rejectAction — resolve a single action (GAP-001)", (
     expect(updateSetMock).toHaveBeenCalledTimes(1);
     expect(updateSetMock.mock.calls[0][0]).toMatchObject({ status: "rejected" });
     expect(updateWhereMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─── Origin-aware fail-closed classification (hardening contract C5) ──────────
+
+describe("classifyActionForOrigin — unknown composed actions fail closed", () => {
+  it("still returns the table's classification for a known action, whatever the origin", () => {
+    // The gate must not re-risk actions that ARE classified; it only decides what
+    // an unknown one becomes.
+    const known = classifyAction("meta_title_update");
+    expect(classifyActionForOrigin("intelligence:x:y", "meta_title_update")).toEqual(known);
+    expect(classifyActionForOrigin("cron:weekly", "meta_title_update")).toEqual(known);
+  });
+
+  it("makes an UNKNOWN action from the intelligence plane critical and irreversible", () => {
+    // Without this the unknown-action default is medium/reversible, which is the
+    // band that auto-executes — so a composed action nobody classified would run
+    // itself. Critical routes it to the approval queue instead.
+    expect(classifyActionForOrigin("intelligence:aeo_gap:abc123", "invented_action")).toEqual({
+      riskLevel: "critical",
+      reversible: false,
+    });
+  });
+
+  it("leaves hand-written callers on the permissive default", () => {
+    // The default is correct for module jobs, where an unclassified action is a
+    // typo caught in review rather than a runtime gap. Narrowing it everywhere
+    // would turn every such typo into a stuck approval queue.
+    expect(classifyActionForOrigin("cron:serp-daily", "invented_action")).toEqual({
+      riskLevel: "medium",
+      reversible: true,
+    });
+  });
+
+  it("routes an unknown composed action to approval, end to end", () => {
+    const composed = createProposal({
+      clientId: "c1",
+      module: "web-vitals",
+      action: "invented_action",
+      description: "d",
+      rationale: "r",
+      triggeredBy: "intelligence:page_slow:fp1",
+    });
+    expect(composed.riskLevel).toBe("critical");
+    expect(evaluateExecution(composed).execute).toBe(false);
+    expect(evaluateExecution(composed).requiresApproval).toBe(true);
+  });
+
+  it("recognises the plane by triggeredBy, NOT by module", () => {
+    // The load-bearing detail. An intelligence-plane proposal carries the module
+    // that will EXECUTE it, so `module === "intelligence"` matches nothing: a
+    // module-keyed gate would be dead code that looks like a control.
+    expect(isComposedOrigin("intelligence:page_slow:fp1")).toBe(true);
+    expect(isComposedOrigin("cron:web-vitals")).toBe(false);
+
+    const viaModuleName = createProposal({
+      clientId: "c1",
+      // The real module on every intelligence proposal — never "intelligence".
+      module: "web-vitals",
+      action: "invented_action",
+      description: "d",
+      rationale: "r",
+      triggeredBy: "cron:web-vitals",
+    });
+    // Same module, non-composed origin: the permissive default still applies,
+    // which is what proves the discriminator is the origin and not the module.
+    expect(viaModuleName.riskLevel).toBe("medium");
   });
 });

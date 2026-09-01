@@ -70,6 +70,7 @@ vi.mock("../../src/core/database/index.js", () => ({
   schema: { jobExecutions: { id: "je.id" }, clients: { active: "clients.active" } },
 }));
 
+import { deterministicJobId, isBullMqSafeJobId } from "../../src/core/job-id.js";
 import {
   fanoutChildJobId,
   getScheduler,
@@ -93,11 +94,29 @@ describe("fanoutChildJobId", () => {
     // Same parent instance id (a retry of the same fire) → same child id, so
     // BullMQ ignores the re-add and the child is not run twice.
     expect(fanoutChildJobId("repeat:vitals:1750000000000", "client-1")).toBe(
-      "child:repeat:vitals:1750000000000:client-1",
+      "child~repeat-vitals-1750000000000~client-1",
     );
     expect(fanoutChildJobId("repeat:vitals:1750000000000", "client-1")).toBe(
-      "child:repeat:vitals:1750000000000:client-1",
+      "child~repeat-vitals-1750000000000~client-1",
     );
+  });
+
+  it("produces an id BullMQ will actually accept", () => {
+    // The assertion above used to expect `child:repeat:vitals:...:client-1`,
+    // which BullMQ rejects: a custom id may not contain `:`. A repeatable
+    // parent's own id is `repeat:<name>:<ms>`, so EVERY scheduled fan-out threw
+    // at `queue.add()` and the dedup protection above had never run. The test
+    // was green because the queue in this file is a fake that accepts any id.
+    //
+    // `isBullMqSafeJobId` is pinned against a real Redis in
+    // `tests/live/queue.live.test.ts`, so this is not one fake vouching for
+    // another.
+    expect(isBullMqSafeJobId(fanoutChildJobId("repeat:vitals:1750000000000", "client-1"))).toBe(
+      true,
+    );
+    expect(isBullMqSafeJobId(fanoutChildJobId("p1", "a"))).toBe(true);
+    // The shape it replaced, so the regression is named rather than implied.
+    expect(isBullMqSafeJobId("child:repeat:vitals:1750000000000:client-1")).toBe(false);
   });
 
   it("differs across scheduled occurrences so every fire still runs", () => {
@@ -160,8 +179,8 @@ describe("Scheduler.processJob — client fan-out (GAP-006)", () => {
     expect(children.length).toBe(2);
     // Deterministic child ids (idempotent on parent retry → no duplicate outreach).
     expect(children.map((c) => c.opts.jobId).sort()).toEqual([
-      "child:parent-99:client-a",
-      "child:parent-99:client-b",
+      "child~parent-99~client-a",
+      "child~parent-99~client-b",
     ]);
     // Each child carries THAT tenant's id, domain, and config.
     const a = children.find((c) => c.opts.jobId.endsWith("client-a"))!;
@@ -219,5 +238,71 @@ describe("Scheduler.stop — releases resources and resets the singleton (GAP-00
     expect(scheduler.isRunning()).toBe(false);
     // Singleton was reset, so the next accessor builds a fresh instance.
     expect(getScheduler()).not.toBe(scheduler);
+  });
+});
+
+// ─── addJob idempotency (hardening contract C5) ──────────────────────────────
+
+describe("Scheduler.addJob — deduplication key", () => {
+  const definition = {
+    name: "intel:test-job",
+    module: "intelligence",
+    cron: "0 0 * * *",
+    handler: "h",
+    clientScoped: false,
+    tokenBudget: { maxFastTokensPerRun: 0, maxStrategicTokensPerRun: 0, cooldownMinutes: 0 },
+    enabled: true,
+  };
+
+  it("passes a caller-supplied jobId through to BullMQ", async () => {
+    // BullMQ treats a job id as a dedupe key, so this is the whole of the retry
+    // protection for consequence-of-a-row enqueues: without it a retried
+    // handler sends the same outreach twice.
+    const scheduler = new Scheduler();
+    scheduler.registerDefinition(definition as never);
+
+    const jobId = deterministicJobId("intel", "c1", "o1", "intel:test-job");
+    await scheduler.addJob("intel:test-job", { clientId: "c1" }, { jobId });
+
+    const add = bull.queueAdds.at(-1);
+    expect(add?.opts?.jobId).toBe(jobId);
+    expect(isBullMqSafeJobId(jobId)).toBe(true);
+  });
+
+  it("rejects a jobId BullMQ would reject, naming the rule", async () => {
+    // The fake queue accepts anything, so without this the suite cannot tell a
+    // usable dedup key from one that throws on contact with Redis — which is
+    // exactly how `intel:<client>:<fingerprint>:<job>` shipped.
+    const scheduler = new Scheduler();
+    scheduler.registerDefinition(definition as never);
+
+    await expect(
+      scheduler.addJob("intel:test-job", { clientId: "c1" }, { jobId: "intel:c1:o1:job" }),
+    ).rejects.toThrow(/not a valid BullMQ custom id/);
+  });
+
+  it("leaves jobId undefined when the caller supplies none", async () => {
+    // An operator pressing a button twice on purpose should get two jobs; only
+    // enqueues derived from a durable row need the key.
+    const scheduler = new Scheduler();
+    scheduler.registerDefinition(definition as never);
+
+    await scheduler.addJob("intel:test-job", { clientId: "c1" });
+
+    const add = bull.queueAdds.at(-1);
+    expect(add?.opts?.jobId).toBeUndefined();
+  });
+
+  it("keeps the retention bounds it always had", async () => {
+    // Adding the dedupe key must not displace removeOnComplete/removeOnFail —
+    // dropping those would grow the queue without bound.
+    const scheduler = new Scheduler();
+    scheduler.registerDefinition(definition as never);
+
+    await scheduler.addJob("intel:test-job", {}, { jobId: "k" });
+
+    const add = bull.queueAdds.at(-1);
+    expect(add?.opts?.removeOnComplete).toEqual({ count: 100 });
+    expect(add?.opts?.removeOnFail).toEqual({ count: 50 });
   });
 });
