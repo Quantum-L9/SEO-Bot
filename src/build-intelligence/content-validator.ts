@@ -121,11 +121,16 @@ export async function validateRouteSemantics(
   args: {
     clientId: string;
     buildId: string;
-    blueprintRoute?: SEOContentBlueprintRoute;
     llm?: LlmService;
   },
 ): Promise<import("./schema-guards.js").ContentValidationVerdict> {
   const llm = args.llm ?? getLlmService();
+  // The PageContentContract is the coverage authority (WBV2-012: the
+  // deterministic compiler already clamped ungroundable proof topics).
+  // The raw SEO blueprint route is deliberately NOT included in the judge
+  // input: it re-imports demands the contract filtered out, and a live run
+  // (client quantumaipartners_com) failed routes on exactly those raw
+  // blueprint topics that the contract had honestly removed.
   const systemPrompt =
     "You are a strict SEO content QA validator. Judge ONLY whether the generated " +
     "content satisfies the contract: required topics covered, entities handled, " +
@@ -155,7 +160,6 @@ export async function validateRouteSemantics(
           proof_requirements: section.proof_requirements,
         })),
       },
-      blueprint_route: args.blueprintRoute ?? null,
     },
     null,
     2,

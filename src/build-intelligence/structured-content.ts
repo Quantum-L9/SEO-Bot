@@ -187,9 +187,6 @@ export async function createStructuredContentPackageWithEvidence(
 
   const llm = deps.llm ?? getLlmService();
   const contract = request.page_content_contract.payload;
-  const blueprintRoutes = new Map<string, SEOContentBlueprintRoute>(
-    (request.seo_content_blueprint?.payload.routes ?? []).map((route) => [route.route_id, route]),
-  );
 
   // Package totals, accumulated from the PER-ROUTE counters below — the route
   // is the unit of ownership, and these are its sum rather than its source.
@@ -211,7 +208,6 @@ export async function createStructuredContentPackageWithEvidence(
       llm,
       request,
       contractRoute,
-      blueprintRoute: blueprintRoutes.get(contractRoute.route_id),
       recorder: deps.recorder,
     });
 
@@ -321,10 +317,9 @@ async function produceRoute(args: {
   llm: LlmService;
   request: StructuredContentRequest;
   contractRoute: PageContentContractRoute;
-  blueprintRoute?: SEOContentBlueprintRoute;
   recorder?: LlmRunRecorder;
 }): Promise<ProducedRoute> {
-  const { llm, request, contractRoute, blueprintRoute, recorder } = args;
+  const { llm, request, contractRoute, recorder } = args;
   // Per-route counters. THIS route's generation spend is owned by THIS route:
   // the package total is the sum of them, never their source.
   const generationCalls: LlmCallCounter = { value: 0 };
@@ -333,7 +328,6 @@ async function produceRoute(args: {
   const validationArgs = {
     clientId: request.client_id,
     buildId: request.build_id,
-    blueprintRoute,
     llm: validationLlm,
   };
   let schemaFailureCount = 0;
@@ -642,7 +636,11 @@ async function generateRoute(
     "the supplied contract and allowed facts. Never invent facts or claims; every " +
     "claim must be backed by an allowed fact. Never invent geography or local-area " +
     "coverage beyond the verified facts (a remote-first business makes no local " +
-    "service-area claims). Respect forbidden claims. Cover the " +
+    "service-area claims). Respect forbidden claims. Never use generic " +
+    "proof-signaling phrases (proven, measurable outcomes, measurable results, " +
+    "immediate value, industry-leading, best-in-class, trusted by) unless a " +
+    "verified fact asserts them — write concrete, specific prose about " +
+    "methodology, process, and approach instead. Cover the " +
     "required topics/entities, answer the required questions, and satisfy the proof " +
     "requirements. When a proof requirement cannot be backed by an allowed fact " +
     "(quantifiable achievements, third-party validation, or credentials the contract " +
