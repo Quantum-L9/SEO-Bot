@@ -259,10 +259,15 @@ appear untracked.
 2. **`intelligence_action_links`.** The pack models the action→link relation as
    its own table. This repo threads that through `action_outcomes`; whether a
    dedicated link table is better is a schema question worth asking on its own.
-3. **The extra `SAFETY` constants** — `minDomainRating`, `followUpDelayDays`,
-   `maxFollowUps`, `circuitBreakerDropPct`. `LINK_VELOCITY` carries only the two
-   caps the governor enforces. If any of those four are duplicated as literals
-   elsewhere, they belong beside the caps.
+3. **Exporting `SAFETY` from `link-building/index.ts`.** ~~The extra constants
+   are missing here~~ — checked, and they are not: `SAFETY` already holds
+   `minDomainRating`, `followUpDelayDays`, `maxFollowUps` and
+   `circuitBreakerDropPct`, and it derives its two velocity caps from
+   `LINK_VELOCITY` rather than restating them, so there is no duplicated cap.
+   What the pack's `safety.ts` actually offers is making that object reachable:
+   it is `const SAFETY`, module-private, inside a module that builds LLM, mail
+   and database clients at load time. Worth doing when something outside the
+   module needs one of the four — nothing does today.
 4. **Exporting the Core Web Vitals thresholds** from
    `src/modules/web-vitals/index.ts`, where they are currently a private const.
    The pack extracts them to a pure leaf. No consumer needs that here today —
