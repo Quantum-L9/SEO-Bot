@@ -287,6 +287,12 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
     expect(contract.route_shape.search_intent.journey_stage).toContain("reassert");
     expect(contract.route_shape.targets.primary_query).toBeTruthy();
     expect(contract.journey_stage).toBeUndefined();
+    // Identity fields are schema-required on the model's raw output
+    // (seoContentBlueprintRoutesSchema), so the contract must demand them —
+    // a live run failed when the model dropped `path` and the one bounded
+    // repair could not recover it.
+    expect(contract.route_shape.route_id).toContain("reassert");
+    expect(contract.route_shape.path).toContain("reassert");
   });
 
   it("batches 29 routes into 8 batches of 4 and persists batch_size/batch_count (oracle: 4 and 8)", async () => {

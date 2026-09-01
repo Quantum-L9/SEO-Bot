@@ -328,6 +328,8 @@ export async function createSEOContentBlueprintWithEvidence(
             output_contract: {
               one_entry_per_route_id: batch.map((route) => route.route_id),
               route_shape: {
+                route_id: "string — reassert the route_id from the current_batch entry exactly",
+                path: "string — reassert the path from the current_batch entry exactly",
                 search_intent: {
                   primary: "reassert the primary_intent from the global intent plan",
                   secondary: "string[]",
