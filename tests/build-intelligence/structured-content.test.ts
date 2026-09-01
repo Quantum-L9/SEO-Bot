@@ -692,7 +692,11 @@ describe("StructuredContentPackage — NC-11 shape discipline (content-alias →
       contract_passed: false,
       unsupported_claims: [],
       failed_requirements: [
-        "Regarding expertise: home serves the local area and the surrounding areas.",
+        // The remediation sentence is strictly fact-derived now — this test
+        // contract carries no business_name/vertical facts, so the sentence
+        // uses the route-id/vertical fallbacks (biz="home", vertical=
+        // "professional").
+        "Regarding expertise: home provides professional services.",
       ],
     };
     const { llm } = fakeLlm([quoteFail]);
