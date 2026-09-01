@@ -389,7 +389,7 @@ export async function createSEOContentBlueprintWithEvidence(
                 "conversion",
                 "metadata",
               ],
-              note: 'Return a single JSON object whose only top-level key is "routes": an array of exactly one route object per route_id in the current_batch, in the same order, matching route_shape exactly. The global strategy is already decided — do not silently change it in this batch.',
+              note: 'Return a single JSON object whose only top-level key is "routes": an array of exactly one route object per route_id in the current_batch, in the same order, matching route_shape exactly. The global strategy is already decided — do not silently change it in this batch. The verified business facts are COMPLETE: never demand case studies, substantiated innovations, client examples, metrics, credentials, or industry-specific proof the facts cannot support — such requirements make the contract unsatisfiable and the build fails closed.',
             },
           },
           null,
