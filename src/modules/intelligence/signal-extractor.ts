@@ -70,6 +70,14 @@ export const THRESHOLDS = {
 } as const;
 
 /**
+ * The `link_prospects.status` value meaning "has a contact email, not yet
+ * contacted". Written by link-building's `discoverProspects` and consumed by
+ * its `processOutreach`. Named here so the coupling is explicit and a test can
+ * pin it against the writer rather than hard-coding a string in a query.
+ */
+export const PROSPECT_READY_STATUS = "ready";
+
+/**
  * Stable identity for a signal.
  *
  * Includes clientId so two tenants observing the same keyword never collide on
@@ -341,13 +349,24 @@ export async function extractCitationLossSignals(clientId: string): Promise<Extr
 }
 
 /**
- * prospect_ready — a discovered link prospect worth contacting.
+ * prospect_ready - a discovered link prospect worth contacting.
  *
- * Deliberately narrow: status must still be `discovered` (not already
- * contacted, which would make outreach a duplicate), a contact email must
- * exist, and domain rating must clear the floor. This signal is the only one
- * that can lead to an irreversible action, so its preconditions are the
- * strictest.
+ * Deliberately narrow: status must be `ready`, a contact email must exist, and
+ * domain rating must clear the floor. This signal is the only one that can lead
+ * to an irreversible action, so its preconditions are the strictest.
+ *
+ * THE STATUS VALUE IS NOT NEGOTIABLE - IT IS SET BY link-building.
+ * `link_prospects.status` DEFAULTS to "discovered" in the schema, but
+ * `discoverProspects` always overwrites it on insert with "ready" (has a
+ * contact email) or "needs_email". No row is ever left in the default state,
+ * so filtering on "discovered" matches nothing and this signal would never
+ * fire. `processOutreach` reads "ready" as "have email, not yet contacted",
+ * which is exactly this signal's meaning.
+ *
+ * Note that `ProspectStatus` in src/types/index.ts declares a DIFFERENT
+ * vocabulary (qualified / outreach_sent / follow_up_*) that no code writes.
+ * The runtime values written by link-building are authoritative here; the type
+ * is stale. Do not "fix" this by matching the type union.
  */
 export async function extractProspectReadySignals(clientId: string): Promise<ExtractedSignal[]> {
   assertClientId(clientId);
@@ -359,7 +378,7 @@ export async function extractProspectReadySignals(clientId: string): Promise<Ext
     .where(
       and(
         eq(schema.linkProspects.clientId, clientId),
-        eq(schema.linkProspects.status, "discovered"),
+        eq(schema.linkProspects.status, PROSPECT_READY_STATUS),
       ),
     )
     .orderBy(desc(schema.linkProspects.createdAt))

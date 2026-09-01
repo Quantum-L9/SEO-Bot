@@ -129,6 +129,7 @@ import {
   extractProspectReadySignals,
   extractSignals,
   normalizePagePath,
+  PROSPECT_READY_STATUS,
   severityForKeywordDrop,
   signalFingerprint,
   THRESHOLDS,
@@ -447,7 +448,7 @@ describe("prospect_ready", () => {
         domainRating: 60,
         contactEmail: "a@b.com",
         tactic: "guest_post",
-        status: "discovered",
+        status: "ready",
         relevanceScore: 0.7,
         createdAt: new Date(),
       },
@@ -457,7 +458,7 @@ describe("prospect_ready", () => {
         domainRating: THRESHOLDS.prospectMinDomainRating - 1,
         contactEmail: "c@d.com",
         tactic: "guest_post",
-        status: "discovered",
+        status: "ready",
         relevanceScore: 0.7,
         createdAt: new Date(),
       },
@@ -475,7 +476,7 @@ describe("prospect_ready", () => {
         domainRating: 70,
         contactEmail: null,
         tactic: "t",
-        status: "discovered",
+        status: "ready",
         createdAt: new Date(),
       },
     ];
@@ -492,7 +493,7 @@ describe("prospect_ready", () => {
         domainRating: 70,
         contactEmail: "editor@x.com",
         tactic: "t",
-        status: "discovered",
+        status: "ready",
         relevanceScore: 0.5,
         createdAt: new Date(),
       },
@@ -500,6 +501,33 @@ describe("prospect_ready", () => {
     const signals = await extractProspectReadySignals(CLIENT_A);
     expect(JSON.stringify(signals[0].evidence)).not.toContain("editor@x.com");
     expect(signals[0].evidence).toMatchObject({ hasContactEmail: true });
+  });
+
+  it("filters on the status link-building actually writes, not the schema default", async () => {
+    // REGRESSION: this extractor originally filtered on "discovered" — the
+    // column default — so it matched nothing and the signal never fired.
+    // `discoverProspects` always overwrites status on insert with "ready" or
+    // "needs_email", and `processOutreach` consumes "ready".
+    expect(PROSPECT_READY_STATUS).toBe("ready");
+
+    tables.linkProspects = [
+      {
+        clientId: CLIENT_A,
+        targetUrl: "https://ready.com",
+        domainRating: 70,
+        contactEmail: "a@b.com",
+        tactic: "t",
+        status: "ready",
+        relevanceScore: 0.6,
+        createdAt: new Date(),
+      },
+    ];
+    const signals = await extractProspectReadySignals(CLIENT_A);
+    expect(signals).toHaveLength(1);
+
+    // The status filter is applied against the real column.
+    const statusFilters = observedFilters.filter((f) => f.table === "linkProspects");
+    expect(statusFilters.length).toBeGreaterThan(0);
   });
 
   it("skips a null domain rating", async () => {
@@ -510,7 +538,7 @@ describe("prospect_ready", () => {
         domainRating: null,
         contactEmail: "a@b.com",
         tactic: "t",
-        status: "discovered",
+        status: "ready",
         createdAt: new Date(),
       },
     ];
