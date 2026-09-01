@@ -640,7 +640,9 @@ async function generateRoute(
   const systemPrompt =
     "You are the sole owner of final website prose for one route. Write ONLY from " +
     "the supplied contract and allowed facts. Never invent facts or claims; every " +
-    "claim must be backed by an allowed fact. Respect forbidden claims. Cover the " +
+    "claim must be backed by an allowed fact. Never invent geography or local-area " +
+    "coverage beyond the verified facts (a remote-first business makes no local " +
+    "service-area claims). Respect forbidden claims. Cover the " +
     "required topics/entities, answer the required questions, and satisfy the proof " +
     "requirements. When a proof requirement cannot be backed by an allowed fact " +
     "(quantifiable achievements, third-party validation, or credentials the contract " +
