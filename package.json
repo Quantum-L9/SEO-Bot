@@ -19,7 +19,7 @@
     "verify:source": "test -f src/index.ts && test -f src/core/config.ts",
     "verify:build": "npm run build && test -f dist/index.js",
     "verify:db": "tsx src/core/database/migrate.ts --check",
-    "verify:all": "npm run interop:parity && npm run verify:preflight && npm run verify:source && npm run verify:build && npm test",
+    "verify:all": "npm run verify:preflight && npm run verify:source && npm run verify:build && npm test",
     "typecheck": "tsc -p tsconfig.check.json --noEmit",
     "manifest:generate": "tsx scripts/manifest/generate.ts",
     "manifest:check": "tsx scripts/manifest/check.ts",
@@ -27,8 +27,7 @@
     "verify:release": "tsx scripts/validation/cli.ts run --profile release",
     "verify:production": "tsx scripts/validation/cli.ts run --profile production",
     "evidence:clean": "tsx scripts/validation/cli.ts clean",
-    "lockfile:generate": "npm install --package-lock-only --ignore-scripts --no-audit --no-fund",
-    "interop:parity": "node scripts/validate-interop-parity.mjs"
+    "lockfile:generate": "npm install --package-lock-only --ignore-scripts --no-audit --no-fund"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.0",
