@@ -35,7 +35,19 @@ const logger = createModuleLogger("intelligence:policy-state");
 
 /**
  * Share of tracked keywords that must decline within a week before the ranking
- * circuit breaker opens. Mirrors link-building's `circuitBreakerDropPct: 30`.
+ * circuit breaker opens.
+ *
+ * It shares the value 30 with link-building's `circuitBreakerDropPct`, and the
+ * comment here used to say it "mirrors" it. That reading is wrong and the two
+ * must NOT be coupled: this is a share of the KEYWORD SET (`declined / tracked`
+ * in `isCircuitOpen` below), while link-building's is how far a SINGLE
+ * keyword's position moved (`(position - previousPosition) / previousPosition`,
+ * counted and tripped at more than two). Same number, different quantities.
+ *
+ * That matters because the module docstring above says every governor number
+ * comes from the same source the enforcing module uses — true for the outreach
+ * caps, which really are imported. Importing this one to match would silently
+ * tie an attribution-trust threshold to an outreach-pause threshold.
  */
 export const CIRCUIT_BREAKER_DECLINE_PCT = 30;
 

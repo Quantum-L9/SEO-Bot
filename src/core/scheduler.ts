@@ -23,6 +23,7 @@ import { Redis } from "ioredis";
 import type { JobDefinition } from "../types/index.js";
 import { getConfig } from "./config.js";
 import { getDb, schema } from "./database/index.js";
+import { deterministicJobId, isBullMqSafeJobId } from "./job-id.js";
 import { createModuleLogger } from "./logger.js";
 
 const logger = createModuleLogger("scheduler");
@@ -41,9 +42,18 @@ const logger = createModuleLogger("scheduler");
  * scheduled occurrence run: a job scheduled every 6 hours gets a NEW parent id
  * per fire, so its fan-out is not wrongly deduped across the day (a day-scoped
  * key would suppress all-but-the-first run).
+ *
+ * It used to build `child:<parent>:<client>`, which reads as three parts and
+ * satisfied bullmq's legacy carve-out — until the parent is a repeatable job,
+ * whose own id is `repeat:<name>:<ms>`. Then the child id has five colon parts
+ * and `queue.add()` throws, so the fan-out this protects never happened at all.
+ * Every scheduled fan-out has a repeatable parent, so that was the normal case,
+ * not the edge one.
  */
+export { deterministicJobId, isBullMqSafeJobId } from "./job-id.js";
+
 export function fanoutChildJobId(parentJobId: string, clientId: string): string {
-  return `child:${parentJobId}:${clientId}`;
+  return deterministicJobId("child", parentJobId, clientId);
 }
 
 // ─── Job Registry ────────────────────────────────────────────────────────────
@@ -229,6 +239,15 @@ export class Scheduler {
     const jobDef = JOB_DEFINITIONS.find((j) => j.name === jobName);
     if (!jobDef) {
       throw new Error(`Unknown job: ${jobName}`);
+    }
+    // Fail here, naming the rule, rather than inside bullmq's `Custom Id cannot
+    // contain :`. A caller that hand-builds an id is the caller that needs to
+    // be told about `deterministicJobId`.
+    if (opts.jobId !== undefined && !isBullMqSafeJobId(opts.jobId)) {
+      throw new Error(
+        `Job id "${opts.jobId}" is not a valid BullMQ custom id (no ":", not all digits). ` +
+          "Build it with deterministicJobId().",
+      );
     }
     const queueName = `l9-${jobDef.module}`;
     // FIX(T-A): Initialize queue on-demand — handles disabled jobs skipped during startup.

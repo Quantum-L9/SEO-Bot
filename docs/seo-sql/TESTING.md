@@ -13,7 +13,7 @@ unless explicitly enabled, or execute an unknown action type.
 
 ---
 
-## The five gates
+## The six gates
 
 Run in order. Each one is cheap relative to the one after it, and each answers a
 question the next one assumes.
@@ -24,10 +24,13 @@ question the next one assumes.
 | 2 | Deterministic intelligence | `npm run test:intelligence` | Signals, scoring and grouping are reproducible, tenant-scoped, and reachable |
 | 3 | Safety policy | `npm run test:gates`, `npm run test:api` | The approval boundary, the rollout ladder and the audience projections hold |
 | 4 | Routing | `npm run test:intelligence` | Only allow-listed jobs are queued, once, through BullMQ |
-| 5 | Post-run invariants | `npm run verify:intelligence` | The database afterwards contains what the gates above promised |
+| 5 | Live services | `npm run test:live` | The fakes above told the truth: real Postgres semantics, real BullMQ dedup, real extractor SQL |
+| 6 | Post-run invariants | `npm run verify:intelligence` | The database afterwards contains what the gates above promised |
 
-Gates 1–4 need no services. Gate 5 needs a database and is the one that runs
-against staging and production.
+Gates 1–4 need no services. Gates 5 and 6 both need a real Postgres, and gate 5
+also needs Redis. They differ in where they may point: gate 5 writes, so it runs
+only against disposable services (CI, or `npm run live:up` locally); gate 6 is
+read-only twice over and is the one that runs against staging and production.
 
 ---
 
@@ -102,10 +105,28 @@ governor and `route_safe`'s promise all guarded it. Every one of those controls
 tested green, because each tested its own logic rather than whether the road it
 blocked went anywhere.
 
-One type is **still unreachable** and is recorded rather than hidden:
-`serp_and_answer_engine_loss` needs `keyword_drop` and a citation signal in one
-group, and the extractors key on disjoint dimensions by construction. See
-`TODO.md` §3 for the decision it is waiting on.
+`serp_and_answer_engine_loss` was the second type this file caught, and it is
+now reachable. It needs `keyword_drop` and a citation signal in one group, and
+every citation signal keyed on `platform:<name>` while `keyword_drop` keyed on a
+page or `keyword:<kw>` — dimensions that cannot meet. It was recorded as waiting
+on a product decision about new data, which was wrong: `aeo_citations` has
+always carried a per-row `query`, and only the per-platform rollup discarded it.
+`competitorCitationExtractor` now emits a keyword-scoped signal alongside its
+platform-scoped one, for queries that match a tracked keyword's ranking drop,
+keyed exactly as `keywordDropExtractor` keys. The platform scope is byte-
+identical to before, so `answer_engine_gap` keeps its per-platform targeting.
+
+The tests assert the **mechanism** — that the two group keys are equal, that the
+two scopes get distinct fingerprints, and that the keyword scope respects the
+same 5-position bar — not a score, which a weights tweak could mask. Reversing
+any one of the three makes them fail.
+
+Worth knowing when reading a portfolio: the compound scores **27.43** where the
+single-symptom `keyword_recovery` on the same drop scores **30.60**. That is the
+ROI formula working as written (dividing by `effort + risk`, which is 7 for the
+compound and 5 for the recovery), not a defect — a harder remedy for a worse
+problem can rank below a cheap one. It clears the threshold either way, so the
+plane acts on it; it just does not automatically sort to the top.
 
 ---
 
@@ -166,21 +187,78 @@ exist fails in CI rather than during an incident.
 
 ---
 
+## Live services (gate 5)
+
+`tests/live/*.live.test.ts`, run by `npm run test:live` against a real Postgres
+and a real Redis. Excluded from the default `vitest run` on purpose: a default
+run that silently skipped them would report green for a gate it never reached.
+
+```bash
+npm run live:up          # docker compose -f docker-compose.validation.yml, --wait
+export DATABASE_URL=postgres://l9bot:validation-only@127.0.0.1:55432/l9_seo_bot_validation
+export REDIS_URL=redis://127.0.0.1:56379
+npm run migrate          # first run only, or after adding a migration
+npm run test:live
+npm run live:down        # -v, so the next run starts from an empty database
+```
+
+The compose file binds both to loopback on non-default host ports, so starting
+them does not shadow a real Postgres on 5432 or Redis on 6379. Any other
+reachable pair works too — the suite reads `DATABASE_URL` and `REDIS_URL` and
+knows nothing about compose.
+
+Without services the suite skips and says how to start them.
+`LIVE_SERVICES_REQUIRED=1` turns that skip into a failure; the `gate5` job in
+`.github/workflows/ci.yml` sets it, so the gate cannot pass by finding nothing
+to do. CI uses Actions `services:` rather than the compose file — same images,
+no port mapping to keep in sync.
+
+### Why it exists
+
+Everything else in `tests/` runs against fakes, and this repo has now been
+wrong twice about what those fakes were imitating:
+
+- A mock reused row ids, so a **dedup key that deduplicated nothing** passed its
+  test. Caught by hand while writing that test, and fixed by correcting the
+  mock — which proves the mock.
+- Every queue in the suite is a `vi.fn()` that accepts any job id. Three call
+  sites built ids by interpolating `:` separators, and **BullMQ rejects a custom
+  id containing `:`**. So `queue.add()` threw at all three, every dedup
+  protection they were written for had never once run, and every test around
+  them was green. Found by this suite's first execution.
+
+The pattern is the same one the reachability gate exists for: a control whose
+own logic is correct, guarding a path that goes nowhere.
+
+### What it asserts
+
+| File | What only a real service can answer |
+|---|---|
+| `migrations.live.test.ts` | The migration set applies to an empty database; the relations and the `(run_id, fingerprint)` unique index exist; `aeo_citations.query` — the column the compound diagnosis joins on — is still there |
+| `postgres-semantics.live.test.ts` | `ON CONFLICT DO NOTHING` really returns nothing; a fresh row really gets a fresh id; the unique index rejects a duplicate even without the clause; the same fingerprint is allowed on a *different* run; a tenant filter filters with a second tenant present |
+| `extractors.live.test.ts` | Every extractor's SQL executes against the migrated schema — a query naming a dropped column passes every `mapRow` test and fails first in production, inside a `try` that logs and continues with one extractor silently dead. Also drives `serp_and_answer_engine_loss` end to end, from rows through the real SQL into a scored opportunity |
+| `queue.live.test.ts` | BullMQ collapses two adds sharing a `jobId`; distinct opportunities stay distinct; and `isBullMqSafeJobId` accepts exactly what real BullMQ accepts — the one place the rule meets the implementation rather than another fake |
+
+Seeding is per-test and teardown is by client id, never a truncate: gate 5 is
+defined as the gate that may point at staging, and a truncate there is not a
+test failure, it is an outage.
+
+---
+
 ## What is NOT covered here
 
 Stated plainly, because a gap named is a gap someone can close.
 
-- **No live Postgres or Redis integration suite** (contract §7, §8). Every test
-  above runs against fakes. The fakes are built to reproduce the properties the
-  assertions depend on — at-least-once delivery, `ON CONFLICT DO NOTHING`
-  returning nothing, a fresh row getting a fresh id — and one of them did not,
-  at first, which is how a test that passed against a broken dedup key was
-  caught. That is the standing risk with this approach, and gate 5 against a
-  real database is what covers it.
+- **No fake is now unchecked, but the fakes are still what most tests use.**
+  Gate 5 pins the properties they claim (see below); it does not re-run the
+  whole suite against real services, and it is not meant to. A property the
+  live suite does not name is still a property only a fake vouches for.
 - **No live site-deployment matrix beyond the config layer** (contract §9).
   `tests/services/site-deployment-config.test.ts` covers the dry-run forcing
   rules; nothing exercises a real GitHub or Vercel call, by design.
-- **`serp_and_answer_engine_loss` is unreachable** — `TODO.md` §3.
+- **No live answer-engine or SERP vendor call.** Every vendor response in the
+  suite is a fixture, including the `aeo_citations` rows the keyword-scoped
+  citation signal joins on.
 
 ---
 
@@ -193,7 +271,7 @@ true. The command that answers each is beside it.
 |---|---|---|
 | ☐ | Typecheck clean | `npx tsc --noEmit` |
 | ☐ | Full suite green | `npx vitest run` |
-| ☐ | Migrations apply to an empty database | `npm run migrate` on a fresh DB |
+| ☐ | Migrations apply to an empty database | `npm run test:live` (gate 5 asserts it) |
 | ☐ | Migrations apply to a production clone | restore a backup, then `npm run migrate` |
 | ☐ | No applied migration was edited | `npm run test:gates` |
 | ☐ | `observe` produces correct signals and ZERO actions | `npm run test:intelligence`, then read `intelligence_runs` |
@@ -203,7 +281,7 @@ true. The command that answers each is beside it.
 | ☐ | Unknown actions fail closed | `INTEL-04`, `execution-policy.test.ts` |
 | ☐ | Every query filters by clientId | `signal-extractor.test.ts`, `INTEL-10` |
 | ☐ | No client B data appears in client A's outputs | `INTEL-10` |
-| ☐ | A BullMQ retry does not duplicate an action | `adversarial.test.ts`, `INTEL-03` |
+| ☐ | A BullMQ retry does not duplicate an action | `adversarial.test.ts`, `INTEL-03`, and `queue.live.test.ts` against real Redis |
 | ☐ | Site deployment stays dry-run in test | `site-deployment-config.test.ts` |
 | ☐ | The live-write job stayed disabled | `INTEL-06` |
 | ☐ | The LLM spend cap blocks the planner loop | `policy-engine.test.ts`, `INTEL-07` |

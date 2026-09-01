@@ -49,6 +49,7 @@
 import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { getConfig } from "../core/config.js";
 import { getDb, schema } from "../core/database/index.js";
+import { deterministicJobId } from "../core/job-id.js";
 import { createModuleLogger } from "../core/logger.js";
 import type { Scheduler } from "../core/scheduler.js";
 import { planTemplateFor } from "./action-planner.js";
@@ -424,7 +425,12 @@ export async function sweepApprovedActions(
           await scheduler.addJob(
             template.followUpJob,
             { clientId: row.clientId },
-            { jobId: `intel:${row.clientId}:${outcome.id}:${template.followUpJob}` },
+            // Composed rather than interpolated: a BullMQ custom id may not
+            // contain `:`, so the interpolated form threw at `queue.add()` and
+            // this whole branch never queued anything.
+            {
+              jobId: deterministicJobId("intel", row.clientId, outcome.id, template.followUpJob),
+            },
           );
           followUpJobQueued = true;
         }

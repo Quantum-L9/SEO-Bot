@@ -32,6 +32,7 @@ import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { getConfig } from "../core/config.js";
 import { getDb, schema } from "../core/database/index.js";
 import { type ExecutionDecision, logAction } from "../core/execution-policy.js";
+import { deterministicJobId } from "../core/job-id.js";
 import { createModuleLogger } from "../core/logger.js";
 import type { Scheduler } from "../core/scheduler.js";
 import { type PlannedDecision, planOpportunity } from "./action-planner.js";
@@ -531,10 +532,24 @@ async function onExecutedProposal(
   // last 100 completed jobs, so the key is forgotten long before an expired
   // opportunity could come back — and while it IS remembered, suppression means
   // a second enqueue would be a duplicate by definition.
+  //
+  // Built through `deterministicJobId` rather than by interpolation. The
+  // interpolated form was `intel:<client>:<fingerprint>:<job>`, and BullMQ
+  // rejects a custom id containing `:` — so every follow-up enqueue threw, and
+  // the dedup key this comment describes had never once reached a queue. The
+  // fake scheduler in the unit suite is a `vi.fn()` that accepts any id, which
+  // is why an argument this careful sat on top of a call that could not run.
   await scheduler.addJob(
     template.followUpJob,
     { clientId: opportunity.clientId },
-    { jobId: `intel:${opportunity.clientId}:${opportunity.fingerprint}:${template.followUpJob}` },
+    {
+      jobId: deterministicJobId(
+        "intel",
+        opportunity.clientId,
+        opportunity.fingerprint,
+        template.followUpJob,
+      ),
+    },
   );
   return 1;
 }

@@ -317,26 +317,86 @@ export const citationRateExtractor: SignalExtractor = {
     );
   },
 };
-
-/** A competitor is being cited on queries where the client is not. */
+/**
+ * A competitor is being cited on queries where the client is not.
+ *
+ * Emitted at TWO scopes from one pass over the same rows, because the same
+ * observation answers two different questions:
+ *
+ * - `platform` — "on perplexity, rival.example is cited instead of us" —
+ *   groups on `platform:<name>`, which is what `answer_engine_gap` targets.
+ * - `keyword` — "on the query 'roof repair austin', which ALSO lost SERP
+ *   position this week, rival.example is cited instead of us" — groups on the
+ *   same key `keywordDropExtractor` uses (the ranking page, else
+ *   `keyword:<kw>`), which is what lets `serp_and_answer_engine_loss` form.
+ *
+ * The keyword scope is why that compound diagnosis is reachable at all. Before
+ * it, both citation extractors keyed on `platform:` and `keyword_drop` keyed on
+ * a page or keyword, so the two rules requiring them in ONE group could never
+ * match and the plane silently produced the two single-symptom diagnoses
+ * instead (TODO.md §3). `aeo_citations` always carried the per-row `query`
+ * dimension needed for the join; only the per-platform rollup discarded it.
+ *
+ * The scopes deliberately OVERLAP: a citation lost on a dropping keyword counts
+ * toward its platform's aggregate as well. Excluding it would silently weaken
+ * `answer_engine_gap`, which is a real signal about overall answer-engine
+ * presence, to make a bookkeeping property true.
+ */
 export const competitorCitationExtractor: SignalExtractor = {
   signalType: "competitor_citation_gain",
   description: "Queries where a competitor is cited by an answer engine and the client is not.",
   query: (clientId) => sql`
-    SELECT platform,
-           competitor_cited,
-           count(*) AS occurrences,
-           max(checked_at) AS last_seen,
-           (array_agg(query ORDER BY checked_at DESC))[1:3] AS sample_queries
-    FROM aeo_citations
-    WHERE client_id = ${clientId}::uuid
-      AND cited = false
-      AND competitor_cited IS NOT NULL
-      AND checked_at >= now() - interval '30 days'
-    GROUP BY platform, competitor_cited
-    HAVING count(*) >= 2
-    ORDER BY count(*) DESC
-    LIMIT 25
+    WITH uncited AS (
+      SELECT lower(btrim(query)) AS keyword_key, query, platform, competitor_cited, checked_at
+      FROM aeo_citations
+      WHERE client_id = ${clientId}::uuid
+        AND cited = false
+        AND competitor_cited IS NOT NULL
+        AND checked_at >= now() - interval '30 days'
+    ),
+    dropped AS (
+      SELECT lower(btrim(keyword)) AS keyword_key,
+             min(keyword) AS keyword,
+             max(position_delta)::numeric AS position_delta,
+             (array_agg(url ORDER BY position_delta DESC) FILTER (WHERE url IS NOT NULL))[1] AS url
+      FROM reporting.keyword_drops_7d
+      WHERE client_id = ${clientId}::uuid
+      GROUP BY 1
+    ),
+    by_platform AS (
+      SELECT 'platform'::text AS scope,
+             platform,
+             competitor_cited,
+             count(*) AS occurrences,
+             max(checked_at) AS last_seen,
+             (array_agg(query ORDER BY checked_at DESC))[1:3] AS sample_queries,
+             NULL::text AS keyword,
+             NULL::text AS url,
+             NULL::numeric AS position_delta
+      FROM uncited
+      GROUP BY platform, competitor_cited
+      HAVING count(*) >= 2
+    ),
+    by_keyword AS (
+      SELECT 'keyword'::text AS scope,
+             u.platform,
+             u.competitor_cited,
+             count(*) AS occurrences,
+             max(u.checked_at) AS last_seen,
+             (array_agg(u.query ORDER BY u.checked_at DESC))[1:3] AS sample_queries,
+             d.keyword,
+             d.url,
+             d.position_delta
+      FROM uncited u
+      JOIN dropped d ON d.keyword_key = u.keyword_key
+      GROUP BY u.platform, u.competitor_cited, d.keyword, d.url, d.position_delta
+      HAVING count(*) >= 2
+    )
+    SELECT * FROM by_platform
+    UNION ALL
+    SELECT * FROM by_keyword
+    ORDER BY occurrences DESC
+    LIMIT 50
   `,
   mapRow: (row, clientId) => {
     const platform = asString(row.platform);
@@ -348,22 +408,67 @@ export const competitorCitationExtractor: SignalExtractor = {
     const sampleQueries = Array.isArray(row.sample_queries)
       ? (row.sample_queries as unknown[]).map(asString).filter((q): q is string => q !== null)
       : [];
+    const lastSeen = asString(row.last_seen);
+    const keyword = asString(row.keyword);
+
+    // Platform scope: unchanged from before the keyword join existed.
+    if (asString(row.scope) !== "keyword" || !keyword) {
+      return build(
+        clientId,
+        "competitor_citation_gain",
+        "platform",
+        `${platform}:${competitor}`,
+        severity,
+        0.75,
+        {
+          scope: "platform",
+          platform,
+          competitor_domain: competitor,
+          occurrences,
+          sample_queries: sampleQueries,
+          last_seen: lastSeen,
+        },
+        `platform:${platform}`,
+      );
+    }
+
+    // Keyword scope. The same 5-position bar `keywordDropExtractor` applies, so
+    // this signal cannot outlive the ranking drop it is paired with — a citation
+    // loss on a keyword that only slipped 2 places is answer-engine news, not a
+    // compound SERP failure, and belongs to the platform row above.
+    const delta = asNumber(row.position_delta);
+    if (delta === null || delta < 5) return null;
+
+    const url = asString(row.url);
+    const pageKey = normalizePageKey(url);
 
     return build(
       clientId,
       "competitor_citation_gain",
-      "platform",
-      `${platform}:${competitor}`,
+      "keyword",
+      // Distinct from the platform scope's entityId on purpose: the fingerprint
+      // is (client, signalType, entityId), and a collision would make the two
+      // scopes suppress each other through the cooldown and go mutually blind.
+      `${keyword}@${platform}:${competitor}`,
       severity,
       0.75,
       {
+        scope: "keyword",
+        keyword,
         platform,
         competitor_domain: competitor,
         occurrences,
+        position_delta: delta,
+        url,
+        page_path: pageKey,
         sample_queries: sampleQueries,
-        last_seen: asString(row.last_seen),
+        last_seen: lastSeen,
       },
-      `platform:${platform}`,
+      // Mirrors `keywordDropExtractor` exactly — this is the whole point of the
+      // scope. When the two disagree (a keyword ranking on different URLs per
+      // device), the compound simply does not form and the plane falls back to
+      // the two single-symptom diagnoses, which is the behavior that shipped.
+      pageKey ?? `keyword:${keyword}`,
     );
   },
 };
