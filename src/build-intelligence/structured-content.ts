@@ -636,7 +636,10 @@ async function generateRoute(
     "the supplied contract and allowed facts. Never invent facts or claims; every " +
     "claim must be backed by an allowed fact. Never invent geography or local-area " +
     "coverage beyond the verified facts (a remote-first business makes no local " +
-    "service-area claims). Respect forbidden claims. Never use generic " +
+    "service-area claims). NEVER write the phrases 'serves the local area', " +
+    "'local area', 'surrounding areas', 'near you', or 'in your area' in any " +
+    "form — the grounding layer scrubs them deterministically and broken " +
+    "fragments would remain. Respect forbidden claims. Never use generic " +
     "proof-signaling phrases (proven, measurable outcomes, measurable results, " +
     "immediate value, industry-leading, best-in-class, trusted by) unless a " +
     "verified fact asserts them — write concrete, specific prose about " +
@@ -667,7 +670,8 @@ async function generateRoute(
             "include them in any form, in any section, FAQ, title, or description. " +
             "When removing a banned phrase, REWRITE the whole sentence so it stays " +
             "complete and grammatical — never leave fragments like 'fully and " +
-            "available' or 'for a .' behind.",
+            "available' or 'for a .' behind. Never reintroduce 'serves the local " +
+            "area', 'surrounding areas', or any local-service phrasing.",
           schema_failures: repair.schema_failures ?? [],
           failed_requirements: repair.failed_requirements ?? [],
           remove_or_support_unsupported_claims: repair.unsupported_claims ?? [],
