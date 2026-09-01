@@ -473,7 +473,26 @@ export const competitorCitationExtractor: SignalExtractor = {
   },
 };
 
-/** High-authority prospects discovered and never contacted. */
+/**
+ * High-authority prospects discovered and never contacted.
+ *
+ * THE "NEVER CONTACTED" SET IS ('ready', 'needs_email') — NOT 'discovered'.
+ * `link_prospects.status` DEFAULTS to 'discovered' in the schema, which makes
+ * that the obvious filter, but `discoverProspects` always overwrites it on
+ * insert: 'ready' when it found a contact email, 'needs_email' when it did not.
+ * No row is ever left in the default state, so `status = 'discovered'` matched
+ * nothing and this extractor never produced a signal.
+ *
+ * Both states are counted on purpose, because the severity ladder below draws
+ * its distinction between them: 'ready' rows carry a contact_email and land in
+ * `with_contact`, 'needs_email' rows do not. Narrowing the filter to 'ready'
+ * alone would make `with_contact` equal `count` and collapse that ladder.
+ *
+ * Stated positively rather than as `status <> 'outreach_queued'`: if a new
+ * post-contact state is added later, the positive form silently omits it,
+ * whereas the negative form would count an already-contacted prospect and
+ * invite duplicate outreach.
+ */
 export const prospectReadyExtractor: SignalExtractor = {
   signalType: "prospect_high_dr_ready",
   description: "Discovered link prospects above the authority bar, not yet contacted.",
@@ -484,7 +503,7 @@ export const prospectReadyExtractor: SignalExtractor = {
            count(*) FILTER (WHERE contact_email IS NOT NULL) AS with_contact
     FROM link_prospects
     WHERE client_id = ${clientId}::uuid
-      AND status = 'discovered'
+      AND status IN ('ready', 'needs_email')
       AND domain_rating >= 40
   `,
   mapRow: (row, clientId) => {
