@@ -37,7 +37,7 @@ export interface LoadSecretsResult {
   /** Number of keys actually injected into process.env. */
   injected: number;
   /** Where the effective config ultimately comes from. */
-  source: 'infisical' | 'env';
+  source: "infisical" | "env";
 }
 
 export interface RefreshSecretsResult extends LoadSecretsResult {
