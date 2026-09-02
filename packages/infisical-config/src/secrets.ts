@@ -137,7 +137,9 @@ export async function loadSecrets(options: LoadSecretsOptions = {}): Promise<Loa
         overwrite,
       );
       if (decision === "skip-blank") {
-        delete process.env[secret.secretKey];
+        if (isBlankEnvValue(process.env[secret.secretKey])) {
+          delete process.env[secret.secretKey];
+        }
         continue;
       }
       if (decision === "inject") {

@@ -95,7 +95,7 @@ describe("Graphiti machine alias parser", () => {
     expect(parsed).toEqual({ GRAPHITI_MCP_TOKEN: "secret-value" });
   });
 
-  it("fills blank Graphiti aliases from a supplied overlay", () => {
+  it("applyMemoryAliases sets required defaults on an empty env", () => {
     const env: NodeJS.ProcessEnv = {};
     applyMemoryAliases(env);
     expect(env.L9_MEMORY_MODE).toBe("required");
