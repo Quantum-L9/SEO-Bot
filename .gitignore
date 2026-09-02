@@ -59,3 +59,4 @@ validation/runs/
 # CI installs with `npm ci`). A second lockfile drifts silently from the first
 # and changes what a contributor's install resolves.
 pnpm-lock.yaml
+.env.filtered

@@ -29,6 +29,7 @@ const BASE_ENV: Record<string, string> = {
   PAGESPEED_API_KEY: "psi",
   OPENROUTER_API_KEY: "or",
   PERPLEXITY_API_KEY: "px",
+  L9_MEMORY_TOKEN: "test-memory-token",
 };
 
 const originalEnv = process.env;
