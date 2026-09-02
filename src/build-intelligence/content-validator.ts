@@ -121,17 +121,25 @@ export async function validateRouteSemantics(
   args: {
     clientId: string;
     buildId: string;
-    blueprintRoute?: SEOContentBlueprintRoute;
     llm?: LlmService;
   },
 ): Promise<import("./schema-guards.js").ContentValidationVerdict> {
   const llm = args.llm ?? getLlmService();
+  // The PageContentContract is the coverage authority (WBV2-012: the
+  // deterministic compiler already clamped ungroundable proof topics).
+  // The raw SEO blueprint route is deliberately NOT included in the judge
+  // input: it re-imports demands the contract filtered out, and a live run
+  // (client quantumaipartners_com) failed routes on exactly those raw
+  // blueprint topics that the contract had honestly removed.
   const systemPrompt =
     "You are a strict SEO content QA validator. Judge ONLY whether the generated " +
     "content satisfies the contract: required topics covered, entities handled, " +
     "questions answered, proof requirements respected, search intent aligned, and " +
     "no unsupported or forbidden claims. A claim is unsupported if it is not backed " +
-    "by an allowed fact. Do not rewrite content. Respond with ONLY a JSON object: " +
+    "by an allowed fact. A proof requirement is satisfied by honest methodological " +
+    "or commitment content when no allowed fact supports factual proof — never " +
+    "require fabricated metrics, clients, or credentials. Do not rewrite content. " +
+    "Respond with ONLY a JSON object: " +
     '{"seo_blueprint_passed":bool,"contract_passed":bool,"unsupported_claims":[...],' +
     '"failed_requirements":[...]} — no prose, no markdown fences.';
 
@@ -142,7 +150,11 @@ export async function validateRouteSemantics(
         route_id: contractRoute.route_id,
         search_context: contractRoute.search_context,
         forbidden_claims: contractRoute.forbidden_claims,
-        acceptance_tests: contractRoute.acceptance_tests,
+        // acceptance_tests are site-level acceptance criteria (post-build
+        // validation), not prose coverage demands — a prose validator can
+        // never meaningfully judge 'case studies build credibility' or
+        // 'dark canvas maintained across sections', and judging them failed
+        // live runs on exactly such tests (quantumaipartners_com).
         allowed_facts: contractRoute.business_facts,
         sections: contractRoute.sections.map((section) => ({
           section_id: section.section_id,
@@ -152,7 +164,6 @@ export async function validateRouteSemantics(
           proof_requirements: section.proof_requirements,
         })),
       },
-      blueprint_route: args.blueprintRoute ?? null,
     },
     null,
     2,
@@ -161,7 +172,7 @@ export async function validateRouteSemantics(
   return llm.executePolicyJson("CONTENT_VALIDATION", {
     clientId: args.clientId,
     module: "build-intelligence",
-    purpose: `content-validation:${contractRoute.route_id}`,
+    purpose: `content-validation:${contractRoute.route_id}:${args.buildId}`,
     systemPrompt,
     userPrompt,
     validate: (value) => contentValidationVerdictSchema.parse(value),

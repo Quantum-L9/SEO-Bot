@@ -26,7 +26,6 @@ import {
   type PageContentContractRoute,
   refForArtifact,
   type SEOContentBlueprintArtifact,
-  type SEOContentBlueprintRoute,
   type StructuredContentPackageArtifact,
   type StructuredContentPackageV1,
   type StructuredContentRoute,
@@ -187,9 +186,6 @@ export async function createStructuredContentPackageWithEvidence(
 
   const llm = deps.llm ?? getLlmService();
   const contract = request.page_content_contract.payload;
-  const blueprintRoutes = new Map<string, SEOContentBlueprintRoute>(
-    (request.seo_content_blueprint?.payload.routes ?? []).map((route) => [route.route_id, route]),
-  );
 
   // Package totals, accumulated from the PER-ROUTE counters below — the route
   // is the unit of ownership, and these are its sum rather than its source.
@@ -211,7 +207,6 @@ export async function createStructuredContentPackageWithEvidence(
       llm,
       request,
       contractRoute,
-      blueprintRoute: blueprintRoutes.get(contractRoute.route_id),
       recorder: deps.recorder,
     });
 
@@ -321,10 +316,9 @@ async function produceRoute(args: {
   llm: LlmService;
   request: StructuredContentRequest;
   contractRoute: PageContentContractRoute;
-  blueprintRoute?: SEOContentBlueprintRoute;
   recorder?: LlmRunRecorder;
 }): Promise<ProducedRoute> {
-  const { llm, request, contractRoute, blueprintRoute, recorder } = args;
+  const { llm, request, contractRoute, recorder } = args;
   // Per-route counters. THIS route's generation spend is owned by THIS route:
   // the package total is the sum of them, never their source.
   const generationCalls: LlmCallCounter = { value: 0 };
@@ -333,7 +327,6 @@ async function produceRoute(args: {
   const validationArgs = {
     clientId: request.client_id,
     buildId: request.build_id,
-    blueprintRoute,
     llm: validationLlm,
   };
   let schemaFailureCount = 0;
@@ -637,12 +630,34 @@ async function generateRoute(
   generationCalls?: LlmCallCounter,
   recorder?: LlmRunRecorder,
 ): Promise<StructuredContentRoute> {
+  const factCorpus = buildFactCorpus(contractRoute.business_facts);
+  const bannedPhrases = [...CREDENTIAL_CLAIM_TOKENS, ...MAGNITUDE_PHRASES].filter(
+    (token) => !factCorpus.includes(token.toLowerCase()),
+  );
   const systemPrompt =
     "You are the sole owner of final website prose for one route. Write ONLY from " +
     "the supplied contract and allowed facts. Never invent facts or claims; every " +
-    "claim must be backed by an allowed fact. Respect forbidden claims. Cover the " +
+    "claim must be backed by an allowed fact. Never invent geography or local-area " +
+    "coverage beyond the verified facts (a remote-first business makes no local " +
+    "service-area claims). NEVER write the phrases 'serves the local area', " +
+    "'local area', 'surrounding areas', 'near you', or 'in your area' in any " +
+    "form — the grounding layer scrubs them deterministically and broken " +
+    "fragments would remain. Respect forbidden claims. Never use generic " +
+    "proof-signaling phrases (proven, measurable outcomes, measurable results, " +
+    "immediate value, industry-leading, best-in-class, trusted by) unless a " +
+    "verified fact asserts them — write concrete, specific prose about " +
+    "methodology, process, and approach instead. Cover the " +
     "required topics/entities, answer the required questions, and satisfy the proof " +
-    "requirements. Produce a metadata title and description that satisfy their " +
+    "requirements. When a proof requirement cannot be backed by an allowed fact " +
+    "(quantifiable achievements, third-party validation, or credentials the contract " +
+    "does not support), satisfy it with an honest methodological or commitment " +
+    "statement — never fabricate the proof itself. " +
+    "NEVER write any of these phrases — the grounding layer removes them " +
+    "deterministically and broken fragments would remain: " +
+    `${bannedPhrases.join(", ")}. ` +
+    "If a concept needs expression, write a complete grammatical sentence that " +
+    "avoids the banned wording entirely. Produce a metadata title and " +
+    "description that satisfy their " +
     "requirements. Produce exactly one section object per contract section_id (same " +
     "ids), plus faqs, internal links (including every required internal-link target), " +
     "and schema_content_inputs.\n\n" +
@@ -655,7 +670,11 @@ async function generateRoute(
             "Your previous output failed validation. Fix ONLY the items below; " +
             "keep everything else compliant. Any unsupported claims below are BANNED " +
             "phrases: you MUST remove them completely — do not rephrase them, do not " +
-            "include them in any form, in any section, FAQ, title, or description.",
+            "include them in any form, in any section, FAQ, title, or description. " +
+            "When removing a banned phrase, REWRITE the whole sentence so it stays " +
+            "complete and grammatical — never leave fragments like 'fully and " +
+            "available' or 'for a .' behind. Never reintroduce 'serves the local " +
+            "area', 'surrounding areas', or any local-service phrasing.",
           schema_failures: repair.schema_failures ?? [],
           failed_requirements: repair.failed_requirements ?? [],
           remove_or_support_unsupported_claims: repair.unsupported_claims ?? [],
@@ -782,18 +801,28 @@ export function applyDeterministicRemediation(
 
   const facts = new Map(contractRoute.business_facts.map((f) => [f.key, f.value]));
   const biz = String(facts.get("business_name") ?? contractRoute.route_id);
-  const locality = String(facts.get("locality") ?? "the local area");
   // Number("") is 0 — an absent years fact must not read as "0 years".
   const years = Number(facts.get("years_local_experience") ?? NaN);
   const fillerYearsPhrase =
-    Number.isFinite(years) && years > 0 ? ` with ${years} years of local roofing experience` : "";
-  const hours = String(facts.get("hours") ?? "24/7");
+    Number.isFinite(years) && years > 0 ? ` with ${years} years of local experience` : "";
   // c. Substantive-content floor: scrubbing (or a lazy model) can leave a
-  //    section under the 10-word threshold. Fill thin sections with a
-  //    fact-derived paragraph so the deterministic check passes honestly.
-  const filler =
-    `${biz} serves ${locality} and the surrounding areas${fillerYearsPhrase}` +
-    `. ${biz} is fully insured and available ${hours}; contact us for a free inspection.`;
+  //    section under the 10-word threshold. Fill thin sections from present
+  //    facts only. Do not invent a vertical or an offering when the contract
+  //    has no vertical fact — the previous fallback ("professional services")
+  //    was not fact-derived.
+  const verticalFact = facts.get("vertical");
+  const vertical = verticalFact ? String(verticalFact).trim() : "";
+  const offering = vertical ? ` provides ${vertical} services` : "";
+  const states = String(facts.get("states_served") ?? "");
+  const phone = String(facts.get("phone") ?? "");
+  const siteUrl = String(facts.get("site_url") ?? "");
+  const filler = [
+    `${biz}${offering}${states ? ` across ${states}` : ""}${fillerYearsPhrase}.`,
+    phone ? `${biz} can be reached at ${phone}.` : "",
+    siteUrl ? `Learn more at ${siteUrl}.` : "",
+  ]
+    .filter((part) => part.length > 0)
+    .join(" ");
   for (const section of route.sections ?? []) {
     const words = (section.blocks ?? [])
       .flatMap((block) =>
@@ -819,8 +848,6 @@ export function applyDeterministicRemediation(
     if (entity) entities.push(entity);
     else if (topic) topics.push(topic);
   }
-  const topicYearsPhrase =
-    Number.isFinite(years) && years > 0 ? ` with ${years} years of local experience` : "";
   const sentences: string[] = [];
   const pushUnique = (text: string) => {
     const existing = collectRouteText(route);
@@ -830,14 +857,11 @@ export function applyDeterministicRemediation(
   // tokens (and entities must appear literally), so stating them verbatim
   // covers EVERY stem the deterministic check derives from them. All
   // missed labels share ONE sentence — one per failure reads as duplicated
-  // boilerplate (golden run #48), and a "provides X" entity template reads
-  // as nonsense for non-service entities ("provides storm damage" — golden
-  // run #49).
+  // boilerplate (golden run #48). The sentence tail is the strictly
+  // fact-derived filler — never a local-business template.
   const labels = [...new Set([...topics, ...entities])];
   if (labels.length > 0) {
-    pushUnique(
-      `Regarding ${labels.join(" and ")}: ${biz} serves ${locality} and the surrounding areas${topicYearsPhrase}.`,
-    );
+    pushUnique(`Regarding ${labels.join(" and ")}: ${filler}`);
   }
 
   if (sentences.length > 0) {

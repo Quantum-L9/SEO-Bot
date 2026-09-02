@@ -326,8 +326,14 @@ export async function createSEOContentBlueprintWithEvidence(
             verified_business_facts: request.business_facts,
             seo_config: request.seo_config ?? {},
             output_contract: {
+              container: {
+                routes:
+                  "array — the ONLY top-level key of the response; exactly one route object per route_id in the current_batch, in current_batch order",
+              },
               one_entry_per_route_id: batch.map((route) => route.route_id),
               route_shape: {
+                route_id: "string — reassert the route_id from the current_batch entry exactly",
+                path: "string — reassert the path from the current_batch entry exactly",
                 search_intent: {
                   primary: "reassert the primary_intent from the global intent plan",
                   secondary: "string[]",
@@ -346,7 +352,8 @@ export async function createSEOContentBlueprintWithEvidence(
                   required_topics: "string[]",
                   required_entities: "string[]",
                   questions: "string[]",
-                  proof_needed: "string[]",
+                  proof_needed:
+                    "string[] — only proof the verified business facts or honest methodology can support; never demand quantifiable achievements, third-party validation, client names, or credentials the facts cannot back",
                   required: "boolean",
                 },
                 competitive_gaps: [
@@ -382,7 +389,7 @@ export async function createSEOContentBlueprintWithEvidence(
                 "conversion",
                 "metadata",
               ],
-              note: "Return exactly one route object per route_id in the current_batch, matching route_shape exactly. The global strategy is already decided — do not silently change it in this batch.",
+              note: 'Return a single JSON object whose only top-level key is "routes": an array of exactly one route object per route_id in the current_batch, in the same order, matching route_shape exactly. The global strategy is already decided — do not silently change it in this batch. The verified business facts are COMPLETE: never demand case studies, substantiated innovations, client examples, metrics, credentials, or industry-specific proof the facts cannot support — such requirements make the contract unsatisfiable and the build fails closed.',
             },
           },
           null,

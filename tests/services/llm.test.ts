@@ -242,10 +242,13 @@ describe("LlmService.execute — gate ordering + memory + usage (GAP-005)", () =
   });
 
   it("records usage on a successful call (module parsed from the description tag)", async () => {
+    // llmUsage.clientId is a uuid FK to clients.id — the ledger row exists for
+    // registered (uuid) clients, so the recording case must use one.
+    const clientId = "11111111-2222-3333-4444-555555555555";
     const svc = new LlmService();
     await svc.execute(
       {
-        clientId: "c1",
+        clientId,
         type: TaskType.EXTRACTION,
         complexity: TaskComplexity.LOW,
         description: "[serp-intelligence] parse",
@@ -255,12 +258,27 @@ describe("LlmService.execute — gate ordering + memory + usage (GAP-005)", () =
     );
     expect(usageValuesMock).toHaveBeenCalledTimes(1);
     expect(usageValuesMock.mock.calls[0][0]).toMatchObject({
-      clientId: "c1",
+      clientId,
       module: "serp-intelligence",
       inputTokens: 10,
       outputTokens: 20,
       cost: 0.01,
     });
+  });
+
+  it("does NOT record a ledger row for slug client ids — seam usage is tracked in the budget ledger and run evidence", async () => {
+    const svc = new LlmService();
+    await svc.execute(
+      {
+        clientId: "quantumaipartners_com",
+        type: TaskType.EXTRACTION,
+        complexity: TaskComplexity.LOW,
+        description: "[serp-intelligence] parse",
+      } as any,
+      "sys",
+      "user",
+    );
+    expect(usageValuesMock).not.toHaveBeenCalled();
   });
 
   it("does NOT record usage when the provider call fails", async () => {
