@@ -18,8 +18,13 @@ import { z } from "zod";
 // import cannot cycle — and keeping the list beside the rank logic that reads it
 // is what stops the enum and the ladder drifting apart.
 import { INTELLIGENCE_MODES } from "../intelligence/mode.js";
+import { applyMemoryAliases } from "./memory-aliases.js";
 
 dotenv.config();
+
+/** `KEY=` in .env is unset, not a zero-length secret. */
+const blankToUndefined = (value: unknown) =>
+  typeof value === "string" && value.trim() === "" ? undefined : value;
 
 const envSchema = z.object({
   // Database
@@ -49,10 +54,11 @@ const envSchema = z.object({
   OPENROUTER_API_KEY: z.string().min(1),
   PERPLEXITY_API_KEY: z.string().min(1),
 
-  // Governed cross-agent memory (l9-graphiti-memory HTTP MCP)
-  L9_MEMORY_MODE: z.enum(["disabled", "optional", "required"]).default("optional"),
-  L9_MEMORY_URL: z.string().url().optional(),
-  L9_MEMORY_TOKEN: z.string().min(1).optional(),
+  // Governed cross-agent memory (l9-graphiti-memory HTTP MCP). Default required.
+  // Blank L9_MEMORY_TOKEN aliases GRAPHITI_MCP_TOKEN via applyMemoryAliases().
+  L9_MEMORY_MODE: z.enum(["disabled", "optional", "required"]).default("required"),
+  L9_MEMORY_URL: z.preprocess(blankToUndefined, z.string().url().optional()),
+  L9_MEMORY_TOKEN: z.preprocess(blankToUndefined, z.string().min(1).optional()),
   L9_MEMORY_TOKEN_BUDGET: z.coerce.number().int().min(128).max(64000).default(1200),
   L9_MEMORY_MAX_RECORDS: z.coerce.number().int().min(1).max(200).default(40),
 
@@ -225,6 +231,21 @@ const configSchema = envSchema.superRefine((value, ctx) => {
         "must not equal OPERATOR_API_KEY — the reporting agent surface requires its own secret",
     });
   }
+  if (value.L9_MEMORY_MODE === "required" && !value.L9_MEMORY_TOKEN) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["L9_MEMORY_TOKEN"],
+      message:
+        "is required when L9_MEMORY_MODE=required — set L9_MEMORY_TOKEN or GRAPHITI_MCP_TOKEN",
+    });
+  }
+  if (value.L9_MEMORY_MODE === "required" && !value.L9_MEMORY_URL) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["L9_MEMORY_URL"],
+      message: "is required when L9_MEMORY_MODE=required",
+    });
+  }
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;
@@ -233,6 +254,7 @@ let _config: EnvConfig | null = null;
 
 export function loadConfig(): EnvConfig {
   if (_config) return _config;
+  applyMemoryAliases();
 
   const result = configSchema.safeParse(process.env);
 

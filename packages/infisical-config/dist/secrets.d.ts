@@ -1,6 +1,17 @@
-import type { LoadSecretsOptions, LoadSecretsResult, RefreshSecretsOptions, RefreshSecretsResult } from './types.js';
+import type { LoadSecretsOptions, LoadSecretsResult, RefreshSecretsOptions, RefreshSecretsResult } from "./types.js";
 /** Parse a loose boolean env var ('1' / 'true', case-insensitive). */
 export declare function envFlag(value: string | undefined): boolean;
+/** True when a process.env / vault value is missing or only whitespace. */
+export declare function isBlankEnvValue(value: string | undefined): boolean;
+/**
+ * Delete `KEY=` / `KEY=""` placeholders from an env object.
+ * `.env` templates and empty Infisical rows are unset, not "set to empty" —
+ * Infisical backfill of required secrets (`L9_MEMORY_TOKEN`) needs that.
+ */
+export declare function unsetBlankProcessEnv(env?: NodeJS.ProcessEnv): string[];
+export type SecretInjectDecision = "inject" | "skip-existing" | "skip-blank";
+/** Decide whether a vault row should land in process.env. */
+export declare function decideSecretInject(existing: string | undefined, incoming: string, overwrite: boolean): SecretInjectDecision;
 /**
  * Hydrate process.env from Infisical (https://infisical.com) via a machine
  * identity (Universal Auth). Designed to be called once, before configuration
@@ -8,8 +19,11 @@ export declare function envFlag(value: string | undefined): boolean;
  *
  *  - OPTIONAL: no-op when client id / secret / project id are all absent —
  *    falls back to process.env exactly as before. Nothing breaks locally.
- *  - NON-DESTRUCTIVE: never overwrites an already-set var (unless `overwrite`),
- *    so an explicit shell/systemd export or a local .env still wins.
+ *  - NON-DESTRUCTIVE: never overwrites an already-set nonempty var (unless
+ *    `overwrite`), so an explicit shell/systemd export or a local .env still
+ *    wins. Blank `KEY=` placeholders are unset first — they are not values.
+ *  - BLANK VAULT ROWS: empty Infisical values are not injected (and leftover
+ *    blanks are deleted) so Infisical can backfill `L9_MEMORY_TOKEN`.
  *  - FAIL-SOFT by default; `required` (or INFISICAL_REQUIRED=true) makes it a
  *    hard dependency that throws on missing config or fetch failure.
  *  - @infisical/sdk is imported lazily, so it's only resolved when configured.
