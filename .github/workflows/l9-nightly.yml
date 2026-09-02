@@ -1,0 +1,23 @@
+# Quantum-L9 org starter — org nightly (ci_deep analyze-semgrep + full-tree tests).
+# Thin trigger only. Calls the l9-ci-core nightly kernel; do not add scan logic here.
+name: "L9 Nightly"
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  l9_nightly:
+    uses: Quantum-L9/l9-ci-core/.github/workflows/nightly.yml@0d3d8d3cf2828e1a8c01c237597feb3979c2ba52
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+    secrets: inherit
+    with:
+      python-version: "3.12"
+      run-extended-tests: true
+      language: python
