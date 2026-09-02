@@ -9,8 +9,13 @@
  * Phase 3 — SEOContentBlueprint (strategic reasoning, NO search routing)
  *
  * Consumes CompetitiveLandscape + route identities/purposes + VerifiedBusiness
- * Facts + SEO config. It deliberately does NOT consume WebsiteBuildBlueprint —
- * that preserves SEO-Bot's independent authority over the content strategy.
+ * Facts + SEO config. It deliberately does NOT consume WebsiteBuildBlueprintV2
+ * — that preserves SEO-Bot's independent authority over the content strategy
+ * (WBV2-011), and keeps SEO-Bot downstream of blueprint route identity rather
+ * than an input to it (WBV2-006: no cycle). SEO-Bot is design-blind by
+ * construction: ClientVision, DesignReferenceSet and DesignReferenceIntelligence
+ * are Website-Bot-local types and are not exported by @quantum-l9/bot-interop,
+ * so this repo cannot import them even by accident (WBV2-002).
  *
  * Evidence is normalized BEFORE the model: bounded, deterministic page-content
  * metrics for relevant donor ranking URLs only — never raw HTML, never a

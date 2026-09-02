@@ -55,3 +55,89 @@ jobs:
         run: node_modules/.bin/vitest run
         env:
           NODE_ENV: test
+
+  # ── Gate 5: the suite that needs real services ──────────────────────────────
+  # Everything in the `ci` job above runs against fakes. The fakes are built to
+  # reproduce the properties the assertions depend on, and they have been wrong
+  # about them twice: a mock reusing row ids made a broken dedup key pass, and a
+  # `vi.fn()` queue accepting any job id hid three job ids that BullMQ rejects
+  # outright. See docs/seo-sql/TESTING.md.
+  #
+  # `services:` rather than docker-compose.validation.yml: the runner reaches
+  # these on localhost with no compose file and no port mapping to keep in sync.
+  # The compose file stays the local path.
+  gate5:
+    name: Gate 5 — live Postgres + Redis
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: l9bot
+          POSTGRES_DB: l9_seo_bot_ci
+          # No password, rather than a hardcoded one. This container is
+          # reachable only on the runner's loopback for the life of the job, so
+          # a literal here bought nothing and was a credential in the diff.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U l9bot -d l9_seo_bot_ci"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      DATABASE_URL: postgres://l9bot@127.0.0.1:5432/l9_seo_bot_ci
+      REDIS_URL: redis://127.0.0.1:6379
+      NODE_ENV: test
+      # `getConfig()` validates the WHOLE env schema on first use, so every step
+      # below needs these even though this job never calls a vendor. They live
+      # at job level rather than only in vitest.live.config.ts because the
+      # migrate and invariant steps are plain `tsx`, not vitest, and a config
+      # that covers only the test runner leaves them failing on a missing key
+      # unrelated to what they check. Placeholders, not credentials — an
+      # accidental live call fails loudly on an unresolvable host.
+      POSTHOG_API_URL: https://posthog.invalid
+      POSTHOG_PERSONAL_API_KEY: live-suite-placeholder
+      DATAFORSEO_LOGIN: live-suite-placeholder
+      DATAFORSEO_PASSWORD: live-suite-placeholder
+      PAGESPEED_API_KEY: live-suite-placeholder
+      OPENROUTER_API_KEY: live-suite-placeholder
+      PERPLEXITY_API_KEY: live-suite-placeholder
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@quantum-l9'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Applying the migrations IS the first assertion. A migration set that
+      # does not apply to an empty database was a manual row in the
+      # production-readiness checklist until this job existed.
+      - name: Migrate an empty database
+        run: node_modules/.bin/tsx src/core/database/migrate.ts
+
+      # LIVE_SERVICES_REQUIRED=1 turns the local skip into a failure. Without it
+      # a broken service would make this job pass by finding nothing to run,
+      # which is the failure mode the whole gate exists to avoid.
+      - name: Gate 5 suite
+        run: node_modules/.bin/vitest run --config vitest.live.config.ts
+        env:
+          LIVE_SERVICES_REQUIRED: '1'
+
+      # The post-run invariant pack, against the database the suite just used.
+      # Rows mean a violation, so a clean exit is the assertion.
+      - name: Post-run invariants
+        run: node_modules/.bin/tsx scripts/intelligence/verify-invariants.ts

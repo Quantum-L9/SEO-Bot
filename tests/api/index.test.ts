@@ -73,7 +73,12 @@ vi.mock("../../src/core/database/index.js", () => {
 });
 
 const addJobMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
-vi.mock("../../src/core/scheduler.js", () => ({
+// PARTIAL mock: only getScheduler is replaced (so no Redis connection is opened).
+// TRIGGERABLE_JOBS / isTriggerableJob pass through from the real module, so the
+// allowlist assertions below test the SHIPPING allowlist rather than a copy of
+// it that would keep passing after the real one was widened.
+vi.mock("../../src/core/scheduler.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/core/scheduler.js")>()),
   getScheduler: () => ({ addJob: addJobMock, isRunning: () => true }),
 }));
 vi.mock("../../src/services/llm.js", () => ({

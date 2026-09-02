@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0.0",
+  "_comment": [
+    "Immutability ledger for applied migrations (testing contract, static gate 2).",
+    "A migration that has run against any deployed database is history: editing it",
+    "leaves every database that already applied the old text silently divergent from",
+    "the file that claims to describe it, and drizzle's journal records only that the",
+    "tag ran, never what it said. This file is the missing half.",
+    "tests/migrations/static-gates.test.ts hashes every drizzle/*.sql and compares.",
+    "Adding a migration adds a line here. Changing one CHANGES a line here, which is",
+    "the visible, reviewable diff that says an applied migration was rewritten - the",
+    "thing that would otherwise pass review as an ordinary SQL edit."
+  ],
+  "migrations": {
+    "0000_steady_morlun": "cd24628c681713d7bbd502259ca75064bf3bd96111ca1314a79dee2f4eb57fb4",
+    "0001_build_intelligence_artifacts": "2265d8abb288171f393b46fcbf46617b38dce5f4c22a5432aa95a44bbf90e58b",
+    "0002_reporting_plane": "4ed94e1a8114b9af68c49215c19c700b23ad205e6946baab1f987177f134eeef",
+    "0003_intelligence_plane": "9cbccb382ebba4b201ac1ea9861c30c935ee798057c1a1f5e1dbf096e06d32d4",
+    "0004_portfolio_benchmarks": "fc6115f98dc8071dc7a434bb6bdde1e3998f87940dabdc1ddaaff677844719c8",
+    "0005_intelligence_reporting_views": "d8b03265e9642625dfc63d1f3d8e3db162c1ebf1c373b48aface54840a9eba5b"
+  }
+}

@@ -23,6 +23,7 @@ import { Redis } from "ioredis";
 import type { JobDefinition } from "../types/index.js";
 import { getConfig } from "./config.js";
 import { getDb, schema } from "./database/index.js";
+import { deterministicJobId, isBullMqSafeJobId } from "./job-id.js";
 import { createModuleLogger } from "./logger.js";
 
 const logger = createModuleLogger("scheduler");
@@ -41,9 +42,18 @@ const logger = createModuleLogger("scheduler");
  * scheduled occurrence run: a job scheduled every 6 hours gets a NEW parent id
  * per fire, so its fan-out is not wrongly deduped across the day (a day-scoped
  * key would suppress all-but-the-first run).
+ *
+ * It used to build `child:<parent>:<client>`, which reads as three parts and
+ * satisfied bullmq's legacy carve-out — until the parent is a repeatable job,
+ * whose own id is `repeat:<name>:<ms>`. Then the child id has five colon parts
+ * and `queue.add()` throws, so the fan-out this protects never happened at all.
+ * Every scheduled fan-out has a repeatable parent, so that was the normal case,
+ * not the edge one.
  */
+export { deterministicJobId, isBullMqSafeJobId } from "./job-id.js";
+
 export function fanoutChildJobId(parentJobId: string, clientId: string): string {
-  return `child:${parentJobId}:${clientId}`;
+  return deterministicJobId("child", parentJobId, clientId);
 }
 
 // ─── Job Registry ────────────────────────────────────────────────────────────
@@ -207,10 +217,37 @@ export class Scheduler {
     logger.debug({ jobName }, "Handler registered");
   }
 
-  async addJob(jobName: string, data: Record<string, unknown>): Promise<void> {
+  /**
+   * Queue a job outside its cron schedule.
+   *
+   * `opts.jobId` makes the enqueue IDEMPOTENT: BullMQ treats a job id as a
+   * deduplication key, so a retried caller re-queues nothing rather than
+   * producing a second copy of the same work. Callers that enqueue as a
+   * consequence of a durable database row — the intelligence plane's follow-up
+   * jobs, which are queued after a proposal is logged — MUST pass one derived
+   * from that row, because their own retry is exactly the case that would
+   * otherwise duplicate an outreach send or a plan.
+   *
+   * Omitting it keeps BullMQ's default of a fresh id per call, which is right
+   * for an operator pressing a button twice on purpose.
+   */
+  async addJob(
+    jobName: string,
+    data: Record<string, unknown>,
+    opts: { jobId?: string } = {},
+  ): Promise<void> {
     const jobDef = JOB_DEFINITIONS.find((j) => j.name === jobName);
     if (!jobDef) {
       throw new Error(`Unknown job: ${jobName}`);
+    }
+    // Fail here, naming the rule, rather than inside bullmq's `Custom Id cannot
+    // contain :`. A caller that hand-builds an id is the caller that needs to
+    // be told about `deterministicJobId`.
+    if (opts.jobId !== undefined && !isBullMqSafeJobId(opts.jobId)) {
+      throw new Error(
+        `Job id "${opts.jobId}" is not a valid BullMQ custom id (no ":", not all digits). ` +
+          "Build it with deterministicJobId().",
+      );
     }
     const queueName = `l9-${jobDef.module}`;
     // FIX(T-A): Initialize queue on-demand — handles disabled jobs skipped during startup.
@@ -224,12 +261,15 @@ export class Scheduler {
       jobName,
       { definition: jobDef, ...data },
       {
+        // Undefined leaves BullMQ's default (a generated id per call) in place.
+        jobId: opts.jobId,
         removeOnComplete: { count: 100 },
         removeOnFail: { count: 50 },
       },
     );
-    // Log only jobName — data contains clientConfig and may include secrets/PII
-    logger.info({ jobName }, "Manual job queued");
+    // Log only jobName and the dedupe key — data contains clientConfig and may
+    // include secrets/PII. The jobId is derived from row ids, never from payload.
+    logger.info({ jobName, jobId: opts.jobId }, "Manual job queued");
   }
 
   async start(): Promise<void> {
@@ -405,6 +445,33 @@ let _scheduler: Scheduler | null = null;
 export function getScheduler(): Scheduler {
   _scheduler ??= new Scheduler();
   return _scheduler;
+}
+
+/**
+ * Jobs that may be triggered outside their cron schedule — by an operator via
+ * POST /api/clients/:clientId/trigger, or by the intelligence plane's action
+ * planner.
+ *
+ * This is the single allow-list for both callers. It deliberately EXCLUDES
+ * `serp:execute-surpass-plans` (the gated live-site write path, AGENTS §9) and
+ * `reports:weekly-summary`, neither of which should be reachable by an
+ * on-demand trigger.
+ */
+export const TRIGGERABLE_JOBS: readonly string[] = [
+  "serp:check-rankings",
+  "serp:competitor-analysis",
+  "serp:generate-surpass-plan",
+  "vitals:check-all-sources",
+  "aeo:check-citations",
+  "aeo:optimize-faqs",
+  "links:discover-prospects",
+  "links:process-outreach",
+  "behavior:pull-engagement",
+  "behavior:generate-insights",
+] as const;
+
+export function isTriggerableJob(jobName: string): boolean {
+  return TRIGGERABLE_JOBS.includes(jobName);
 }
 
 export const jobDefinitions = JOB_DEFINITIONS;

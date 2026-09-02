@@ -197,6 +197,66 @@ export function classifyAction(actionType: string): { riskLevel: RiskLevel; reve
 }
 
 /**
+ * Proposal origins whose unknown actions FAIL CLOSED to critical/irreversible.
+ *
+ * The permissive default above is safe for the hand-written module jobs it was
+ * designed for: a human adds the action string and its classification in the
+ * same edit, so an unclassified action there is a typo caught in review. It is
+ * NOT safe for a plane that composes proposals at runtime, where an
+ * unclassified action is not a typo but a gap — and where the default's
+ * `medium/reversible` is precisely the band that AUTO-EXECUTES. The most
+ * dangerous case would be the quietest one.
+ *
+ * Failing closed inverts that: an unrecognised action from a composing origin
+ * becomes CRITICAL, which routes it to the approval queue instead of to
+ * execution. The cost of a mistake becomes an operator seeing a proposal they
+ * did not expect, rather than a change nobody chose.
+ *
+ * Keyed on `triggeredBy`, NOT on `module`. This is the load-bearing detail: an
+ * intelligence-plane proposal carries the module that will EXECUTE it
+ * (`web-vitals`, `link-building`, …), never the plane that composed it, so a
+ * module-keyed check would match nothing and provide the appearance of a
+ * control without the control. `triggeredBy` is set to `intelligence:<type>:<fingerprint>`
+ * at the single site in `action-planner.ts` that builds these proposals.
+ *
+ * This is a backstop, not the primary control. The plane's own allow-list
+ * (`allowedActionsFor`, asserted at import) should stop an unknown action ever
+ * reaching here. Both exist because that allow-list protects the paths it knows
+ * about, and this protects the ones it does not.
+ */
+const FAIL_CLOSED_ORIGIN_PREFIXES: readonly string[] = ["intelligence:"];
+
+/** Whether a proposal was composed at runtime rather than hand-written. */
+export function isComposedOrigin(triggeredBy: string): boolean {
+  return FAIL_CLOSED_ORIGIN_PREFIXES.some((prefix) => triggeredBy.startsWith(prefix));
+}
+
+/**
+ * Classify an action, taking the proposal's ORIGIN into account.
+ *
+ * Prefer this over `classifyAction` at every call site that knows where the
+ * proposal came from. `classifyAction` is retained for callers that genuinely
+ * have only an action string, and its permissive default is why this exists.
+ */
+export function classifyActionForOrigin(
+  triggeredBy: string,
+  actionType: string,
+): { riskLevel: RiskLevel; reversible: boolean } {
+  const classification = ACTION_CLASSIFICATION[actionType];
+  if (classification) return classification;
+
+  if (isComposedOrigin(triggeredBy)) {
+    logger.warn(
+      { triggeredBy, actionType },
+      "Unknown action from a composed origin — failing closed to critical/irreversible (requires approval)",
+    );
+    return { riskLevel: "critical", reversible: false };
+  }
+
+  return classifyAction(actionType);
+}
+
+/**
  * Create a fully-classified proposal from raw action data.
  */
 export function createProposal(params: {
@@ -212,7 +272,9 @@ export function createProposal(params: {
   aiConfidence?: number;
   metadata?: Record<string, unknown>;
 }): ActionProposal {
-  const { riskLevel, reversible } = classifyAction(params.action);
+  // Origin-aware: an unrecognised action from a composed origin fails closed to
+  // the approval queue rather than falling into the auto-execute band.
+  const { riskLevel, reversible } = classifyActionForOrigin(params.triggeredBy, params.action);
 
   return {
     ...params,
@@ -247,7 +309,11 @@ export async function logAction(
       riskLevel: proposal.riskLevel,
       reversible: proposal.reversible,
       status: decision.execute ? "auto_executed" : "pending_approval",
-      options: proposal.options ? JSON.stringify(proposal.options) : null,
+      // `options` is a jsonb column, so Drizzle serializes the value itself.
+      // JSON.stringify()-ing first stored a JSON *string* inside a JSON column:
+      // reading it back yielded "[{\"id\":...}]" rather than an array, so every
+      // consumer had to know to parse twice. Pass the array through.
+      options: proposal.options ?? null,
       aiRecommendation: proposal.aiRecommendation,
       aiConfidence: proposal.aiConfidence,
       estimatedImpact: proposal.estimatedImpact ?? null,
