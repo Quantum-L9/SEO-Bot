@@ -39,16 +39,16 @@ import { createModuleLogger } from "../../core/logger.js";
 import type { Scheduler } from "../../core/scheduler.js";
 import { getLlmService } from "../../services/llm.js";
 import { getNotificationService } from "../../services/notifications.js";
-import { velocityRunLimit } from "./velocity.js";
+import { LINK_VELOCITY, velocityRunLimit } from "./velocity.js";
 
 const logger = createModuleLogger("link-building");
 
 // ─── Safety Controls ─────────────────────────────────────────────────────────
 
 const SAFETY = {
-  maxLinksPerWeek: 5, // Conservative velocity
+  maxLinksPerWeek: LINK_VELOCITY.maxLinksPerWeek, // Conservative velocity
   minDomainRating: 20, // Minimum DR for prospects
-  maxEmailsPerDay: 10, // Daily outreach cap
+  maxEmailsPerDay: LINK_VELOCITY.maxEmailsPerDay, // Daily outreach cap
   followUpDelayDays: 3, // Days between follow-ups
   maxFollowUps: 2, // Max follow-up emails per prospect
   circuitBreakerDropPct: 30, // Pause if rankings drop 30%+

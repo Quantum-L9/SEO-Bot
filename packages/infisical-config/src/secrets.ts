@@ -4,20 +4,20 @@ import type {
   Logger,
   RefreshSecretsOptions,
   RefreshSecretsResult,
-} from './types.js';
+} from "./types.js";
 
 /** Fallback logger when a service doesn't pass its own. Quiet by default. */
 const consoleLogger: Logger = {
-  info: (obj, msg) => console.info(msg ?? '', obj ?? ''),
-  warn: (obj, msg) => console.warn(msg ?? '', obj ?? ''),
+  info: (obj, msg) => console.info(msg ?? "", obj ?? ""),
+  warn: (obj, msg) => console.warn(msg ?? "", obj ?? ""),
   debug: (obj, msg) => {
-    if (process.env.DEBUG) console.debug(msg ?? '', obj ?? '');
+    if (process.env.DEBUG) console.debug(msg ?? "", obj ?? "");
   },
 };
 
 /** Parse a loose boolean env var ('1' / 'true', case-insensitive). */
 export function envFlag(value: string | undefined): boolean {
-  return value === '1' || value?.toLowerCase() === 'true';
+  return value === "1" || value?.toLowerCase() === "true";
 }
 
 /**
@@ -49,7 +49,7 @@ export async function loadSecrets(options: LoadSecretsOptions = {}): Promise<Loa
   if (!clientId || !clientSecret || !projectId) {
     if (required) {
       throw new Error(
-        'INFISICAL_REQUIRED is set but client id, client secret and project id are not all provided.',
+        "INFISICAL_REQUIRED is set but client id, client secret and project id are not all provided.",
       );
     }
     // Partial config is almost always a deploy misconfiguration — surface it.
@@ -60,22 +60,22 @@ export async function loadSecrets(options: LoadSecretsOptions = {}): Promise<Loa
           hasClientSecret: Boolean(clientSecret),
           hasProjectId: Boolean(projectId),
         },
-        'Infisical partially configured — need client id, client secret and project id; skipping Infisical',
+        "Infisical partially configured — need client id, client secret and project id; skipping Infisical",
       );
     } else {
-      log.debug({}, 'Infisical not configured — using process.env only');
+      log.debug({}, "Infisical not configured — using process.env only");
     }
-    return { loaded: false, injected: 0, source: 'env' };
+    return { loaded: false, injected: 0, source: "env" };
   }
 
-  const environment = options.environment ?? process.env.INFISICAL_ENV ?? 'prod';
-  const secretPath = options.secretPath ?? process.env.INFISICAL_SECRET_PATH ?? '/';
+  const environment = options.environment ?? process.env.INFISICAL_ENV ?? "prod";
+  const secretPath = options.secretPath ?? process.env.INFISICAL_SECRET_PATH ?? "/";
   const siteUrl = options.siteUrl ?? process.env.INFISICAL_SITE_URL;
   const recursive = options.recursive ?? envFlag(process.env.INFISICAL_RECURSIVE);
 
   try {
     // Lazy import: the SDK is only loaded when Infisical is configured.
-    const { InfisicalSDK } = await import('@infisical/sdk');
+    const { InfisicalSDK } = await import("@infisical/sdk");
     const client = new InfisicalSDK(siteUrl ? { siteUrl } : {});
 
     await client.auth().universalAuth.login({ clientId, clientSecret });
@@ -98,16 +98,16 @@ export async function loadSecrets(options: LoadSecretsOptions = {}): Promise<Loa
 
     log.info(
       { environment, secretPath, fetched: secrets.length, injected },
-      'Loaded secrets from Infisical',
+      "Loaded secrets from Infisical",
     );
-    return { loaded: true, injected, source: 'infisical' };
+    return { loaded: true, injected, source: "infisical" };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (required) {
       throw new Error(`Infisical secret load failed (required): ${message}`);
     }
-    log.warn({ error: message }, 'Infisical secret load failed — continuing with process.env');
-    return { loaded: false, injected: 0, source: 'env' };
+    log.warn({ error: message }, "Infisical secret load failed — continuing with process.env");
+    return { loaded: false, injected: 0, source: "env" };
   }
 }
 
@@ -129,7 +129,7 @@ export async function refreshSecrets(
 ): Promise<RefreshSecretsResult> {
   const log = options.logger ?? consoleLogger;
 
-  log.debug({}, 'refreshSecrets: starting re-fetch with overwrite=true');
+  log.debug({}, "refreshSecrets: starting re-fetch with overwrite=true");
 
   const result = await loadSecrets({ ...options, overwrite: true });
   const refreshResult: RefreshSecretsResult = {
@@ -140,12 +140,12 @@ export async function refreshSecrets(
   if (result.loaded) {
     log.info(
       { injected: result.injected, refreshedAt: refreshResult.refreshedAt },
-      'refreshSecrets: secrets refreshed from Infisical',
+      "refreshSecrets: secrets refreshed from Infisical",
     );
   } else {
     log.warn(
       { source: result.source, refreshedAt: refreshResult.refreshedAt },
-      'refreshSecrets: re-fetch skipped or failed — process.env unchanged',
+      "refreshSecrets: re-fetch skipped or failed — process.env unchanged",
     );
   }
 
@@ -167,25 +167,23 @@ export async function refreshSecrets(
  *   // on graceful shutdown:
  *   uninstall();
  */
-export function installSighupReload(
-  options: RefreshSecretsOptions = {},
-): () => void {
+export function installSighupReload(options: RefreshSecretsOptions = {}): () => void {
   const log = options.logger ?? consoleLogger;
 
   const handler = () => {
-    log.info({}, 'SIGHUP received — refreshing secrets from Infisical');
+    log.info({}, "SIGHUP received — refreshing secrets from Infisical");
     refreshSecrets(options).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
-      log.warn({ error: msg }, 'refreshSecrets on SIGHUP failed');
+      log.warn({ error: msg }, "refreshSecrets on SIGHUP failed");
     });
   };
 
-  process.on('SIGHUP', handler);
-  log.debug({}, 'SIGHUP reload handler installed');
+  process.on("SIGHUP", handler);
+  log.debug({}, "SIGHUP reload handler installed");
 
   return () => {
-    process.off('SIGHUP', handler);
-    log.debug({}, 'SIGHUP reload handler removed');
+    process.off("SIGHUP", handler);
+    log.debug({}, "SIGHUP reload handler removed");
   };
 }
 
@@ -206,7 +204,7 @@ export function startRefreshInterval(
   options: RefreshSecretsOptions = {},
 ): ReturnType<typeof setInterval> {
   const log = options.logger ?? consoleLogger;
-  log.info({ intervalMs }, 'Starting Infisical secret refresh interval');
+  log.info({ intervalMs }, "Starting Infisical secret refresh interval");
 
   // Fire immediately, then on interval
   void refreshSecrets(options);

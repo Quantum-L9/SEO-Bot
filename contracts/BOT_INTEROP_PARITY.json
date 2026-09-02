@@ -1,0 +1,17 @@
+{
+  "invariant": "WBV2-014",
+  "note": "Canonical bot-interop source set. Every repo in the website-intelligence seam commits this identical manifest and validates its vendored copy against it. Regenerate with --write, then copy this file to every peer.",
+  "peers": ["Quantum-L9/Website-Bot", "Quantum-L9/SEO-Bot"],
+  "canonical_source_set": "packages/bot-interop/src/*.ts",
+  "algorithm": "sha256",
+  "set_digest": "1da67dbe2750bb9e27482d8a3977358c56409c3b3ef722bdc0eac92492e0242b",
+  "files": {
+    "ack.ts": "0165c0287868556a249f8f36bcb53511d19cecbfb5f551fbe08dc841f00269f7",
+    "handoff.ts": "cc7bb1986dd7423985a7a3f48c75bb466fee53a341788852d1e8b950e03f309c",
+    "index.ts": "cd3776f05fb89d9a836f03d11636b1a2d3f417167cc02812f9000cc807ff18bf",
+    "website-intelligence.ts": "cb51067569c7df0f2969ca4b8cc45c2d9669ae60dcd053e881ce2a98f02afbb3"
+  },
+  "shared_contracts": {
+    "contracts/WEBSITE_INTELLIGENCE_LOCK.json": "2446acd1561945aace2d038b788ba75789af4576e44baad84f9c8c79bbf00009"
+  }
+}
