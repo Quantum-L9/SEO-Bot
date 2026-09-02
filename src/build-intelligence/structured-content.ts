@@ -26,7 +26,6 @@ import {
   type PageContentContractRoute,
   refForArtifact,
   type SEOContentBlueprintArtifact,
-  type SEOContentBlueprintRoute,
   type StructuredContentPackageArtifact,
   type StructuredContentPackageV1,
   type StructuredContentRoute,
@@ -631,6 +630,10 @@ async function generateRoute(
   generationCalls?: LlmCallCounter,
   recorder?: LlmRunRecorder,
 ): Promise<StructuredContentRoute> {
+  const factCorpus = buildFactCorpus(contractRoute.business_facts);
+  const bannedPhrases = [...CREDENTIAL_CLAIM_TOKENS, ...MAGNITUDE_PHRASES].filter(
+    (token) => !factCorpus.includes(token.toLowerCase()),
+  );
   const systemPrompt =
     "You are the sole owner of final website prose for one route. Write ONLY from " +
     "the supplied contract and allowed facts. Never invent facts or claims; every " +
@@ -651,7 +654,7 @@ async function generateRoute(
     "statement — never fabricate the proof itself. " +
     "NEVER write any of these phrases — the grounding layer removes them " +
     "deterministically and broken fragments would remain: " +
-    `${[...CREDENTIAL_CLAIM_TOKENS, ...MAGNITUDE_PHRASES].join(", ")}. ` +
+    `${bannedPhrases.join(", ")}. ` +
     "If a concept needs expression, write a complete grammatical sentence that " +
     "avoids the banned wording entirely. Produce a metadata title and " +
     "description that satisfy their " +
@@ -803,18 +806,18 @@ export function applyDeterministicRemediation(
   const fillerYearsPhrase =
     Number.isFinite(years) && years > 0 ? ` with ${years} years of local experience` : "";
   // c. Substantive-content floor: scrubbing (or a lazy model) can leave a
-  //    section under the 10-word threshold. Fill thin sections with a
-  //    STRICTLY fact-derived paragraph. The previous filler hardcoded a
-  //    local-business template ("serves the local area and the surrounding
-  //    areas", "fully insured", "24/7", "free inspection") — phrases its own
-  //    grounding layer then scrubbed as ungrounded, leaving the recurring
-  //    fragments that failed live runs (quantumaipartners_com).
-  const vertical = String(facts.get("vertical") ?? "professional");
+  //    section under the 10-word threshold. Fill thin sections from present
+  //    facts only. Do not invent a vertical or an offering when the contract
+  //    has no vertical fact — the previous fallback ("professional services")
+  //    was not fact-derived.
+  const verticalFact = facts.get("vertical");
+  const vertical = verticalFact ? String(verticalFact).trim() : "";
+  const offering = vertical ? ` provides ${vertical} services` : "";
   const states = String(facts.get("states_served") ?? "");
   const phone = String(facts.get("phone") ?? "");
   const siteUrl = String(facts.get("site_url") ?? "");
   const filler = [
-    `${biz} provides ${vertical} services${states ? ` across ${states}` : ""}${fillerYearsPhrase}.`,
+    `${biz}${offering}${states ? ` across ${states}` : ""}${fillerYearsPhrase}.`,
     phone ? `${biz} can be reached at ${phone}.` : "",
     siteUrl ? `Learn more at ${siteUrl}.` : "",
   ]

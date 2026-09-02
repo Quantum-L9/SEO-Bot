@@ -694,9 +694,8 @@ describe("StructuredContentPackage — NC-11 shape discipline (content-alias →
       failed_requirements: [
         // The remediation sentence is strictly fact-derived now — this test
         // contract carries no business_name/vertical facts, so the sentence
-        // uses the route-id/vertical fallbacks (biz="home", vertical=
-        // "professional").
-        "Regarding expertise: home provides professional services.",
+        // uses the route-id fallback (biz="home") and does not invent an offering.
+        "Regarding expertise: home.",
       ],
     };
     const { llm } = fakeLlm([quoteFail]);

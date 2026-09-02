@@ -172,7 +172,7 @@ export async function validateRouteSemantics(
   return llm.executePolicyJson("CONTENT_VALIDATION", {
     clientId: args.clientId,
     module: "build-intelligence",
-    purpose: `content-validation:${contractRoute.route_id}`,
+    purpose: `content-validation:${contractRoute.route_id}:${args.buildId}`,
     systemPrompt,
     userPrompt,
     validate: (value) => contentValidationVerdictSchema.parse(value),
