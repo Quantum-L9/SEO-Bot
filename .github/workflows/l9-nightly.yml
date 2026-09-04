@@ -16,8 +16,16 @@ jobs:
       actions: read
       checks: write
       contents: read
+      # The kernel declares `packages: read` for its authenticated setup-node
+      # step. Permissions can only be reduced, never elevated, down a reusable
+      # chain, so omitting it here caps the kernel below its own contract.
+      packages: read
     secrets: inherit
     with:
       python-version: "3.12"
       run-extended-tests: true
-      language: python
+      # Deviates from the org starter default (python) on purpose: this repo is
+      # `repo_class: typescript` (.l9/ci.json) with no Python project. The input
+      # selects the SDK semgrep ruleset, so `python` would scan a TypeScript
+      # tree with Python rules and report a clean nightly that analysed nothing.
+      language: typescript
