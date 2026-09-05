@@ -44,6 +44,7 @@ import {
   type DonorQualification,
   qualifyDomain,
 } from "./domain-classification.js";
+import { byCodeUnit } from "./ordering.js";
 import { PRODUCER } from "./producer.js";
 import {
   buildSeedPortfolio,
@@ -654,17 +655,6 @@ function compareAggregates(a: DomainAggregate, b: DomainAggregate): number {
 }
 
 /** Round to 6 dp so floating-point noise never perturbs the canonical digest. */
-/**
- * Deterministic, locale-independent ordering. Not localeCompare: these ids are
- * compared across machines and collation varies with locale and ICU version.
- * Code-unit order is what the previous inline comparator produced
- * (typescript:S3358).
- */
-function byCodeUnit(a: string, b: string): number {
-  if (a < b) return -1;
-  return a > b ? 1 : 0;
-}
-
 function round(value: number): number {
   return Math.round(value * 1e6) / 1e6;
 }

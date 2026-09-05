@@ -46,6 +46,7 @@ import {
   unsatisfiedProofRequirements,
 } from "./claim-grounding.js";
 import { type RouteValidationVerdict, validateRoute } from "./content-validator.js";
+import { byCodeUnit } from "./ordering.js";
 import { PRODUCER } from "./producer.js";
 import {
   type SchemaFailure,
@@ -1043,16 +1044,6 @@ function trailingNumber(text: string): string | undefined {
     if (/^\d[\d,]*(?:\.\d+)?$/.test(candidate)) return candidate;
   }
   return undefined;
-}
-
-/**
- * Deterministic, locale-independent ordering. Not `localeCompare`: these lists
- * are compared across machines, and collation varies with locale and ICU
- * version. Code-unit order is what the previous inline comparator produced.
- */
-function byCodeUnit(a: string, b: string): number {
-  if (a < b) return -1;
-  return a > b ? 1 : 0;
 }
 
 /** The prose a content block contributes, by block shape. */
