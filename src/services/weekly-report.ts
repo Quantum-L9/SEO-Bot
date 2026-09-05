@@ -382,7 +382,7 @@ function generateHtmlReport(data: WeeklyReportData): string {
     <table style="width: 100%; border-collapse: collapse;">
       <tr>
         <td style="padding: 8px;"><strong>LCP</strong></td>
-        <td style="padding: 8px;">${vitals.lcp.value ? vitals.lcp.value.toFixed(1) + "s" : "N/A"}</td>
+        <td style="padding: 8px;">${vitals.lcp.value ? `${vitals.lcp.value.toFixed(1)}s` : "N/A"}</td>
         <td style="padding: 8px;">${vitals.lcp.rating}</td>
       </tr>
       <tr>
@@ -392,7 +392,7 @@ function generateHtmlReport(data: WeeklyReportData): string {
       </tr>
       <tr>
         <td style="padding: 8px;"><strong>INP</strong></td>
-        <td style="padding: 8px;">${vitals.inp.value ? vitals.inp.value.toFixed(0) + "ms" : "N/A"}</td>
+        <td style="padding: 8px;">${vitals.inp.value ? `${vitals.inp.value.toFixed(0)}ms` : "N/A"}</td>
         <td style="padding: 8px;">${vitals.inp.rating}</td>
       </tr>
     </table>
