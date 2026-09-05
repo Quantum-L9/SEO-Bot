@@ -4,6 +4,7 @@
  * status: active
  */
 
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyMemoryAliases,
@@ -84,6 +85,18 @@ describe("memory is required", () => {
     const result = await loadWith({ L9_MEMORY_MODE: "optional" });
     expect(result.exited).toBe(false);
     expect(result.config?.L9_MEMORY_MODE).toBe("optional");
+  });
+
+  it("starts when Gate 5 sets L9_MEMORY_MODE=disabled", async () => {
+    const result = await loadWith({ L9_MEMORY_MODE: "disabled" });
+    expect(result.exited).toBe(false);
+    expect(result.config?.L9_MEMORY_MODE).toBe("disabled");
+  });
+
+  it("Gate 5 job env in ci.yml sets L9_MEMORY_MODE=disabled", () => {
+    const yml = readFileSync(".github/workflows/ci.yml", "utf8");
+    const gate5 = yml.split("gate5:")[1] ?? "";
+    expect(gate5).toContain("L9_MEMORY_MODE: disabled");
   });
 });
 

@@ -107,6 +107,9 @@ jobs:
       PAGESPEED_API_KEY: live-suite-placeholder
       OPENROUTER_API_KEY: live-suite-placeholder
       PERPLEXITY_API_KEY: live-suite-placeholder
+      # Gate 5 is Postgres + Redis only. #89 made memory default required;
+      # without an explicit degrade, getConfig() exits before migrate/vitest.
+      L9_MEMORY_MODE: disabled
     steps:
       - uses: actions/checkout@v4
         with:
