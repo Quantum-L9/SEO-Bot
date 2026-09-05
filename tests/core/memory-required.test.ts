@@ -87,16 +87,23 @@ describe("memory is required", () => {
     expect(result.config?.L9_MEMORY_MODE).toBe("optional");
   });
 
-  it("starts when Gate 5 sets L9_MEMORY_MODE=disabled", async () => {
-    const result = await loadWith({ L9_MEMORY_MODE: "disabled" });
+  it("Gate 5 Graphiti placeholders keep mode required and copy the token", async () => {
+    const result = await loadWith({
+      GRAPHITI_MCP_TOKEN: "live-suite-placeholder",
+      GRAPHITI_MCP_URL: "https://graphiti.invalid",
+    });
     expect(result.exited).toBe(false);
-    expect(result.config?.L9_MEMORY_MODE).toBe("disabled");
+    expect(result.config?.L9_MEMORY_MODE).toBe("required");
+    expect(result.config?.L9_MEMORY_TOKEN).toBe("live-suite-placeholder");
+    expect(result.config?.L9_MEMORY_URL).toBe("https://graphiti.invalid");
   });
 
-  it("Gate 5 job env in ci.yml sets L9_MEMORY_MODE=disabled", () => {
+  it("Gate 5 job env in ci.yml sets GRAPHITI_MCP_TOKEN so the alias can fire", () => {
     const yml = readFileSync(".github/workflows/ci.yml", "utf8");
     const gate5 = yml.split("gate5:")[1] ?? "";
-    expect(gate5).toContain("L9_MEMORY_MODE: disabled");
+    expect(gate5).toContain("GRAPHITI_MCP_TOKEN: live-suite-placeholder");
+    expect(gate5).toContain("GRAPHITI_MCP_URL: https://graphiti.invalid");
+    expect(gate5).not.toContain("L9_MEMORY_MODE: disabled");
   });
 });
 

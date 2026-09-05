@@ -5,7 +5,7 @@
 
 **Cluster:** Quantum-L9/SEO-Bot#91
 **Owning fix:** https://github.com/Quantum-L9/SEO-Bot/pull/96
-**Next:** merge PR 96; confirm Gate 5 starts past getConfig
+**Next:** merge PR 96; confirm Gate 5 stays required and GRAPHITI_MCP_TOKEN aliases onto L9_MEMORY_TOKEN
 **Pickup:** Graphiti PICKUP written 2026-09-05
 
 Tracked items that are intentionally **not** done yet because they depend on an

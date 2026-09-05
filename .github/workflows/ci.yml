@@ -107,9 +107,12 @@ jobs:
       PAGESPEED_API_KEY: live-suite-placeholder
       OPENROUTER_API_KEY: live-suite-placeholder
       PERPLEXITY_API_KEY: live-suite-placeholder
-      # Gate 5 is Postgres + Redis only. #89 made memory default required;
-      # without an explicit degrade, getConfig() exits before migrate/vitest.
-      L9_MEMORY_MODE: disabled
+      # Memory stays required (#89). Gate 5 does not talk to Graphiti; set the
+      # Graphiti machine keys so applyMemoryAliases copies them onto
+      # L9_MEMORY_TOKEN / L9_MEMORY_URL. Placeholders, not credentials — an
+      # accidental live call fails on an unresolvable host.
+      GRAPHITI_MCP_TOKEN: live-suite-placeholder
+      GRAPHITI_MCP_URL: https://graphiti.invalid
     steps:
       - uses: actions/checkout@v4
         with:
