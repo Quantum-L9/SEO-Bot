@@ -1,0 +1,31 @@
+# Quantum-L9 org starter — org nightly (ci_deep analyze-semgrep + full-tree tests).
+# Thin trigger only. Calls the l9-ci-core nightly kernel; do not add scan logic here.
+name: "L9 Nightly"
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  l9_nightly:
+    uses: Quantum-L9/l9-ci-core/.github/workflows/nightly.yml@0d3d8d3cf2828e1a8c01c237597feb3979c2ba52
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+      # The kernel declares `packages: read` for its authenticated setup-node
+      # step. Permissions can only be reduced, never elevated, down a reusable
+      # chain, so omitting it here caps the kernel below its own contract.
+      packages: read
+    secrets: inherit
+    with:
+      python-version: "3.12"
+      run-extended-tests: true
+      # Deviates from the org starter default (python) on purpose: this repo is
+      # `repo_class: typescript` (.l9/ci.json) with no Python project. The input
+      # selects the SDK semgrep ruleset, so `python` would scan a TypeScript
+      # tree with Python rules and report a clean nightly that analysed nothing.
+      language: typescript
