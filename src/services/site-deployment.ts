@@ -71,7 +71,7 @@ export interface FileUpdateResult {
 
 class GitHubContentClient {
   private readonly baseUrl = "https://api.github.com";
-  private config: SiteDeploymentConfig;
+  private readonly config: SiteDeploymentConfig;
 
   constructor(config: SiteDeploymentConfig) {
     this.config = config;

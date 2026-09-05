@@ -1,4 +1,4 @@
-export type MemoryClass = 'identity' | 'preference' | 'constraint' | 'decision' | 'episodic' | 'semantic' | 'procedural' | 'observation' | 'insight' | 'meta';
+export type MemoryClass = "identity" | "preference" | "constraint" | "decision" | "episodic" | "semantic" | "procedural" | "observation" | "insight" | "meta";
 export interface MemoryClientConfig {
     baseUrl: string;
     bearerToken: string;
@@ -16,7 +16,7 @@ export interface ContextSection {
 }
 export interface HydrationResult {
     receipt_id: string;
-    status: 'complete' | 'partial' | 'failed';
+    status: "complete" | "partial" | "failed";
     task: string;
     sections: ContextSection[];
     token_budget: number;
@@ -28,7 +28,7 @@ export interface HydrationResult {
 }
 export interface WriteReceipt {
     receipt_id: string;
-    status: 'admitted' | 'duplicate' | 'quarantined' | 'rejected' | 'superseded';
+    status: "admitted" | "duplicate" | "quarantined" | "rejected" | "superseded";
     record_id?: string | null;
     namespace: string;
     schema_version: string;
@@ -63,7 +63,7 @@ export interface MemoryWriteInput {
 }
 export interface PromoteLearningInput {
     recordId: string;
-    targetClass?: 'insight' | 'procedural' | 'semantic';
+    targetClass?: "insight" | "procedural" | "semantic";
     reason: string;
     supportingRecordIds?: string[];
     testSuccessCount?: number;
@@ -76,7 +76,7 @@ interface JsonRpcErrorShape {
     data?: unknown;
 }
 interface JsonRpcResponse {
-    jsonrpc: '2.0';
+    jsonrpc: "2.0";
     id?: string | number | null;
     result?: unknown;
     error?: JsonRpcErrorShape;

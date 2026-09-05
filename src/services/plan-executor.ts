@@ -97,13 +97,26 @@ const ACTION_DISPATCH_MAP: Record<string, ActionDispatcher> = {
 };
 
 /**
+ * Drop every trailing "/" in one backward pass.
+ *
+ * `replace(/\/+$/, "")` looks equivalent and is not: an end-anchored quantifier
+ * is retried from every start position, so a path with a long run of slashes
+ * costs O(n²) (typescript:S8786).
+ */
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") end -= 1;
+  return value.slice(0, end);
+}
+
+/**
  * Convert a live URL to a relative source file path.
  * e.g. https://example.com/services/ → src/pages/services/index.astro
  */
 function urlToFilePath(url: string): string | null {
   try {
     const { pathname } = new URL(url);
-    const clean = pathname.replace(/\/+$/, "");
+    const clean = stripTrailingSlashes(pathname);
     return clean === "" ? "src/pages/index.astro" : `src/pages${clean}/index.astro`;
   } catch {
     return null;
@@ -117,8 +130,8 @@ function urlToFilePath(url: string): string | null {
 function extractValue(actionText: string, _key: string): string | null {
   const quoted = /["\u201C\u201D]([^"\u201C\u201D]+)["\u201C\u201D]/.exec(actionText);
   if (quoted) return quoted[1];
-  const afterColon = /:(.+)$/.exec(actionText);
-  if (afterColon) return afterColon[1].trim();
+  const colon = actionText.indexOf(":");
+  if (colon !== -1 && colon + 1 < actionText.length) return actionText.slice(colon + 1).trim();
   return null;
 }
 

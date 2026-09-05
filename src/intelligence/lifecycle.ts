@@ -54,8 +54,7 @@ import { createModuleLogger } from "../core/logger.js";
 import type { Scheduler } from "../core/scheduler.js";
 import { planTemplateFor } from "./action-planner.js";
 import { followUpJobBlockedReason, resolveCapabilities } from "./mode.js";
-import type { ExperimentVerdict } from "./outcome-attributor.js";
-import { openExperiment, type TargetMetric } from "./outcome-attributor.js";
+import { type ExperimentVerdict, openExperiment, type TargetMetric } from "./outcome-attributor.js";
 import type { OpportunityType } from "./types.js";
 
 const logger = createModuleLogger("intelligence:lifecycle");

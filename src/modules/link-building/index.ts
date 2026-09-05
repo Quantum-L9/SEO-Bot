@@ -141,14 +141,14 @@ async function discoverBacklinkProspects(
 
     return items
       .filter((item: Record<string, unknown>) => {
-        const refDomain = String(item.referring_main_domain || "");
+        const refDomain = fieldText(item.referring_main_domain);
         return !refDomain.includes(clientDomain.replace("www.", ""));
       })
       .map((item: Record<string, unknown>) => ({
-        targetUrl: String(item.url_from || ""),
-        targetDomain: String(item.referring_main_domain || ""),
+        targetUrl: fieldText(item.url_from),
+        targetDomain: fieldText(item.referring_main_domain),
         domainRating: Number(item.rank || 0),
-        anchorText: String(item.anchor || ""),
+        anchorText: fieldText(item.anchor),
         tactic: classifyTactic(item),
       }))
       .slice(0, 20);
@@ -161,8 +161,24 @@ async function discoverBacklinkProspects(
   }
 }
 
+/**
+ * A DataForSEO response field as text.
+ *
+ * These items are `Record<string, unknown>` straight off the wire, so a field
+ * the provider returns as an object or array — a shape change on their side,
+ * or a field we guessed wrong — reaches `String()` and becomes the literal
+ * "[object Object]", which then lands in a stored backlink row and in the
+ * anchor text of a generated outreach plan. Only primitives are text
+ * (typescript:S6551).
+ */
+function fieldText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return "";
+}
+
 function classifyTactic(backlink: Record<string, unknown>): LinkTactic {
-  const url = String(backlink.url_from || "").toLowerCase();
+  const url = fieldText(backlink.url_from).toLowerCase();
 
   if (url.includes("/resources") || url.includes("/links") || url.includes("/tools"))
     return "resource_page";

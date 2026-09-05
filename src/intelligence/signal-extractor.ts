@@ -71,16 +71,55 @@ export function asString(value: unknown): string | null {
   return null;
 }
 
-function build(
-  clientId: string,
-  signalType: SignalType,
-  entityType: SignalCandidate["entityType"],
-  entityId: string,
-  severity: SignalSeverity,
-  confidence: number,
-  evidence: Record<string, unknown>,
-  groupKey: string,
-): SignalCandidate {
+/**
+ * The first rung whose bound `value` meets, highest first, else `fallback`.
+ *
+ * Every severity and confidence decision here is a threshold ladder. Written
+ * as a ternary chain it reads as nested conditions (typescript:S3358) and the
+ * bounds get lost in the punctuation; as data the ordering is visible and the
+ * rungs can be read straight down.
+ */
+function byThreshold<T>(
+  value: number,
+  ladder: ReadonlyArray<readonly [number, T]>,
+  fallback: T,
+): T {
+  for (const [bound, result] of ladder) {
+    if (value >= bound) return result;
+  }
+  return fallback;
+}
+
+/**
+ * One signal candidate.
+ *
+ * Named fields rather than eight positional parameters (typescript:S107):
+ * three of them were adjacent strings — clientId, entityId, groupKey — which a
+ * caller could transpose with no type error and no test failure, since the
+ * fingerprint would still be well-formed and would simply describe a different
+ * signal.
+ */
+interface SignalDraft {
+  clientId: string;
+  signalType: SignalType;
+  entityType: SignalCandidate["entityType"];
+  entityId: string;
+  severity: SignalSeverity;
+  confidence: number;
+  evidence: Record<string, unknown>;
+  groupKey: string;
+}
+
+function build({
+  clientId,
+  signalType,
+  entityType,
+  entityId,
+  severity,
+  confidence,
+  evidence,
+  groupKey,
+}: SignalDraft): SignalCandidate {
   return {
     clientId,
     entityType,
@@ -116,14 +155,14 @@ export const keywordDropExtractor: SignalExtractor = {
     const url = asString(row.url);
     const pageKey = normalizePageKey(url);
 
-    return build(
+    return build({
       clientId,
-      "keyword_drop",
-      "keyword",
-      keyword,
+      signalType: "keyword_drop",
+      entityType: "keyword",
+      entityId: keyword,
       severity,
-      0.85,
-      {
+      confidence: 0.85,
+      evidence: {
         keyword,
         device: asString(row.device),
         current_position: asNumber(row.current_position),
@@ -135,8 +174,8 @@ export const keywordDropExtractor: SignalExtractor = {
       },
       // Group on the ranking page when we know it, so a ranking drop and a page
       // experience problem on the same URL become ONE opportunity.
-      pageKey ?? `keyword:${keyword}`,
-    );
+      groupKey: pageKey ?? `keyword:${keyword}`,
+    });
   },
 };
 
@@ -161,16 +200,23 @@ export const pageExperienceExtractor: SignalExtractor = {
     const severity: SignalSeverity = riskLevel === "critical" ? "critical" : "high";
     const pageviews = asNumber(row.total_pageviews) ?? 0;
 
-    return build(
+    return build({
       clientId,
-      "high_exit_bad_lcp",
-      "page",
-      pagePath,
+      signalType: "high_exit_bad_lcp",
+      entityType: "page",
+      entityId: pagePath,
       severity,
       // A judgment on a handful of sessions is a judgment on noise. Traffic
       // volume is the only thing separating a real pattern from three visitors.
-      pageviews >= 100 ? 0.9 : pageviews >= 20 ? 0.7 : 0.45,
-      {
+      confidence: byThreshold(
+        pageviews,
+        [
+          [100, 0.9],
+          [20, 0.7],
+        ],
+        0.45,
+      ),
+      evidence: {
         page_path: pagePath,
         period: asString(row.period),
         exit_rate: asNumber(row.exit_rate),
@@ -183,8 +229,8 @@ export const pageExperienceExtractor: SignalExtractor = {
         cls: asNumber(row.cls),
         risk_level: riskLevel,
       },
-      pagePath,
-    );
+      groupKey: pagePath,
+    });
   },
 };
 
@@ -237,14 +283,14 @@ export const lcpRegressionExtractor: SignalExtractor = {
     const severity: SignalSeverity = ratio >= 1.5 ? "high" : "medium";
     const samples = asNumber(row.samples) ?? 0;
 
-    return build(
+    return build({
       clientId,
-      "lcp_regression",
-      "page",
-      pagePath,
+      signalType: "lcp_regression",
+      entityType: "page",
+      entityId: pagePath,
       severity,
-      samples >= 10 ? 0.85 : 0.65,
-      {
+      confidence: samples >= 10 ? 0.85 : 0.65,
+      evidence: {
         page_path: pagePath,
         device: asString(row.device),
         current_lcp: currentLcp,
@@ -253,8 +299,8 @@ export const lcpRegressionExtractor: SignalExtractor = {
         baseline_samples: samples,
         measured_at: asString(row.measured_at),
       },
-      pagePath,
-    );
+      groupKey: pagePath,
+    });
   },
 };
 
@@ -298,14 +344,14 @@ export const citationRateExtractor: SignalExtractor = {
     const severity: SignalSeverity = dropPoints >= 30 ? "high" : "medium";
     const checked = asNumber(row.queries_checked) ?? 0;
 
-    return build(
+    return build({
       clientId,
-      "citation_rate_down",
-      "platform",
-      platform,
+      signalType: "citation_rate_down",
+      entityType: "platform",
+      entityId: platform,
       severity,
-      checked >= 10 ? 0.8 : 0.6,
-      {
+      confidence: checked >= 10 ? 0.8 : 0.6,
+      evidence: {
         platform,
         current_rate_pct: current,
         previous_rate_pct: previous,
@@ -313,8 +359,8 @@ export const citationRateExtractor: SignalExtractor = {
         queries_checked: checked,
         cited_count: asNumber(row.cited_count),
       },
-      `platform:${platform}`,
-    );
+      groupKey: `platform:${platform}`,
+    });
   },
 };
 /**
@@ -413,14 +459,14 @@ export const competitorCitationExtractor: SignalExtractor = {
 
     // Platform scope: unchanged from before the keyword join existed.
     if (asString(row.scope) !== "keyword" || !keyword) {
-      return build(
+      return build({
         clientId,
-        "competitor_citation_gain",
-        "platform",
-        `${platform}:${competitor}`,
+        signalType: "competitor_citation_gain",
+        entityType: "platform",
+        entityId: `${platform}:${competitor}`,
         severity,
-        0.75,
-        {
+        confidence: 0.75,
+        evidence: {
           scope: "platform",
           platform,
           competitor_domain: competitor,
@@ -428,8 +474,8 @@ export const competitorCitationExtractor: SignalExtractor = {
           sample_queries: sampleQueries,
           last_seen: lastSeen,
         },
-        `platform:${platform}`,
-      );
+        groupKey: `platform:${platform}`,
+      });
     }
 
     // Keyword scope. The same 5-position bar `keywordDropExtractor` applies, so
@@ -442,17 +488,17 @@ export const competitorCitationExtractor: SignalExtractor = {
     const url = asString(row.url);
     const pageKey = normalizePageKey(url);
 
-    return build(
+    return build({
       clientId,
-      "competitor_citation_gain",
-      "keyword",
+      signalType: "competitor_citation_gain",
+      entityType: "keyword",
       // Distinct from the platform scope's entityId on purpose: the fingerprint
       // is (client, signalType, entityId), and a collision would make the two
       // scopes suppress each other through the cooldown and go mutually blind.
-      `${keyword}@${platform}:${competitor}`,
+      entityId: `${keyword}@${platform}:${competitor}`,
       severity,
-      0.75,
-      {
+      confidence: 0.75,
+      evidence: {
         scope: "keyword",
         keyword,
         platform,
@@ -468,8 +514,8 @@ export const competitorCitationExtractor: SignalExtractor = {
       // scope. When the two disagree (a keyword ranking on different URLs per
       // device), the compound simply does not form and the plane falls back to
       // the two single-symptom diagnoses, which is the behavior that shipped.
-      pageKey ?? `keyword:${keyword}`,
-    );
+      groupKey: pageKey ?? `keyword:${keyword}`,
+    });
   },
 };
 
@@ -525,22 +571,26 @@ export const prospectReadyExtractor: SignalExtractor = {
     // were all guarding a path no real signal could take.
     // `calibration.test.ts` pins every actionable type against the threshold
     // through its real extractor, so this cannot silently regress.
-    const severity: SignalSeverity = withContact >= 20 ? "high" : count >= 20 ? "medium" : "low";
-    return build(
+    // Not a ladder — two different measures. Contactable prospects outrank raw
+    // volume, so they are tested first (typescript:S3358).
+    let severity: SignalSeverity = "low";
+    if (withContact >= 20) severity = "high";
+    else if (count >= 20) severity = "medium";
+    return build({
       clientId,
-      "prospect_high_dr_ready",
-      "client",
-      "link_prospects",
+      signalType: "prospect_high_dr_ready",
+      entityType: "client",
+      entityId: "link_prospects",
       severity,
-      0.9,
-      {
+      confidence: 0.9,
+      evidence: {
         prospect_count: count,
         contactable_count: withContact,
         best_domain_rating: asNumber(row.best_domain_rating),
         avg_domain_rating: asNumber(row.avg_domain_rating),
       },
-      "client:link_prospects",
-    );
+      groupKey: "client:link_prospects",
+    });
   },
 };
 
@@ -563,24 +613,30 @@ export function llmBudgetExtractor(monthlyBudgetUsd: number): SignalExtractor {
       const utilization = spend / monthlyBudgetUsd;
       if (utilization < 0.8) return null;
 
-      const severity: SignalSeverity =
-        utilization >= 1 ? "critical" : utilization >= 0.9 ? "high" : "medium";
+      const severity: SignalSeverity = byThreshold<SignalSeverity>(
+        utilization,
+        [
+          [1, "critical"],
+          [0.9, "high"],
+        ],
+        "medium",
+      );
 
-      return build(
+      return build({
         clientId,
-        "llm_budget_pressure",
-        "client",
-        "llm_budget",
+        signalType: "llm_budget_pressure",
+        entityType: "client",
+        entityId: "llm_budget",
         severity,
-        1,
-        {
+        confidence: 1,
+        evidence: {
           spend_usd: spend,
           monthly_budget_usd: monthlyBudgetUsd,
           utilization: Math.round(utilization * 1000) / 1000,
           call_count: asNumber(row.call_count),
         },
-        "client:llm_budget",
-      );
+        groupKey: "client:llm_budget",
+      });
     },
   };
 }
@@ -607,15 +663,22 @@ export const jobFailureExtractor: SignalExtractor = {
     const failures = asNumber(row.failure_count) ?? 0;
     if (!jobName || failures < 2) return null;
 
-    const severity: SignalSeverity = failures >= 5 ? "critical" : failures >= 3 ? "high" : "medium";
-    return build(
+    const severity: SignalSeverity = byThreshold<SignalSeverity>(
+      failures,
+      [
+        [5, "critical"],
+        [3, "high"],
+      ],
+      "medium",
+    );
+    return build({
       clientId,
-      "job_failure_cluster",
-      "job",
-      jobName,
+      signalType: "job_failure_cluster",
+      entityType: "job",
+      entityId: jobName,
       severity,
-      1,
-      {
+      confidence: 1,
+      evidence: {
         job_name: jobName,
         failure_count: failures,
         last_failure_at: asString(row.last_failure_at),
@@ -623,8 +686,8 @@ export const jobFailureExtractor: SignalExtractor = {
         // fresh as the job that feeds it.
         impact: "Data feeding other signals for this client may be stale.",
       },
-      `job:${jobName}`,
-    );
+      groupKey: `job:${jobName}`,
+    });
   },
 };
 
