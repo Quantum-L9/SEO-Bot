@@ -405,5 +405,5 @@ async function main(): Promise<void> {
 
 // Only when executed directly, so the invariants can be imported by tests.
 if (process.argv[1]?.endsWith("verify-invariants.ts")) {
-  void main();
+  await main();
 }

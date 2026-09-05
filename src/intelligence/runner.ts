@@ -45,7 +45,7 @@ import {
 } from "./mode.js";
 import { buildOpportunities } from "./opportunity-scorer.js";
 import { openExperiment } from "./outcome-attributor.js";
-import { loadPolicyState, refreshPolicyState } from "./policy-state.js";
+import { refreshPolicyState } from "./policy-state.js";
 import { allExtractors, applySuppression, extractSignals } from "./signal-extractor.js";
 import type { ScoredOpportunity, SignalCandidate } from "./types.js";
 
@@ -411,6 +411,25 @@ async function executeCycle(
 }
 
 /**
+ * Why the rollout gate withholds an execution the policy allowed, or null.
+ *
+ * Two independent reasons, checked in order of authority: a mode that does not
+ * route at all withholds everything, and only then does a specific follow-up
+ * job get asked about. Extracted from a nested ternary so each reason reads as
+ * its own statement (typescript:S3358).
+ */
+function rolloutBlockedReason(
+  capabilities: IntelligenceCapabilities,
+  followUpJob: string | null,
+): string | null {
+  if (!capabilities.route) {
+    return `rollout mode '${capabilities.mode}' records proposals but does not execute them`;
+  }
+  if (followUpJob) return followUpJobBlockedReason(followUpJob, capabilities);
+  return null;
+}
+
+/**
  * Apply the rollout gate to the execution policy's decision.
  *
  * The policy decides what is SAFE to do; the rollout mode decides how much of
@@ -431,12 +450,7 @@ function gateExecution(
   // Nothing to narrow: the policy already declined, or there is no proposal.
   if (!execution?.execute) return execution;
 
-  const followUpJob = planned.template?.followUpJob ?? null;
-  const blocked = !capabilities.route
-    ? `rollout mode '${capabilities.mode}' records proposals but does not execute them`
-    : followUpJob
-      ? followUpJobBlockedReason(followUpJob, capabilities)
-      : null;
+  const blocked = rolloutBlockedReason(capabilities, planned.template?.followUpJob ?? null);
 
   if (!blocked) return execution;
 
@@ -670,4 +684,4 @@ export async function refreshAllPolicyState(): Promise<number> {
   return refreshed;
 }
 
-export { loadPolicyState };
+export { loadPolicyState } from "./policy-state.js";

@@ -90,9 +90,7 @@ let _perplexityPort: AnswerEngineObservationPort | null = null;
 /** Resolve the observation port for a named answer engine (singleton). */
 export function getAnswerEnginePort(engine: AnswerEngineId): AnswerEngineObservationPort {
   if (engine === "perplexity") {
-    if (_perplexityPort === null) {
-      _perplexityPort = new PerplexityAnswerEnginePort();
-    }
+    _perplexityPort ??= new PerplexityAnswerEnginePort();
     return _perplexityPort;
   }
   throw new Error(`Unsupported answer engine: ${engine}`);

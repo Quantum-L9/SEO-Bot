@@ -198,7 +198,9 @@ export function planOpportunity(
       opportunity_score: opportunity.score,
       target_url: opportunity.targetUrl,
       target_keyword: opportunity.targetKeyword,
-      signal_types: [...new Set(opportunity.signals.map((signal) => signal.signalType))].sort(),
+      signal_types: [...new Set(opportunity.signals.map((signal) => signal.signalType))].sort(
+        (a, b) => a.localeCompare(b),
+      ),
     },
   });
 
