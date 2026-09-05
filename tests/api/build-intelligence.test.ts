@@ -454,3 +454,61 @@ describe("build-intelligence — consumer run_ref", () => {
     }
   });
 });
+
+describe("build-intelligence — seo-content-blueprint admits only verified business facts (L2-S5-001)", () => {
+  const blueprintBody = () => ({
+    client_id: "client-1",
+    build_id: "build-1",
+    competitive_landscape: sealedLandscape.value,
+    routes: [{ route_id: "/", path: "/", purpose: "Home" }],
+    business_facts: [
+      { fact_id: "fact-hours", key: "hours", value: "24/7", verified: true, source_refs: ["spec"] },
+    ],
+  });
+
+  it("rejects a fact whose verified flag is not literally true (400)", async () => {
+    for (const fact of [
+      { fact_id: "f", key: "k", value: "v", verified: false, source_refs: [] },
+      { fact_id: "f", key: "k", value: "v", verified: "yes", source_refs: [] },
+      { fact_id: "f", key: "k", value: "v", source_refs: [] },
+    ]) {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/build-intelligence/seo-content-blueprint",
+        headers: AUTH,
+        payload: { ...blueprintBody(), business_facts: [fact] },
+      });
+      expect(res.statusCode, `fact ${JSON.stringify(fact)} must be rejected`).toBe(400);
+      expect(JSON.stringify(res.json())).toMatch(/verified/);
+    }
+  });
+
+  it("rejects a fact carrying unknown fields (strict)", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/seo-content-blueprint",
+      headers: AUTH,
+      payload: {
+        ...blueprintBody(),
+        business_facts: [
+          { fact_id: "f", key: "k", value: "v", verified: true, source_refs: [], model: "gpt-4o" },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("admits a well-formed verified fact past the boundary", async () => {
+    const producer = await import("../../src/build-intelligence/seo-content-blueprint.js");
+    vi.mocked(producer.createSEOContentBlueprintWithEvidence).mockRejectedValueOnce(
+      new Error("boundary reached"),
+    );
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/seo-content-blueprint",
+      headers: AUTH,
+      payload: blueprintBody(),
+    });
+    expect(res.statusCode).not.toBe(400);
+  });
+});

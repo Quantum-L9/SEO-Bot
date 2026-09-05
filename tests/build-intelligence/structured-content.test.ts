@@ -507,6 +507,41 @@ describe("StructuredContentPackage — the exact contract is the only authority"
     expect(counts.gen).toBe(0);
   });
 
+  // L2-S6-002: a same-build blueprint that is NOT the one the contract was
+  // compiled from (contract.inputs.seo_content_blueprint) is a lineage break,
+  // caught before any LLM spend.
+  it("rejects an accompanying blueprint the contract was not compiled from", async () => {
+    const stale = sealIntelligenceArtifact({
+      artifact_type: "seo_content_blueprint",
+      client_id: "client-1",
+      build_id: "build-1",
+      producer: { repo: "SEO-Bot", version: "1.0.0" },
+      payload: {
+        schema: WEBSITE_INTELLIGENCE_SCHEMAS.seoContentBlueprint,
+        competitive_landscape_ref: {
+          ...dummyRef,
+          artifact_type: "competitive_landscape" as const,
+        },
+        batch_size: 4,
+        batch_count: 0,
+        routes: [],
+      },
+    });
+    const { llm, counts } = fakeLlm([pass]);
+    await expect(
+      createStructuredContentPackage(
+        {
+          client_id: "client-1",
+          build_id: "build-1",
+          page_content_contract: makeContract(),
+          seo_content_blueprint: stale,
+        },
+        { llm },
+      ),
+    ).rejects.toMatchObject({ code: "ARTIFACT_LINEAGE_MISMATCH" });
+    expect(counts.gen).toBe(0);
+  });
+
   it("refuses to seal a package whose validation block records failures", async () => {
     // A verdict that claims to pass while still carrying an unsupported claim
     // must never reach a sealed artifact.
@@ -804,6 +839,45 @@ describe("StructuredContentPackage — NC-11 shape discipline (content-alias →
 });
 
 /* ── Schema-contract regression suite (blocks union, forbidden aliases) ────── */
+
+describe("StructuredContentPackage — provider failures are not shape failures (L2-S6-001)", () => {
+  function transportFailingLlm(name: string): { llm: LlmService; counts: { gen: number } } {
+    const counts = { gen: 0 };
+    const llm = {
+      async executePolicyJson(operation: string, args: { callCounter?: { value: number } }) {
+        if (args.callCounter) args.callCounter.value += 1;
+        if (operation === "STRUCTURED_CONTENT_GENERATION") {
+          counts.gen += 1;
+          const error = new Error(`401 invalid api key`);
+          error.name = name;
+          throw error;
+        }
+        throw new Error(`unexpected op ${operation}`);
+      },
+    } as unknown as LlmService;
+    return { llm, counts };
+  }
+
+  for (const name of ["ProviderRequestError", "CircuitOpenError", "BudgetExhaustedError"]) {
+    it(`surfaces ${name} as itself and never spends the bounded repair on it`, async () => {
+      const { llm, counts } = transportFailingLlm(name);
+      let caught: unknown;
+      try {
+        await createStructuredContentPackage(
+          { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+          { llm },
+        );
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(Error);
+      expect((caught as Error).name).toBe(name);
+      expect(caught).not.toBeInstanceOf(StructuredContentShapeError);
+      // The transport failed on the first call; no repair call is made for it.
+      expect(counts.gen).toBe(1);
+    });
+  }
+});
 
 describe("StructuredContentPackage — blocks-union output contract (schema regression)", () => {
   it("rejects a section that uses the forbidden `content` alias instead of blocks", () => {
