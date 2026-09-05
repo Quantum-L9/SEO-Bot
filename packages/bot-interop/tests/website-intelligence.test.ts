@@ -47,12 +47,12 @@ function landscape(niche: string): CompetitiveLandscapeV1 {
 
 const refA: ArtifactRef = {
   artifact_type: "competitive_landscape",
-  artifact_id: "competitive_landscape:" + "a".repeat(64),
+  artifact_id: `competitive_landscape:${"a".repeat(64)}`,
   payload_digest: "a".repeat(64),
 };
 const refB: ArtifactRef = {
   artifact_type: "seo_content_blueprint",
-  artifact_id: "seo_content_blueprint:" + "b".repeat(64),
+  artifact_id: `seo_content_blueprint:${"b".repeat(64)}`,
   payload_digest: "b".repeat(64),
 };
 
@@ -131,7 +131,7 @@ test("tampered payload fails integrity verification", () => {
 
 test("tampered artifact_id fails integrity verification", () => {
   const artifact = seal(landscape("scrap-metal"));
-  const tampered = { ...artifact, artifact_id: "competitive_landscape:" + "f".repeat(64) };
+  const tampered = { ...artifact, artifact_id: `competitive_landscape:${"f".repeat(64)}` };
   assert.throws(
     () => assertIntelligenceArtifactIntegrity(tampered),
     /INTEL_ARTIFACT_HASH_MISMATCH/,

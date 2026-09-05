@@ -10,7 +10,7 @@
  * search policy the recorder reports is the policy the router actually applied.
  */
 
-import { L9LLMRouter, SearchPolicySource, TaskComplexity, TaskType } from "@quantum-l9/llm-router";
+import { L9LLMRouter, TaskComplexity, TaskType } from "@quantum-l9/llm-router";
 import { describe, expect, it } from "vitest";
 import {
   type SeoImproveLlmOperation,

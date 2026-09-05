@@ -47,7 +47,6 @@ vi.mock("bullmq", () => {
 });
 vi.mock("ioredis", () => ({
   Redis: class {
-    constructor(_url?: unknown, _opts?: unknown) {}
     async quit() {
       bull.closed.redisQuit++;
     }
