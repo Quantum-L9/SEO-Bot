@@ -5,6 +5,8 @@
  */
 
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyMemoryAliases,
@@ -99,13 +101,27 @@ describe("memory is required", () => {
   });
 
   it("Gate 5 job env in ci.yml sets GRAPHITI_MCP_TOKEN so the alias can fire", () => {
-    const yml = readFileSync(".github/workflows/ci.yml", "utf8");
-    const gate5 = yml.split("gate5:")[1] ?? "";
+    const workflowPath = join(
+      dirname(fileURLToPath(import.meta.url)),
+      "../../.github/workflows/ci.yml",
+    );
+    const yml = readFileSync(workflowPath, "utf8");
+    const gate5 = extractNamedJob(yml, "gate5");
     expect(gate5).toContain("GRAPHITI_MCP_TOKEN: live-suite-placeholder");
     expect(gate5).toContain("GRAPHITI_MCP_URL: https://graphiti.invalid");
     expect(gate5).not.toContain("L9_MEMORY_MODE: disabled");
   });
 });
+
+function extractNamedJob(yml: string, jobId: string): string {
+  const start = yml.search(new RegExp(`^  ${jobId}:`, "m"));
+  if (start < 0) {
+    return "";
+  }
+  const fromJob = yml.slice(start);
+  const nextJob = fromJob.slice(2).search(/^  [A-Za-z0-9_-]+:/m);
+  return nextJob < 0 ? fromJob : fromJob.slice(0, nextJob + 2);
+}
 
 describe("Graphiti machine alias parser", () => {
   it("copies only Graphiti keys", () => {
