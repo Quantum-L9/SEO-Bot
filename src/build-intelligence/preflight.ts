@@ -147,109 +147,146 @@ function env(name: string): string {
  * this handler through (i.e. the request carried a valid SEO_BOT_API_KEY — the
  * hook runs before this handler). Do NOT hardcode PASS: every check probes.
  */
-export function runPreflight(contractSeen: boolean): PreflightReport {
-  const checks: PreflightCheck[] = [];
+/**
+ * Client-gate projection of the check set. A FAIL is "not ready"; an UNKNOWN
+ * check is a capability we could not prove, which is "degraded" — never
+ * silently "ready".
+ */
+function overallStatus(checks: PreflightCheck[]): "ready" | "degraded" | "not_ready" {
+  if (checks.some((check) => check.status === "FAIL")) return "not_ready";
+  if (checks.some((check) => check.status === "UNKNOWN")) return "degraded";
+  return "ready";
+}
 
-  // 1. The handler is reachable: this function runs, so the process is up.
-  checks.push({
-    name: "seo_bot_reachable",
-    status: "PASS",
-    detail: "preflight handler reached",
+/** 1. The handler is reachable: this function runs, so the process is up. */
+function checkReachable(): PreflightCheck {
+  return { name: "seo_bot_reachable", status: "PASS", detail: "preflight handler reached" };
+}
+
+/**
+ * 2. Machine auth: the hook that guards /api/build-intelligence/ admitted this
+ * request AND the secret is configured (a misconfigured secret would let the
+ * hook fall back to operator auth — FAIL, never assume).
+ */
+function checkMachineAuth(contractSeen: boolean): PreflightCheck {
+  return probe("seo_bot_machine_auth", () => {
+    if (!contractSeen) throw new PreflightCheckFailure("request was not machine-authenticated");
+    if (!env("SEO_BOT_API_KEY"))
+      throw new PreflightCheckFailure("SEO_BOT_API_KEY is not configured");
+    return "machine secret present and request authenticated";
   });
+}
 
-  // 2. Machine auth: the hook that guards /api/build-intelligence/ admitted
-  //    this request AND the secret is configured (a misconfigured secret would
-  //    let the hook fall back to operator auth — FAIL, never assume).
-  checks.push(
-    probe("seo_bot_machine_auth", () => {
-      if (!contractSeen) throw new PreflightCheckFailure("request was not machine-authenticated");
-      if (!env("SEO_BOT_API_KEY"))
-        throw new PreflightCheckFailure("SEO_BOT_API_KEY is not configured");
-      return "machine secret present and request authenticated";
-    }),
-  );
+/** 3. DataForSEO configuration (used by the competitive-landscape producer). */
+function checkDataForSeo(): PreflightCheck {
+  return probe("dataforseo_configured", () => {
+    requireEnv("DATAFORSEO_LOGIN");
+    requireEnv("DATAFORSEO_PASSWORD");
+    return "DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD present";
+  });
+}
 
-  // 3. DataForSEO configuration (used by the competitive-landscape producer).
-  checks.push(
-    probe("dataforseo_configured", () => {
-      requireEnv("DATAFORSEO_LOGIN");
-      requireEnv("DATAFORSEO_PASSWORD");
-      return "DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD present";
-    }),
-  );
-
-  // 4. Competitive-landscape capability = its evidence source is configured.
-  checks.push({
+/**
+ * 4. Competitive-landscape capability = its evidence source is configured.
+ * Derived from check 3, which is passed in by name rather than read out of the
+ * array by index — the previous `checks[2]` silently re-pointed at a different
+ * probe if the order ever changed.
+ */
+function checkLandscapeCapability(dataForSeo: PreflightCheck): PreflightCheck {
+  const configured = dataForSeo.status === "PASS";
+  return {
     name: "competitive_landscape_capability",
-    status: checks[2]?.status === "PASS" ? "PASS" : checks[2]?.status,
-    detail:
-      checks[2]?.status === "PASS"
-        ? "SERP evidence source configured"
-        : "DataForSEO configuration is required for competitive evidence",
+    status: configured ? "PASS" : dataForSeo.status,
+    detail: configured
+      ? "SERP evidence source configured"
+      : "DataForSEO configuration is required for competitive evidence",
+  };
+}
+
+/** 5. LLM provider configuration (used by every governed LLM op). */
+function checkLlmProviders(): PreflightCheck {
+  return probe("llm_provider_configured", () => {
+    requireEnv("OPENROUTER_API_KEY");
+    requireEnv("PERPLEXITY_API_KEY");
+    return "OPENROUTER_API_KEY and PERPLEXITY_API_KEY present";
   });
+}
 
-  // 5. LLM provider configuration (used by every governed LLM op).
-  checks.push(
-    probe("llm_provider_configured", () => {
-      requireEnv("OPENROUTER_API_KEY");
-      requireEnv("PERPLEXITY_API_KEY");
-      return "OPENROUTER_API_KEY and PERPLEXITY_API_KEY present";
-    }),
-  );
+/** 6. SEO-content-blueprint capability = LLM providers + router importable. */
+function checkBlueprintCapability(): PreflightCheck {
+  return probe("seo_content_blueprint_capability", () => {
+    if (!env("OPENROUTER_API_KEY")) {
+      throw new PreflightCheckFailure("OPENROUTER_API_KEY is required for blueprint strategy");
+    }
+    const routerVersion = packageVersion("@quantum-l9/llm-router");
+    if (!routerVersion) throw new PreflightCheckFailure("@quantum-l9/llm-router is not resolvable");
+    if (typeof L9LLMRouter !== "function") {
+      throw new PreflightCheckFailure("L9LLMRouter export is missing");
+    }
+    return "LLM strategy stack present and importable";
+  });
+}
 
-  // 6. SEO-content-blueprint capability = LLM providers + router importable.
-  checks.push(
-    probe("seo_content_blueprint_capability", () => {
-      if (!env("OPENROUTER_API_KEY")) {
-        throw new PreflightCheckFailure("OPENROUTER_API_KEY is required for blueprint strategy");
-      }
-      const routerVersion = packageVersion("@quantum-l9/llm-router");
-      if (!routerVersion)
-        throw new PreflightCheckFailure("@quantum-l9/llm-router is not resolvable");
-      if (typeof L9LLMRouter !== "function") {
-        throw new PreflightCheckFailure("L9LLMRouter export is missing");
-      }
-      return "LLM strategy stack present and importable";
-    }),
-  );
+/** 7. Structured-content capability = LLM providers + strict schema importable. */
+function checkStructuredContentCapability(): PreflightCheck {
+  return probe("structured_content_capability", () => {
+    if (!env("OPENROUTER_API_KEY") || !env("PERPLEXITY_API_KEY")) {
+      throw new PreflightCheckFailure("LLM provider keys are required for prose generation");
+    }
+    return "structured-content LLM stack present";
+  });
+}
 
-  // 7. Structured-content capability = LLM providers + strict schema importable.
-  checks.push(
-    probe("structured_content_capability", () => {
-      if (!env("OPENROUTER_API_KEY") || !env("PERPLEXITY_API_KEY")) {
-        throw new PreflightCheckFailure("LLM provider keys are required for prose generation");
-      }
-      return "structured-content LLM stack present";
-    }),
-  );
+/**
+ * 8. bot-interop compatibility: the contract package resolves AND the protocol
+ * constant matches the one the producers seal with.
+ */
+function checkBotInteropCompatible(): PreflightCheck {
+  return probe("bot_interop_compatible", () => {
+    const version = packageVersion("@quantum-l9/bot-interop");
+    if (!version) throw new PreflightCheckFailure("@quantum-l9/bot-interop is not resolvable");
+    if (WEBSITE_INTELLIGENCE_PROTOCOL !== "l9.website-intelligence") {
+      throw new PreflightCheckFailure(
+        `unexpected protocol constant: ${WEBSITE_INTELLIGENCE_PROTOCOL}`,
+      );
+    }
+    return `bot-interop ${version} resolves; protocol constant matches`;
+  });
+}
 
-  // 8. bot-interop compatibility: the contract package resolves AND the
-  //    protocol constant matches the one the producers seal with.
-  checks.push(
-    probe("bot_interop_compatible", () => {
-      const version = packageVersion("@quantum-l9/bot-interop");
-      if (!version) throw new PreflightCheckFailure("@quantum-l9/bot-interop is not resolvable");
-      if (WEBSITE_INTELLIGENCE_PROTOCOL !== "l9.website-intelligence") {
-        throw new PreflightCheckFailure(
-          `unexpected protocol constant: ${WEBSITE_INTELLIGENCE_PROTOCOL}`,
-        );
-      }
-      return `bot-interop ${version} resolves; protocol constant matches`;
-    }),
-  );
+/**
+ * 9. llm-router compatibility: the package resolves and the router class is the
+ * one the LlmService constructs.
+ */
+function checkLlmRouterCompatible(): PreflightCheck {
+  return probe("llm_router_compatible", () => {
+    const version = packageVersion("@quantum-l9/llm-router");
+    if (!version) throw new PreflightCheckFailure("@quantum-l9/llm-router is not resolvable");
+    if (typeof L9LLMRouter !== "function") {
+      throw new PreflightCheckFailure("L9LLMRouter export is missing");
+    }
+    return `llm-router ${version} resolves; L9LLMRouter present`;
+  });
+}
 
-  // 9. llm-router compatibility: the package resolves and the router class is
-  //    the one the LlmService constructs.
-  checks.push(
-    probe("llm_router_compatible", () => {
-      const version = packageVersion("@quantum-l9/llm-router");
-      if (!version) throw new PreflightCheckFailure("@quantum-l9/llm-router is not resolvable");
-      if (typeof L9LLMRouter !== "function") {
-        throw new PreflightCheckFailure("L9LLMRouter export is missing");
-      }
-      return `llm-router ${version} resolves; L9LLMRouter present`;
-    }),
-  );
+/**
+ * Run all nine checks. `contractSeen` is true when the machine-auth hook let
+ * this handler through (i.e. the request carried a valid SEO_BOT_API_KEY — the
+ * hook runs before this handler). Do NOT hardcode PASS: every check probes.
+ */
+export function runPreflight(contractSeen: boolean): PreflightReport {
+  const dataForSeo = checkDataForSeo();
+  const checks: PreflightCheck[] = [
+    checkReachable(),
+    checkMachineAuth(contractSeen),
+    dataForSeo,
+    checkLandscapeCapability(dataForSeo),
+    checkLlmProviders(),
+    checkBlueprintCapability(),
+    checkStructuredContentCapability(),
+    checkBotInteropCompatible(),
+    checkLlmRouterCompatible(),
+  ];
 
   const statusOf = (name: string): PreflightStatus =>
     checks.find((check) => check.name === name)?.status ?? "UNKNOWN";
@@ -262,11 +299,7 @@ export function runPreflight(contractSeen: boolean): PreflightReport {
     // Client-gate projection: the same probes, reshaped for the
     // Website-Bot SeoBotPreflightResult contract. A FAIL/UNKNOWN check
     // is a false capability; never defaulted to true.
-    status: checks.some((check) => check.status === "FAIL")
-      ? "not_ready"
-      : checks.some((check) => check.status === "UNKNOWN")
-        ? "degraded"
-        : "ready",
+    status: overallStatus(checks),
     service: "SEO-Bot",
     version: packageVersion("l9-seo-bot") ?? "unknown",
     bot_interop_version: packageVersion("@quantum-l9/bot-interop"),

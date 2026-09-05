@@ -243,37 +243,35 @@ export class GraphitiMemoryClient {
 
   private async ensureSession(): Promise<void> {
     if (this.initialized) return;
-    if (!this.initializePromise) {
-      this.initializePromise = (async () => {
-        const id = this.idFactory();
-        const { payload, sessionId } = await this.post(
-          {
-            jsonrpc: "2.0",
-            id,
-            method: "initialize",
-            params: {
-              protocolVersion: this.protocolVersion,
-              capabilities: {},
-              clientInfo: { name: "@quantum-l9/graphiti-memory-client", version: "2.0.0" },
-            },
-          },
-          false,
-        );
-        this.assertEnvelope(payload, id, "initialize");
-        // The canonical l9-graphiti-memory HTTP server at the pinned base is
-        // stateless and does not issue Mcp-Session-Id. Newer/spec-compliant
-        // deployments may issue one, so session propagation is opportunistic.
-        this.sessionId = sessionId;
-        await this.postNotification({
+    this.initializePromise ??= (async () => {
+      const id = this.idFactory();
+      const { payload, sessionId } = await this.post(
+        {
           jsonrpc: "2.0",
-          method: "notifications/initialized",
-          params: {},
-        });
-        this.initialized = true;
-      })().finally(() => {
-        this.initializePromise = undefined;
+          id,
+          method: "initialize",
+          params: {
+            protocolVersion: this.protocolVersion,
+            capabilities: {},
+            clientInfo: { name: "@quantum-l9/graphiti-memory-client", version: "2.0.0" },
+          },
+        },
+        false,
+      );
+      this.assertEnvelope(payload, id, "initialize");
+      // The canonical l9-graphiti-memory HTTP server at the pinned base is
+      // stateless and does not issue Mcp-Session-Id. Newer/spec-compliant
+      // deployments may issue one, so session propagation is opportunistic.
+      this.sessionId = sessionId;
+      await this.postNotification({
+        jsonrpc: "2.0",
+        method: "notifications/initialized",
+        params: {},
       });
-    }
+      this.initialized = true;
+    })().finally(() => {
+      this.initializePromise = undefined;
+    });
     await this.initializePromise;
   }
 

@@ -712,7 +712,7 @@ export class LlmService {
 
 let _llmService: LlmService | null = null;
 export function getLlmService(): LlmService {
-  if (!_llmService) _llmService = new LlmService();
+  _llmService ??= new LlmService();
   return _llmService;
 }
 

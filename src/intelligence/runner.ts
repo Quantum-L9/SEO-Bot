@@ -45,7 +45,7 @@ import {
 } from "./mode.js";
 import { buildOpportunities } from "./opportunity-scorer.js";
 import { openExperiment } from "./outcome-attributor.js";
-import { loadPolicyState, refreshPolicyState } from "./policy-state.js";
+import { refreshPolicyState } from "./policy-state.js";
 import { allExtractors, applySuppression, extractSignals } from "./signal-extractor.js";
 import type { ScoredOpportunity, SignalCandidate } from "./types.js";
 
@@ -670,4 +670,4 @@ export async function refreshAllPolicyState(): Promise<number> {
   return refreshed;
 }
 
-export { loadPolicyState };
+export { loadPolicyState } from "./policy-state.js";

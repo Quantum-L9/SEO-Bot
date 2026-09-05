@@ -190,9 +190,9 @@ const JOB_DEFINITIONS: JobDefinition[] = [
 
 export class Scheduler {
   private readonly connection: Redis;
-  private queues: Map<string, Queue> = new Map();
-  private workers: Map<string, Worker> = new Map();
-  private handlers: Map<string, (job: Job) => Promise<void>> = new Map();
+  private readonly queues: Map<string, Queue> = new Map();
+  private readonly workers: Map<string, Worker> = new Map();
+  private readonly handlers: Map<string, (job: Job) => Promise<void>> = new Map();
 
   constructor() {
     const config = getConfig();
