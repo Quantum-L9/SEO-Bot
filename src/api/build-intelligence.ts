@@ -192,6 +192,34 @@ const seoConfigSchema = z
 // verified cryptographically rather than re-validated field by field.
 const artifactEnvelope = z.object({}).passthrough();
 
+// Verified business facts are the ONLY grounding a blueprint may rely on. The
+// contract type pins `verified: true`; the boundary enforces it so an
+// unverified fact can never reach the paid strategy path (L2-S5-001).
+const contentSlotSchema = z.enum([
+  "primary_offer",
+  "service_overview",
+  "differentiation",
+  "trust",
+  "process",
+  "project_proof",
+  "local_relevance",
+  "objection_handling",
+  "faq",
+  "conversion",
+  "metadata",
+]);
+const verifiedBusinessFactSchema = z
+  .object({
+    fact_id: z.string().min(1),
+    key: z.string().min(1),
+    value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),
+    verified: z.literal(true),
+    source_refs: z.array(z.string()),
+    route_ids: z.array(z.string().min(1)).optional(),
+    target_slots: z.array(contentSlotSchema).optional(),
+  })
+  .strict();
+
 const seoContentBlueprintBody = z
   .object({
     client_id: z.string().min(1),
@@ -199,7 +227,7 @@ const seoContentBlueprintBody = z
     run_ref: runRefSchema,
     competitive_landscape: artifactEnvelope,
     routes: z.array(routeIdentitySchema).min(1),
-    business_facts: z.array(z.object({}).passthrough()),
+    business_facts: z.array(verifiedBusinessFactSchema),
     seo_config: seoConfigSchema.optional(),
   })
   .strict();
