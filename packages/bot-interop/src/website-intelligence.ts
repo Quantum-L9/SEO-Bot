@@ -678,10 +678,10 @@ export function assertIntelligenceArtifactIntegrity(artifact: WebsiteIntelligenc
 /* ------------------------------------------------------------------ */
 
 /** A concrete, renderable color value — the thing an observation must never become. */
-const CONCRETE_COLOR = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|color-mix|lab|lch|oklch|oklab)\s*\(/i;
+const CONCRETE_COLOR = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|color-mix|lab|lch|oklch|oklab)\s*\(/i;
 /** Raw expression markers: markup, CSS declarations/blocks, and embedded assets. */
 const RAW_MARKUP = /<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^>]*)?>/;
-const RAW_CSS_BLOCK = /\{[^}]*:[^}]*\}/;
+const RAW_CSS_BLOCK = /\{[^}:]*:[^}]*\}/;
 const RAW_CSS_DECLARATION =
   /\b(?:color|background|background-color|background-image|font-family|font-size|border-radius|box-shadow|letter-spacing|line-height)\s*:/i;
 const RAW_ASSET_REF = /\burl\s*\(|\bdata:[a-z]+\//i;

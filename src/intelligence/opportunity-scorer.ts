@@ -302,7 +302,9 @@ export function buildOpportunities(signals: readonly SignalCandidate[]): {
       signals: groupSignals,
       evidence: {
         group_key: first.groupKey,
-        signal_types: [...new Set(groupSignals.map((signal) => signal.signalType))].sort(),
+        signal_types: [...new Set(groupSignals.map((signal) => signal.signalType))].sort((a, b) =>
+          a.localeCompare(b),
+        ),
         signal_count: groupSignals.length,
         signals: groupSignals.map((signal) => ({
           signal_type: signal.signalType,

@@ -136,7 +136,8 @@ export function opportunityFingerprint(
 export function normalizePageKey(input: string | null | undefined): string | null {
   if (typeof input !== "string" || input.trim() === "") return null;
   const withoutOrigin = input.replace(/^https?:\/\/[^/]+/i, "");
-  const withoutQuery = withoutOrigin.replace(/[?#].*$/, "");
+  const queryStart = withoutOrigin.search(/[?#]/);
+  const withoutQuery = queryStart === -1 ? withoutOrigin : withoutOrigin.slice(0, queryStart);
   if (withoutQuery === "") return "/";
   const trimmed =
     withoutQuery.length > 1 && withoutQuery.endsWith("/")

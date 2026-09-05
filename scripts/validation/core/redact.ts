@@ -28,7 +28,7 @@ export function redactText(input: string, environment: NodeJS.ProcessEnv = proce
     "$1[REDACTED:NPM_TOKEN]",
   );
   output = output.replace(
-    /([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+):([^\s/@]+)@/gi,
+    /([a-z][a-z0-9+.-]{0,39}:\/\/)([^\s/@:]+):([^\s/@]+)@/gi,
     "$1[REDACTED:URL_USER]:[REDACTED:URL_PASSWORD]@",
   );
   output = output.replace(

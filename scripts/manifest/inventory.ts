@@ -137,10 +137,12 @@ export async function buildManifest(root: string): Promise<RepositoryManifest> {
   };
 }
 export function renderManifestMarkdown(manifest: RepositoryManifest): string {
-  const rows = manifest.entries.map(
-    (entry) =>
-      `| \`${entry.path}\` | ${entry.owner} | ${entry.classification} | ${entry.generated ? "yes" : "no"} | ${entry.purpose.replaceAll("|", String.raw`\|`)} |`,
-  );
+  const rows = manifest.entries.map((entry) => {
+    const generated = entry.generated ? "yes" : "no";
+    // A literal pipe would break the table cell it lands in.
+    const purpose = entry.purpose.replaceAll("|", String.raw`\|`);
+    return `| \`${entry.path}\` | ${entry.owner} | ${entry.classification} | ${generated} | ${purpose} |`;
+  });
   return [
     "# L9 SEO Bot Repository Manifest",
     "",

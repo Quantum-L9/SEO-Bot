@@ -77,7 +77,7 @@ export function buildFactCorpus(facts: VerifiedBusinessFact[]): string {
 export function factNumbers(facts: VerifiedBusinessFact[]): Set<string> {
   const numbers = new Set<string>();
   for (const match of buildFactCorpus(facts).matchAll(/\d[\d,]*(?:\.\d+)?/g)) {
-    numbers.add(match[0].replace(/,/g, ""));
+    numbers.add(match[0].replaceAll(",", ""));
   }
   return numbers;
 }
@@ -88,7 +88,7 @@ export function factNumbers(facts: VerifiedBusinessFact[]): Set<string> {
  * rather than incidental prose.
  */
 const QUANTIFIED_CLAIM_PATTERNS: ReadonlyArray<{ category: string; pattern: RegExp }> = [
-  { category: "years of experience", pattern: /\b(\d{1,4})\s*\+?\s*(?:years?|yrs?)\b/g },
+  { category: "years of experience", pattern: /\b(\d{1,4})(?:\s*\+)?\s*(?:years?|yrs?)\b/g },
   {
     category: "founding year",
     pattern: /\b(?:since|established(?: in)?|founded(?: in)?)\s+(\d{4})\b/g,
@@ -96,11 +96,11 @@ const QUANTIFIED_CLAIM_PATTERNS: ReadonlyArray<{ category: string; pattern: RegE
   {
     category: "completed work volume",
     pattern:
-      /\b(\d{1,3}(?:,\d{3})*|\d+)\s*\+?\s*(?:projects?|jobs?|installs?|installations?|roofs?|homes?|properties|customers?|clients?|families)\b/g,
+      /\b(\d{1,3}(?:,\d{3})*|\d+)(?:\s*\+)?\s*(?:(?:project|job|install(?:ation)?|roof|home|customer|client)s?|properties|families)\b/g,
   },
   {
     category: "team size",
-    pattern: /\b(\d{1,4})\s*\+?\s*(?:employees?|crews?|technicians?|installers?|staff)\b/g,
+    pattern: /\b(\d{1,4})(?:\s*\+)?\s*(?:(?:employee|crew|technician|installer)s?|staff)\b/g,
   },
   {
     category: "response time",
@@ -244,7 +244,7 @@ export function checkRouteGrounding(
   // 1. Quantified factual claims — the asserted number must be a verified number.
   for (const { category, pattern } of QUANTIFIED_CLAIM_PATTERNS) {
     for (const match of haystack.matchAll(new RegExp(pattern.source, pattern.flags))) {
-      const value = (match[1] ?? "").replace(/,/g, "");
+      const value = (match[1] ?? "").replaceAll(",", "");
       if (!value || numbers.has(value)) continue;
       flag(
         `${route.route_id}: unsupported ${category} claim "${match[0].trim()}" — no verified fact asserts ${value}`,

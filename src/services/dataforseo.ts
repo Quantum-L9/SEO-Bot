@@ -199,9 +199,14 @@ export class DataForSeoClient {
   }
 
   private async requestOnce(endpoint: string, data: unknown[]): Promise<DataForSeoResponse> {
-    let response: { data: DataForSeoResponse };
-    try {
-      response = await axios.post(`${this.baseUrl}${endpoint}`, data, {
+    // Deliberately unguarded: the raw axios error must reach the retry loop
+    // unchanged so it can classify the failure. The previous `try { ... } catch
+    // (error) { throw error; }` wrapper did exactly nothing but say so
+    // (typescript:S2737); the comment now carries that intent instead.
+    const response: { data: DataForSeoResponse } = await axios.post(
+      `${this.baseUrl}${endpoint}`,
+      data,
+      {
         headers: {
           Authorization: `Basic ${this.auth}`,
           "Content-Type": "application/json",
@@ -212,11 +217,8 @@ export class DataForSeoClient {
         // the config schema (positive integer, 90s default), so an invalid
         // deployment value fails at startup instead of reaching axios as NaN.
         timeout: this.timeoutMs,
-      });
-    } catch (error) {
-      // Re-thrown as the raw axios error so the retry loop can classify it.
-      throw error;
-    }
+      },
+    );
 
     if (response.data?.status_code !== 20000) {
       throw new DataForSeoUnavailableError(
