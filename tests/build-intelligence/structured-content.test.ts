@@ -507,6 +507,41 @@ describe("StructuredContentPackage — the exact contract is the only authority"
     expect(counts.gen).toBe(0);
   });
 
+  // L2-S6-002: a same-build blueprint that is NOT the one the contract was
+  // compiled from (contract.inputs.seo_content_blueprint) is a lineage break,
+  // caught before any LLM spend.
+  it("rejects an accompanying blueprint the contract was not compiled from", async () => {
+    const stale = sealIntelligenceArtifact({
+      artifact_type: "seo_content_blueprint",
+      client_id: "client-1",
+      build_id: "build-1",
+      producer: { repo: "SEO-Bot", version: "1.0.0" },
+      payload: {
+        schema: WEBSITE_INTELLIGENCE_SCHEMAS.seoContentBlueprint,
+        competitive_landscape_ref: {
+          ...dummyRef,
+          artifact_type: "competitive_landscape" as const,
+        },
+        batch_size: 4,
+        batch_count: 0,
+        routes: [],
+      },
+    });
+    const { llm, counts } = fakeLlm([pass]);
+    await expect(
+      createStructuredContentPackage(
+        {
+          client_id: "client-1",
+          build_id: "build-1",
+          page_content_contract: makeContract(),
+          seo_content_blueprint: stale,
+        },
+        { llm },
+      ),
+    ).rejects.toMatchObject({ code: "ARTIFACT_LINEAGE_MISMATCH" });
+    expect(counts.gen).toBe(0);
+  });
+
   it("refuses to seal a package whose validation block records failures", async () => {
     // A verdict that claims to pass while still carrying an unsupported claim
     // must never reach a sealed artifact.

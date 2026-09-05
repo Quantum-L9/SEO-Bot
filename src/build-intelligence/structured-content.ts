@@ -553,11 +553,27 @@ function assertContractUsable(request: StructuredContentRequest): void {
     }
   }
 
-  // An accompanying blueprint, when supplied, must belong to the same build.
+  // An accompanying blueprint, when supplied, must belong to the same build
+  // AND be the exact blueprint the contract was compiled from: the contract
+  // carries that ref in inputs.seo_content_blueprint, so a stale or foreign
+  // blueprint would validate prose against a strategy the contract never saw
+  // (L2-S6-002).
   const blueprint = request.seo_content_blueprint;
   if (blueprint && blueprint.build_id !== request.build_id) {
     throw new PageContentContractInvalidError(
       `seo_content_blueprint build_id "${blueprint.build_id}" does not match request build_id "${request.build_id}"`,
+    );
+  }
+  if (
+    blueprint &&
+    !sameArtifactRef(
+      refForArtifact(blueprint),
+      request.page_content_contract.payload.inputs.seo_content_blueprint,
+    )
+  ) {
+    throw new ArtifactLineageMismatchError(
+      "seo_content_blueprint is not the blueprint this PageContentContract was compiled from " +
+        `(contract input ${request.page_content_contract.payload.inputs.seo_content_blueprint.artifact_id}, supplied ${blueprint.artifact_id})`,
     );
   }
 }
