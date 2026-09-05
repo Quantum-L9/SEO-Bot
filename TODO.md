@@ -3,10 +3,10 @@
 
 ## Issue unblock (session reference)
 
-**Cluster:** Quantum-L9/Website-Bot#167 + Quantum-L9/SEO-Bot#73 (bot-interop 1.2.0)
-**Owning fix:** Website-Bot tag `bot-interop-v1.2.0` @ d670319 (published); this branch `package-lock.json` now resolves 1.2.0
-**Next:** hand SEO-Bot#72 to l9-pr-remediation for CI green after lockfile push
-**Pickup:** Graphiti PICKUP written 2026-08-29
+**Cluster:** Quantum-L9/SEO-Bot#91
+**Owning fix:** https://github.com/Quantum-L9/SEO-Bot/pull/96
+**Next:** merge PR 96; confirm Gate 5 stays required and GRAPHITI_MCP_TOKEN aliases onto L9_MEMORY_TOKEN
+**Pickup:** Graphiti PICKUP written 2026-09-05
 
 Tracked items that are intentionally **not** done yet because they depend on an
 operational or external precondition (not on more code). Each lists the exact
