@@ -119,9 +119,10 @@ export function summarizeExperiment(input: {
   comparison: MetricComparison;
 }): string {
   const { baseline, measured, delta } = input.comparison;
+  const deltaText = delta === null ? "n/a" : round(delta);
   const numbers =
     baseline !== null && measured !== null
-      ? `${round(baseline)} → ${round(measured)} (Δ ${delta === null ? "n/a" : round(delta)})`
+      ? `${round(baseline)} → ${round(measured)} (Δ ${deltaText})`
       : "insufficient data";
 
   switch (input.verdict) {

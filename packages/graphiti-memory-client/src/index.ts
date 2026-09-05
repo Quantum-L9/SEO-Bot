@@ -334,8 +334,9 @@ export class GraphitiMemoryClient {
     });
     if (!response.ok) {
       const text = await response.text();
+      const detail = text ? `: ${text.slice(0, 500)}` : "";
       throw new MemoryRpcError(
-        `memory notification HTTP ${response.status}${text ? `: ${text.slice(0, 500)}` : ""}`,
+        `memory notification HTTP ${response.status}${detail}`,
         undefined,
         undefined,
         response.status,

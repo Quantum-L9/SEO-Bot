@@ -54,6 +54,20 @@ function branchRefPath(branch: string): string {
   return branch.split("/").map(encodeURIComponent).join("/");
 }
 
+/** The editable home page, by convention, in every managed site. */
+const EDITABLE_HOME_PATH = "src/pages/index.astro";
+
+/**
+ * Which probe a required path reports as. Two paths are special-cased by
+ * identity; the rest are plain required paths. Extracted from a nested ternary
+ * so each case reads as its own line (typescript:S3358).
+ */
+function probeNameFor(path: string, managedManifestPath: string): MaintenanceProbe["name"] {
+  if (path === managedManifestPath) return "managed_manifest";
+  if (path === EDITABLE_HOME_PATH) return "editable_home";
+  return "required_path";
+}
+
 async function githubGet(fetchImpl: typeof fetch, url: string, token: string): Promise<Response> {
   return fetchImpl(url, {
     method: "GET",
@@ -164,12 +178,7 @@ export async function verifyMaintenanceReadiness(
     probes.push({ name: "branch_head", ok: true, detail: observedHead });
 
     for (const path of contract.site.maintenance.required_paths) {
-      const name: MaintenanceProbe["name"] =
-        path === repo.managed_manifest_path
-          ? "managed_manifest"
-          : path === "src/pages/index.astro"
-            ? "editable_home"
-            : "required_path";
+      const name = probeNameFor(path, repo.managed_manifest_path);
       const response = await githubGet(
         fetchImpl,
         `${GITHUB_API}/repos/${repo.full_name}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${repo.commit_sha}`,

@@ -182,7 +182,7 @@ describe("verifyMaintenanceReadiness — GitHub request envelope (GAP-002)", () 
     });
 
     // repo + branch + 2 required paths = 4 GitHub calls, all identically enveloped.
-    expect(calls.length).toBe(4);
+    expect(calls).toHaveLength(4);
     for (const { init } of calls) {
       expect(init?.method).toBe("GET");
       const headers = init?.headers as Record<string, string>;

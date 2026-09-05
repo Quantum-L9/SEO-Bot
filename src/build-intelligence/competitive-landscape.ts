@@ -491,7 +491,7 @@ function selectDonors(
   const domains: CompetitiveLandscapeV1["domains"] = ordered.map((aggregate) => ({
     domain: aggregate.domain,
     aggregate_visibility: round(aggregate.visibility),
-    qualifying_query_ids: [...aggregate.queryIds].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+    qualifying_query_ids: [...aggregate.queryIds].sort(byCodeUnit),
     observation_ids: aggregate.observationIds,
   }));
 
@@ -654,6 +654,17 @@ function compareAggregates(a: DomainAggregate, b: DomainAggregate): number {
 }
 
 /** Round to 6 dp so floating-point noise never perturbs the canonical digest. */
+/**
+ * Deterministic, locale-independent ordering. Not localeCompare: these ids are
+ * compared across machines and collation varies with locale and ICU version.
+ * Code-unit order is what the previous inline comparator produced
+ * (typescript:S3358).
+ */
+function byCodeUnit(a: string, b: string): number {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+}
+
 function round(value: number): number {
   return Math.round(value * 1e6) / 1e6;
 }
