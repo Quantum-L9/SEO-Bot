@@ -345,6 +345,10 @@ async function produceRoute(args: {
       recorder,
     );
   } catch (error) {
+    // A provider/transport/budget/circuit failure is not a content-shape
+    // failure: it must surface as itself (typed, at the real boundary), and
+    // the route's one bounded repair is never spent on it (L2-S6-001).
+    if (isLlmTransportFailure(error)) throw error;
     schemaFailures = schemaFailureDetails(error);
     schemaFailureCount += 1;
     logger.warn(
@@ -405,6 +409,7 @@ async function produceRoute(args: {
       recorder,
     );
   } catch (error) {
+    if (isLlmTransportFailure(error)) throw error;
     const repairFailures = schemaFailureDetails(error);
     if (repairFailures.length > 0) {
       // A repair that still violates the strict output SHAPE is terminal with
@@ -606,6 +611,27 @@ function assertPackageLineage(
       "refusing to seal a package whose validation block records unresolved failures",
     );
   }
+}
+
+/**
+ * Router-plane failures that reach a generation call: the provider refused or
+ * timed out, the circuit is open, a budget is exhausted, or the descriptor was
+ * refused. None of them is evidence about the model's OUTPUT, so they must not
+ * be folded into the route's schema-failure ledger. Detected by error name so
+ * this module keeps importing nothing from the Router (L2-S6-001).
+ */
+const LLM_TRANSPORT_FAILURE_NAMES = new Set([
+  "ProviderRequestError",
+  "CircuitOpenError",
+  "BudgetExhaustedError",
+  "BudgetReservationError",
+  "DailyBudgetExhaustedError",
+  "UnsupportedCapabilityCombinationError",
+  "TaskValidationError",
+  "UnsafeImageUrlError",
+]);
+function isLlmTransportFailure(error: unknown): boolean {
+  return error instanceof Error && LLM_TRANSPORT_FAILURE_NAMES.has(error.name);
 }
 
 /**

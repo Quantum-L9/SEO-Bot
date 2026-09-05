@@ -805,6 +805,45 @@ describe("StructuredContentPackage — NC-11 shape discipline (content-alias →
 
 /* ── Schema-contract regression suite (blocks union, forbidden aliases) ────── */
 
+describe("StructuredContentPackage — provider failures are not shape failures (L2-S6-001)", () => {
+  function transportFailingLlm(name: string): { llm: LlmService; counts: { gen: number } } {
+    const counts = { gen: 0 };
+    const llm = {
+      async executePolicyJson(operation: string, args: { callCounter?: { value: number } }) {
+        if (args.callCounter) args.callCounter.value += 1;
+        if (operation === "STRUCTURED_CONTENT_GENERATION") {
+          counts.gen += 1;
+          const error = new Error(`401 invalid api key`);
+          error.name = name;
+          throw error;
+        }
+        throw new Error(`unexpected op ${operation}`);
+      },
+    } as unknown as LlmService;
+    return { llm, counts };
+  }
+
+  for (const name of ["ProviderRequestError", "CircuitOpenError", "BudgetExhaustedError"]) {
+    it(`surfaces ${name} as itself and never spends the bounded repair on it`, async () => {
+      const { llm, counts } = transportFailingLlm(name);
+      let caught: unknown;
+      try {
+        await createStructuredContentPackage(
+          { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+          { llm },
+        );
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(Error);
+      expect((caught as Error).name).toBe(name);
+      expect(caught).not.toBeInstanceOf(StructuredContentShapeError);
+      // The transport failed on the first call; no repair call is made for it.
+      expect(counts.gen).toBe(1);
+    });
+  }
+});
+
 describe("StructuredContentPackage — blocks-union output contract (schema regression)", () => {
   it("rejects a section that uses the forbidden `content` alias instead of blocks", () => {
     const route: any = structuredClone(genRoute());
