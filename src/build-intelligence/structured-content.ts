@@ -31,6 +31,7 @@ import {
   type StructuredContentRoute,
   sameArtifactRef,
   sealIntelligenceArtifact,
+  type VerifiedFactValue,
   WEBSITE_INTELLIGENCE_SCHEMAS,
 } from "@quantum-l9/bot-interop";
 import { createModuleLogger } from "../core/logger.js";
@@ -45,6 +46,7 @@ import {
   unsatisfiedProofRequirements,
 } from "./claim-grounding.js";
 import { type RouteValidationVerdict, validateRoute } from "./content-validator.js";
+import { byCodeUnit } from "./ordering.js";
 import { PRODUCER } from "./producer.js";
 import {
   type SchemaFailure,
@@ -791,7 +793,7 @@ export function applyDeterministicRemediation(
 ): StructuredContentRoute {
   const corpus = buildFactCorpus(contractRoute.business_facts);
   const allowedNumbers = new Set(
-    (corpus.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((n) => n.replace(/,/g, "")),
+    (corpus.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((n) => n.replaceAll(",", "")),
   );
 
   // a. Scrub ungrounded credential phrases from all prose (whitespace-flexible;
@@ -800,9 +802,9 @@ export function applyDeterministicRemediation(
   scrubTextSurfaces(route, corpus, allowedNumbers, contractRoute.forbidden_claims);
 
   const facts = new Map(contractRoute.business_facts.map((f) => [f.key, f.value]));
-  const biz = String(facts.get("business_name") ?? contractRoute.route_id);
+  const biz = factText(facts.get("business_name")) || contractRoute.route_id;
   // Number("") is 0 — an absent years fact must not read as "0 years".
-  const years = Number(facts.get("years_local_experience") ?? NaN);
+  const years = Number(facts.get("years_local_experience") ?? Number.NaN);
   const fillerYearsPhrase =
     Number.isFinite(years) && years > 0 ? ` with ${years} years of local experience` : "";
   // c. Substantive-content floor: scrubbing (or a lazy model) can leave a
@@ -810,30 +812,21 @@ export function applyDeterministicRemediation(
   //    facts only. Do not invent a vertical or an offering when the contract
   //    has no vertical fact — the previous fallback ("professional services")
   //    was not fact-derived.
-  const verticalFact = facts.get("vertical");
-  const vertical = verticalFact ? String(verticalFact).trim() : "";
+  const vertical = factText(facts.get("vertical"));
   const offering = vertical ? ` provides ${vertical} services` : "";
-  const states = String(facts.get("states_served") ?? "");
-  const phone = String(facts.get("phone") ?? "");
-  const siteUrl = String(facts.get("site_url") ?? "");
+  const states = factText(facts.get("states_served"));
+  const phone = factText(facts.get("phone"));
+  const siteUrl = factText(facts.get("site_url"));
+  const coverage = states ? ` across ${states}` : "";
   const filler = [
-    `${biz}${offering}${states ? ` across ${states}` : ""}${fillerYearsPhrase}.`,
+    `${biz}${offering}${coverage}${fillerYearsPhrase}.`,
     phone ? `${biz} can be reached at ${phone}.` : "",
     siteUrl ? `Learn more at ${siteUrl}.` : "",
   ]
     .filter((part) => part.length > 0)
     .join(" ");
   for (const section of route.sections ?? []) {
-    const words = (section.blocks ?? [])
-      .flatMap((block) =>
-        "text" in block && typeof block.text === "string"
-          ? [block.text]
-          : "items" in block && Array.isArray(block.items)
-            ? block.items.map(String)
-            : [],
-      )
-      .join(" ")
-      .trim();
+    const words = (section.blocks ?? []).flatMap(blockText).join(" ").trim();
     if (words.split(/\s+/).filter(Boolean).length < 10) {
       section.blocks = [...(section.blocks ?? []), { kind: "paragraph", text: filler }];
     }
@@ -843,8 +836,8 @@ export function applyDeterministicRemediation(
   const topics: string[] = [];
   const entities: string[] = [];
   for (const failure of verdict.failed_requirements) {
-    const topic = failure.match(/required topic "([^"]+)"/)?.[1];
-    const entity = failure.match(/required entity "([^"]+)"/)?.[1];
+    const topic = /required topic "([^"]+)"/.exec(failure)?.[1];
+    const entity = /required entity "([^"]+)"/.exec(failure)?.[1];
     if (entity) entities.push(entity);
     else if (topic) topics.push(topic);
   }
@@ -995,8 +988,71 @@ function collectTextSurfaces(route: StructuredContentRoute): TextSurface[] {
   return surfaces;
 }
 
+/**
+ * Render a verified fact for prose.
+ *
+ * `VerifiedFactValue` is `string | number | boolean | string[]`, and the array
+ * variant is the reason this exists: `String(["CA", "NV"])` yields "CA,NV",
+ * which is what a bare `String(facts.get("states_served"))` was interpolating
+ * into a generated sentence — commas with no spaces, mid-paragraph. Arrays are
+ * joined the way prose wants them; a boolean is not a noun phrase and renders
+ * as nothing rather than a literal "true" in a customer-facing sentence.
+ */
+function factText(value: VerifiedFactValue | undefined): string {
+  if (value === undefined) return "";
+  if (Array.isArray(value))
+    return value
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .join(", ");
+  if (typeof value === "boolean") return "";
+  return String(value).trim();
+}
+
 function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return value.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+}
+
+/**
+ * Length of the run at the end of `text` whose characters satisfy `matches`.
+ *
+ * An end-anchored quantifier such as `/[^\w\s]+$/` looks linear and is not: the
+ * engine retries it from every start position, so a long tail that does not
+ * match costs O(n²) (typescript:S8786). Walking backwards visits each character
+ * once and stops at the first that fails.
+ */
+function trailingRunLength(text: string, matches: (char: string) => boolean): number {
+  let length = 0;
+  while (length < text.length && matches(text[text.length - 1 - length]!)) length += 1;
+  return length;
+}
+
+/** Trailing punctuation run — everything that is neither a word char nor space. */
+function trimTrailingPunctuation(text: string): string {
+  return text.slice(0, text.length - trailingRunLength(text, (c) => !/[\w\s]/.test(c)));
+}
+
+/**
+ * The number literal at the very end of `text`, or undefined. Matches what
+ * `/\d[\d,]*(?:\.\d+)?$/` accepted: digits, embedded commas and at most one
+ * decimal part, with the first character a digit.
+ */
+function trailingNumber(text: string): string | undefined {
+  const run = trailingRunLength(text, (c) => /[\d,.]/.test(c));
+  for (let start = text.length - run; start < text.length; start++) {
+    const candidate = text.slice(start);
+    if (/^\d[\d,]*(?:\.\d+)?$/.test(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+/** The prose a content block contributes, by block shape. */
+function blockText(block: unknown): string[] {
+  if (block && typeof block === "object") {
+    if ("text" in block && typeof block.text === "string") return [block.text];
+    if ("items" in block && Array.isArray(block.items)) return block.items.map(String);
+  }
+  return [];
 }
 
 function endsWithWord(text: string, word: string): boolean {
@@ -1016,7 +1072,7 @@ function startsWithWord(text: string, word: string): boolean {
 /** Unit words whose quantified-claim patterns can straddle a surface boundary
  * ("5" at the end of one field, "years" at the start of the next). */
 const QUANTIFIED_UNIT_WORDS =
-  /^(?:years?|yrs?|projects?|jobs?|installs?|installations?|roofs?|homes?|properties|customers?|clients?|families|employees?|crews?|technicians?|installers?|staff)\b/i;
+  /^(?:(?:year|yr|project|job|install(?:ation)?|roof|home|customer|client|employee|crew|technician|installer)s?|properties|families|staff)\b/i;
 
 /**
  * Scrub every text surface of a route in one pass:
@@ -1073,13 +1129,13 @@ function scrubTextSurfaces(
       // Case-insensitive guard: the replace regex is /gi but the presence
       // check must match it, or capitalized claims escape the scrub.
       if (!haystack.includes(token) || corpus.includes(token)) continue;
-      const flexible = escapeRegex(token).replace(/ /g, "\\s+");
+      const flexible = escapeRegex(token).replaceAll(" ", String.raw`\s+`);
       // Substring authority: the grounding check flags the token wherever it
       // appears as a substring, so the scrub must remove the maximal word
       // containing it — a word-bounded `\btoken\b` lets derived forms like
       // "certifications" or "recertification" survive and 422 the route
       // (golden run #41).
-      out = out.replace(new RegExp(`\\b[a-z0-9]*${flexible}[a-z0-9]*\\b`, "gi"), " ");
+      out = out.replace(new RegExp(String.raw`\b[a-z0-9]*${flexible}[a-z0-9]*\b`, "gi"), " ");
     }
     // Forbidden claims: the deterministic check flags them wherever the
     // phrase appears; remove the same maximal-word way, with NO corpus
@@ -1087,8 +1143,8 @@ function scrubTextSurfaces(
     // (golden run #55).
     for (const phrase of forbidden) {
       if (!haystack.includes(phrase)) continue;
-      const flexible = escapeRegex(phrase).replace(/ /g, "\\s+");
-      out = out.replace(new RegExp(`\\b[a-z0-9]*${flexible}[a-z0-9]*\\b`, "gi"), " ");
+      const flexible = escapeRegex(phrase).replaceAll(" ", String.raw`\s+`);
+      out = out.replace(new RegExp(String.raw`\b[a-z0-9]*${flexible}[a-z0-9]*\b`, "gi"), " ");
     }
     // Lifespan clauses first: "can last 30 years", "often lasting 25-30
     // years", "lifespan of 20 years". An ungrounded lifespan number can
@@ -1098,12 +1154,12 @@ function scrubTextSurfaces(
     // years"). Remove the WHOLE clause — verb, number, and unit — so no
     // claim-shaped residue survives.
     out = out.replace(
-      /\b(?:(?:can|may|could|will|typically|often|usually|generally)\s+)?(?:lasts?|lasting|rated\s+for)\s+(?:for\s+|up\s+to\s+)?(\d+(?:-\d+)?)\s*(?:to|-|–|—)?\s*(?:years?|yrs?)\b/gi,
-      (match: string, num: string) => (allowedNumbers.has(num.replace(/,/g, "")) ? match : " "),
+      /\b(?:(?:can|may|could|will|typically|often|usually|generally)\s+)?(?:lasts?|lasting|rated\s+for)\s+(?:for\s+|up\s+to\s+)?(\d+(?:-\d+)?)(?:\s*(?:to|[-–—]))?\s*(?:years?|yrs?)\b/gi,
+      (match: string, num: string) => (allowedNumbers.has(num.replaceAll(",", "")) ? match : " "),
     );
     out = out.replace(
-      /\b(?:lifespans?|service\s+life)\s+of\s+(\d+(?:-\d+)?)\s*(?:to|-|–|—)?\s*(?:years?|yrs?)\b/gi,
-      (match: string, num: string) => (allowedNumbers.has(num.replace(/,/g, "")) ? match : " "),
+      /\b(?:lifespans?|service\s+life)\s+of\s+(\d+(?:-\d+)?)(?:\s*(?:to|[-–—]))?\s*(?:years?|yrs?)\b/gi,
+      (match: string, num: string) => (allowedNumbers.has(num.replaceAll(",", "")) ? match : " "),
     );
     // Age-comparison clauses: "roof age over 20 years", "older than 20
     // years", "20+ years old". The number-only backstop below would leave
@@ -1111,18 +1167,18 @@ function scrubTextSurfaces(
     // #50). Remove preposition + number + unit whole.
     out = out.replace(
       /\b(?:over|older\s+than|beyond|past|ages?\s+over|ages?\s+of)\s+(\d+(?:-\d+)?)\s*(?:years?|yrs?)\b/gi,
-      (match: string, num: string) => (allowedNumbers.has(num.replace(/,/g, "")) ? match : " "),
+      (match: string, num: string) => (allowedNumbers.has(num.replaceAll(",", "")) ? match : " "),
     );
     out = out.replace(
       /\b(\d+(?:-\d+)?)\s*\+\s*(?:years?|yrs?)\s+old\b/gi,
-      (match: string, num: string) => (allowedNumbers.has(num.replace(/,/g, "")) ? match : " "),
+      (match: string, num: string) => (allowedNumbers.has(num.replaceAll(",", "")) ? match : " "),
     );
     // Quantified "N years" assertions: a number the verified facts do not
     // contain can never be corroborated (factNumbers authority). Drop the
     // number, keep the unit, so the claim stops being a quantified claim.
     out = out.replace(
-      /\b(\d+(?:-\d+)?)\s*\+?\s*(?:to|-|–|—)?\s*(?=years?\b|yrs?\b)/gi,
-      (match: string, num: string) => (allowedNumbers.has(num.replace(/,/g, "")) ? match : " "),
+      /\b(\d+(?:-\d+)?)(?:\s*\+)?(?:\s*(?:to|[-–—]))?\s*(?=years?\b|yrs?\b)/gi,
+      (match: string, num: string) => (allowedNumbers.has(num.replaceAll(",", "")) ? match : " "),
     );
     values[i] = out.replace(/\s{2,}/g, " ").trim();
   }
@@ -1135,8 +1191,8 @@ function scrubTextSurfaces(
       prev = i;
       continue;
     }
-    let leftBody = values[prev]!.replace(/[^\w\s]+$/g, "").trimEnd();
-    let rightBody = values[i]!.replace(/^[^\w\s]+/g, "").trimStart();
+    let leftBody = trimTrailingPunctuation(values[prev]!).trimEnd();
+    let rightBody = values[i]!.replace(/^[^\w\s]+/, "").trimStart();
     let removed = false;
     for (const token of multiWordTokens) {
       // Forbidden phrases scrub unconditionally — the deterministic check
@@ -1153,7 +1209,10 @@ function scrubTextSurfaces(
           // left surface ("6 years of" | "experience serving..."): the
           // dangling number is a claim remnant — strip it too (golden run
           // #59: "6 serving Charlotte's unique weather conditions").
-          leftBody = leftBody.replace(/\d[\d,]*(?:\.\d+)?\+?\s*$/, "").trimEnd();
+          // Drop a trailing "6", "6+", "1,200.5 " and the like in one linear pass.
+          const tail = leftBody.trimEnd().replace(/\+$/, "");
+          const dangling = trailingNumber(tail);
+          leftBody = (dangling ? tail.slice(0, tail.length - dangling.length) : leftBody).trimEnd();
           removed = true;
         }
       }
@@ -1161,10 +1220,10 @@ function scrubTextSurfaces(
     if (!removed) {
       // A quantified unit can straddle the same way ("5" ends one field,
       // "years" begins the next). The number is the claim — drop it.
-      const number = leftBody.match(/\d[\d,]*(?:\.\d+)?$/)?.[0];
+      const number = trailingNumber(leftBody);
       if (
         number &&
-        !allowedNumbers.has(number.replace(/,/g, "")) &&
+        !allowedNumbers.has(number.replaceAll(",", "")) &&
         QUANTIFIED_UNIT_WORDS.test(rightBody)
       ) {
         leftBody = leftBody.slice(0, leftBody.length - number.length).trimEnd();
@@ -1198,16 +1257,16 @@ function groundedVerdict(
   const grounding = checkRouteGrounding(route, contractRoute);
   const groundedPhrases = new Set(
     grounding.unsupportedClaims
-      .map((claim: string) => claim.match(/"([^"]+)"/)?.[1])
+      .map((claim: string) => /"([^"]+)"/.exec(claim)?.[1])
       .filter((phrase: string | undefined): phrase is string => Boolean(phrase)),
   );
   const unsupportedClaims = verdict.unsupported_claims.filter((claim: string) => {
-    const phrase = claim.match(/"([^"]+)"/)?.[1];
+    const phrase = /"([^"]+)"/.exec(claim)?.[1];
     return Boolean(phrase) && groundedPhrases.has(phrase as string);
   });
   const groundingFailurePhrases = new Set(
     grounding.failures
-      .map((failure) => failure.match(/"([^"]+)"/)?.[1])
+      .map((failure) => /"([^"]+)"/.exec(failure)?.[1])
       .filter((phrase): phrase is string => Boolean(phrase))
       .map((phrase) => phrase.toLowerCase()),
   );
@@ -1243,7 +1302,7 @@ function groundedVerdict(
   const isProofEcho = (failure: string): boolean => {
     const lower = failure.trim().toLowerCase();
     if (lower.startsWith("missing proof requirements")) return true;
-    return proofPhrases.some((phrase) => lower === phrase);
+    return proofPhrases.includes(lower);
   };
   const proofLabels = (failure: string): string[] => {
     const lower = failure.trim().toLowerCase();
@@ -1266,7 +1325,7 @@ function groundedVerdict(
     .map((id) => id.trim().toLowerCase())
     .filter(Boolean);
   const isRequirementEcho = (failure: string): boolean =>
-    requirementIdPhrases.some((phrase) => failure.trim().toLowerCase() === phrase);
+    requirementIdPhrases.includes(failure.trim().toLowerCase());
   const routeTextLower = collectRouteText(route).toLowerCase();
   const isRemediationSentenceQuote = (failure: string): boolean =>
     failure.trimStart().startsWith("Regarding ") && routeTextLower.includes(failure.toLowerCase());
@@ -1317,5 +1376,5 @@ function routePassed(
 }
 
 function dedupe(values: string[]): string[] {
-  return [...new Set(values)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return [...new Set(values)].sort(byCodeUnit);
 }

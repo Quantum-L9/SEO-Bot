@@ -138,7 +138,7 @@ describe("Scheduler.start — schedules only enabled jobs on their cron (GAP-006
 
     const repeatAdds = bull.queueAdds.filter((a) => a.opts?.repeat);
     const enabled = jobDefinitions.filter((j) => j.enabled);
-    expect(repeatAdds.length).toBe(enabled.length);
+    expect(repeatAdds).toHaveLength(enabled.length);
 
     // The disabled site-mutating job must NOT be scheduled.
     expect(repeatAdds.some((a) => a.name === "serp:execute-surpass-plans")).toBe(false);
@@ -175,7 +175,7 @@ describe("Scheduler.processJob — client fan-out (GAP-006)", () => {
     await processor({ id: "parent-99", name: def!.name, data: { definition: def } });
 
     const children = bull.queueAdds.filter((a) => a.opts?.jobId);
-    expect(children.length).toBe(2);
+    expect(children).toHaveLength(2);
     // Deterministic child ids (idempotent on parent retry → no duplicate outreach).
     expect(children.map((c) => c.opts.jobId).sort()).toEqual([
       "child~parent-99~client-a",
@@ -202,7 +202,7 @@ describe("Scheduler.processJob — client fan-out (GAP-006)", () => {
     await processor({ id: "p1", name: def!.name, data: { definition: def, clientId: "client-a" } });
 
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(bull.queueAdds.filter((a) => a.opts?.jobId).length).toBe(0); // no children
+    expect(bull.queueAdds.filter((a) => a.opts?.jobId)).toHaveLength(0); // no children
   });
 
   it("marks the execution failed and rethrows when the handler rejects", async () => {

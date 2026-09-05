@@ -20,7 +20,10 @@ jobs:
       # step. Permissions can only be reduced, never elevated, down a reusable
       # chain, so omitting it here caps the kernel below its own contract.
       packages: read
-    secrets: inherit
+    # No `secrets: inherit` — the nightly kernel declares no
+    # `on.workflow_call.secrets` and uses only the automatic GITHUB_TOKEN, so
+    # inheriting would hand it every repository secret for nothing
+    # (SonarCloud githubactions:S7635).
     with:
       python-version: "3.12"
       run-extended-tests: true

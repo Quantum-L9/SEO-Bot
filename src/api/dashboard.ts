@@ -43,6 +43,12 @@ export function escapeHtml(value: unknown): string {
   let str: string;
   if (value == null) str = "";
   else if (typeof value === "object") str = JSON.stringify(value);
+  else if (typeof value === "string") str = value;
+  // Symbol and function are the two `unknown` cases a bare String() handles
+  // badly: it throws on the first and emits an entire function body into the
+  // page for the second (typescript:S6551).
+  else if (typeof value === "symbol") str = value.description ?? "";
+  else if (typeof value === "function") str = "";
   else str = String(value);
   return str
     .replaceAll("&", "&amp;")
@@ -647,6 +653,33 @@ interface IntelligencePageData {
   freshness: { rows: RefreshAgeRow[]; error: string | null };
 }
 
+/** A snapshot is stale past 12 hours; that and the error case are the panel's three states. */
+const FRESHNESS_STALE_MINUTES = 720;
+
+/**
+ * The snapshot-age panel. Extracted from a nested ternary so each of the three
+ * states — unavailable, nothing refreshed yet, ages — is one readable branch
+ * (typescript:S3358).
+ */
+function renderFreshness(freshness: { rows: RefreshAgeRow[]; error: string | null }): string {
+  if (freshness.error) {
+    return `<p style="color: #fca5a5;">Snapshot freshness unavailable: ${esc(freshness.error)}</p>`;
+  }
+  if (freshness.rows.length === 0) {
+    return `<p style="color: #94a3b8;">No materialized snapshot has been refreshed yet.</p>`;
+  }
+  const ages = freshness.rows
+    .map((row) => {
+      const fresh = row.status === "ok" && row.ageMinutes < FRESHNESS_STALE_MINUTES;
+      return (
+        `<span style="color: ${fresh ? "#94a3b8" : "#fbbf24"}">` +
+        `${esc(row.viewName.replace("reporting.", ""))} ${esc(row.ageMinutes)}m</span>`
+      );
+    })
+    .join(" · ");
+  return `<p style="color: #94a3b8; font-size: 13px;">Snapshot age: ${ages}</p>`;
+}
+
 function verdictBadgeClass(verdict: unknown): string {
   if (verdict === "improved") return "good";
   if (verdict === "declined") return "critical";
@@ -688,17 +721,7 @@ function panelBody(result: PanelResult, columns: number, rows: string): string {
  * a keyword containing one, reaches this page through them.
  */
 function renderIntelligence(data: IntelligencePageData): string {
-  const freshnessHtml = data.freshness.error
-    ? `<p style="color: #fca5a5;">Snapshot freshness unavailable: ${esc(data.freshness.error)}</p>`
-    : data.freshness.rows.length === 0
-      ? `<p style="color: #94a3b8;">No materialized snapshot has been refreshed yet.</p>`
-      : `<p style="color: #94a3b8; font-size: 13px;">Snapshot age: ${data.freshness.rows
-          .map(
-            (row) =>
-              `<span style="color: ${row.status === "ok" && row.ageMinutes < 720 ? "#94a3b8" : "#fbbf24"}">` +
-              `${esc(row.viewName.replace("reporting.", ""))} ${esc(row.ageMinutes)}m</span>`,
-          )
-          .join(" · ")}</p>`;
+  const freshnessHtml = renderFreshness(data.freshness);
 
   const opportunityRows = data.opportunities.rows
     .map(

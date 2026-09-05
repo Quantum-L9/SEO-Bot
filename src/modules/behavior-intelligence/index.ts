@@ -48,7 +48,7 @@ const logger = createModuleLogger("behavior-intelligence");
 
 class PostHogClient {
   private readonly baseUrl: string;
-  private apiKey: string;
+  private readonly apiKey: string;
 
   constructor(baseUrl: string, apiKey: string) {
     this.baseUrl = baseUrl.replace(/\/$/, "");

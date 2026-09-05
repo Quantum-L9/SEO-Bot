@@ -700,7 +700,7 @@ export class LlmService {
 
   private extractModule(description?: string): string {
     if (!description) return "unknown";
-    return description.match(/\[([^\]]+)\]/)?.[1] ?? "unknown";
+    return /\[([^\]]{1,120})\]/.exec(description)?.[1] ?? "unknown";
   }
 
   private inferTier(complexity: TaskComplexity): string {
@@ -712,7 +712,7 @@ export class LlmService {
 
 let _llmService: LlmService | null = null;
 export function getLlmService(): LlmService {
-  if (!_llmService) _llmService = new LlmService();
+  _llmService ??= new LlmService();
   return _llmService;
 }
 

@@ -48,7 +48,7 @@ export const FORBIDDEN_PACK_KEYS: ReadonlySet<string> = new Set([
   "config",
 ]);
 
-const EMAIL_PATTERN = /[\w.+-]+@[\w-]+\.[\w.-]+/;
+const EMAIL_PATTERN = /[\w.+-]{1,64}@[\w-]{1,63}\.[\w.-]{1,255}/;
 
 export interface EvidencePackClient {
   /** Industry and market only — never name, domain, or credentials. */

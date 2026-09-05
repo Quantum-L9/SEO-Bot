@@ -100,6 +100,19 @@ interface ToolCallResult {
   isError?: boolean;
 }
 
+/**
+ * Drop every trailing "/" in one backward pass.
+ *
+ * `replace(/\/+$/, "")` looks equivalent and is not: an end-anchored quantifier
+ * is retried from every start position, so a path with a long run of slashes
+ * costs O(n²) (typescript:S8786).
+ */
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") end -= 1;
+  return value.slice(0, end);
+}
+
 export class MemoryRpcError extends Error {
   constructor(
     message: string,
@@ -134,7 +147,7 @@ export class GraphitiMemoryClient {
     const parsed = new URL(config.baseUrl);
     if (!["http:", "https:"].includes(parsed.protocol))
       throw new RangeError("baseUrl must use http or https");
-    const normalizedPath = parsed.pathname.replace(/\/+$/, "");
+    const normalizedPath = stripTrailingSlashes(parsed.pathname);
     parsed.pathname = normalizedPath.endsWith("/mcp") ? normalizedPath : `${normalizedPath}/mcp`;
     parsed.search = "";
     parsed.hash = "";
@@ -230,37 +243,35 @@ export class GraphitiMemoryClient {
 
   private async ensureSession(): Promise<void> {
     if (this.initialized) return;
-    if (!this.initializePromise) {
-      this.initializePromise = (async () => {
-        const id = this.idFactory();
-        const { payload, sessionId } = await this.post(
-          {
-            jsonrpc: "2.0",
-            id,
-            method: "initialize",
-            params: {
-              protocolVersion: this.protocolVersion,
-              capabilities: {},
-              clientInfo: { name: "@quantum-l9/graphiti-memory-client", version: "2.0.0" },
-            },
-          },
-          false,
-        );
-        this.assertEnvelope(payload, id, "initialize");
-        // The canonical l9-graphiti-memory HTTP server at the pinned base is
-        // stateless and does not issue Mcp-Session-Id. Newer/spec-compliant
-        // deployments may issue one, so session propagation is opportunistic.
-        this.sessionId = sessionId;
-        await this.postNotification({
+    this.initializePromise ??= (async () => {
+      const id = this.idFactory();
+      const { payload, sessionId } = await this.post(
+        {
           jsonrpc: "2.0",
-          method: "notifications/initialized",
-          params: {},
-        });
-        this.initialized = true;
-      })().finally(() => {
-        this.initializePromise = undefined;
+          id,
+          method: "initialize",
+          params: {
+            protocolVersion: this.protocolVersion,
+            capabilities: {},
+            clientInfo: { name: "@quantum-l9/graphiti-memory-client", version: "2.0.0" },
+          },
+        },
+        false,
+      );
+      this.assertEnvelope(payload, id, "initialize");
+      // The canonical l9-graphiti-memory HTTP server at the pinned base is
+      // stateless and does not issue Mcp-Session-Id. Newer/spec-compliant
+      // deployments may issue one, so session propagation is opportunistic.
+      this.sessionId = sessionId;
+      await this.postNotification({
+        jsonrpc: "2.0",
+        method: "notifications/initialized",
+        params: {},
       });
-    }
+      this.initialized = true;
+    })().finally(() => {
+      this.initializePromise = undefined;
+    });
     await this.initializePromise;
   }
 
@@ -323,8 +334,9 @@ export class GraphitiMemoryClient {
     });
     if (!response.ok) {
       const text = await response.text();
+      const detail = text ? `: ${text.slice(0, 500)}` : "";
       throw new MemoryRpcError(
-        `memory notification HTTP ${response.status}${text ? `: ${text.slice(0, 500)}` : ""}`,
+        `memory notification HTTP ${response.status}${detail}`,
         undefined,
         undefined,
         response.status,

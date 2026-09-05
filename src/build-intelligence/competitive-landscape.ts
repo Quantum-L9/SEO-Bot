@@ -44,6 +44,7 @@ import {
   type DonorQualification,
   qualifyDomain,
 } from "./domain-classification.js";
+import { byCodeUnit } from "./ordering.js";
 import { PRODUCER } from "./producer.js";
 import {
   buildSeedPortfolio,
@@ -491,7 +492,7 @@ function selectDonors(
   const domains: CompetitiveLandscapeV1["domains"] = ordered.map((aggregate) => ({
     domain: aggregate.domain,
     aggregate_visibility: round(aggregate.visibility),
-    qualifying_query_ids: [...aggregate.queryIds].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+    qualifying_query_ids: [...aggregate.queryIds].sort(byCodeUnit),
     observation_ids: aggregate.observationIds,
   }));
 
