@@ -34,6 +34,7 @@
 import axios from "axios";
 import type { Job } from "bullmq";
 import { and, desc, eq, gte } from "drizzle-orm";
+import { POSTHOG_EVENTS } from "../../contracts/posthog_events.js";
 import { getConfig } from "../../core/config.js";
 import { getDb, schema } from "../../core/database/index.js";
 import { createModuleLogger } from "../../core/logger.js";
@@ -138,20 +139,30 @@ async function pullEngagementData(job: Job): Promise<void> {
   logger.info({ clientDomain }, "Pulling engagement data from PostHog");
 
   // ─── Query 1: Page-level engagement metrics ─────────────────────────────
+  //
+  // Scroll depth is its own event in the shared contract (emitted once per page
+  // by Website-Bot's snippet, with `scroll_depth` as an integer percent), not a
+  // property of `$pageview`. Reading it off pageview rows returned null for
+  // every page, so the two event kinds are read together and split per column.
+  // Event names come from the shared contract, never from a literal here.
+
+  const pageviewEvent = `'${POSTHOG_EVENTS.PAGEVIEW}'`;
+  const scrollDepthEvent = `'${POSTHOG_EVENTS.SCROLL_DEPTH}'`;
 
   const pageMetrics = await posthog.query(
     client.posthogProjectId,
     `
     SELECT
       properties.$current_url as page_url,
-      count() as pageviews,
-      uniq(distinct_id) as unique_visitors,
-      avg(toFloat64OrNull(properties.$session_duration)) as avg_session_duration,
-      avg(toFloat64OrNull(properties.scroll_depth)) as avg_scroll_depth
+      countIf(event = ${pageviewEvent}) as pageviews,
+      uniqIf(distinct_id, event = ${pageviewEvent}) as unique_visitors,
+      avgIf(toFloat64OrNull(properties.$session_duration), event = ${pageviewEvent}) as avg_session_duration,
+      avgIf(toFloat64OrNull(properties.scroll_depth), event = ${scrollDepthEvent}) as avg_scroll_depth
     FROM events
-    WHERE event = '$pageview'
+    WHERE event IN (${pageviewEvent}, ${scrollDepthEvent})
       AND timestamp > now() - interval 1 day
     GROUP BY page_url
+    HAVING pageviews > 0
     ORDER BY pageviews DESC
     LIMIT 50
   `,
@@ -168,7 +179,7 @@ async function pullEngagementData(job: Job): Promise<void> {
       countIf(properties.$is_exit = 'true') as exits,
       exits / total_views as exit_rate
     FROM events
-    WHERE event = '$pageview'
+    WHERE event = ${pageviewEvent}
       AND timestamp > now() - interval 1 day
     GROUP BY page_url
     HAVING total_views >= 5
@@ -188,7 +199,7 @@ async function pullEngagementData(job: Job): Promise<void> {
       countIf(properties.$session_page_count = 1) as bounces,
       bounces / sessions as bounce_rate
     FROM events
-    WHERE event = '$pageview'
+    WHERE event = ${pageviewEvent}
       AND properties.$entry_current_url != ''
       AND timestamp > now() - interval 1 day
     GROUP BY landing_page

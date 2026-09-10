@@ -1,6 +1,6 @@
 {
   "name": "@quantum-l9/bot-interop",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Canonical Website-Bot to SEO-Bot handoff and acknowledgement contracts",
   "type": "module",
   "main": "dist/src/index.js",

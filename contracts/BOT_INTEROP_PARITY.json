@@ -4,14 +4,15 @@
   "peers": ["Quantum-L9/Website-Bot", "Quantum-L9/SEO-Bot"],
   "canonical_source_set": "packages/bot-interop/src/*.ts",
   "algorithm": "sha256",
-  "set_digest": "9d19f5a85a2aba1f40856a1d35ecf343468fdc647755a82f2a0d9a46c05a76c4",
+  "set_digest": "8635900cbbb0612883cddd705cb666b13ad787c27900409df97d1b3dd831a0b0",
   "files": {
     "ack.ts": "0165c0287868556a249f8f36bcb53511d19cecbfb5f551fbe08dc841f00269f7",
     "handoff.ts": "cc7bb1986dd7423985a7a3f48c75bb466fee53a341788852d1e8b950e03f309c",
-    "index.ts": "cd3776f05fb89d9a836f03d11636b1a2d3f417167cc02812f9000cc807ff18bf",
+    "index.ts": "aa3b1621111ba919102544848b1fafd04aafb3a788f34e8b8d9a24ceb4728eeb",
+    "posthog-events.ts": "3794d9dd225a57ecd21e3b6d79b3428128efa9eeb7803a3daa4f317f7f324470",
     "website-intelligence.ts": "bbb4011b3d0c4f886d170d0aef58689afd74143e3e2ffe2eccd1a5f41cf9ed81"
   },
   "shared_contracts": {
-    "contracts/WEBSITE_INTELLIGENCE_LOCK.json": "2446acd1561945aace2d038b788ba75789af4576e44baad84f9c8c79bbf00009"
+    "contracts/WEBSITE_INTELLIGENCE_LOCK.json": "b73d2f2a4083983c5132ee969268d23003b77e8f7995dfbf726fcf15848c7537"
   }
 }

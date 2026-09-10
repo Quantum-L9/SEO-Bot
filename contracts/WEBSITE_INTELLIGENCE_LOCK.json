@@ -1,7 +1,7 @@
 {
-  "lock_version": 2,
+  "lock_version": 3,
   "status": "ACCEPTED",
-  "locked_at": "2026-09-01",
+  "locked_at": "2026-09-10",
   "protocol": "l9.website-intelligence",
   "protocol_version": "1.0",
   "mode_scope": ["REDESIGN_IMPROVE"],
@@ -23,8 +23,8 @@
       "comment": "Distribution-only fields (publishConfig) are outside the canonical set; the contract source is what must be identical. Both peers commit this identical lock."
     },
     "@quantum-l9/llm-router": {
-      "website_bot_current_pin": "1.1.2",
-      "comment": "Provider/model authority stays with LLM-Router (WBV2-013). Unchanged by this lock revision."
+      "website_bot_current_pin": "1.3.0",
+      "comment": "Provider/model authority stays with LLM-Router (WBV2-013). Pin mirrors the vendored packages/llm-router version in Website-Bot; lock_version 3 refreshed it from the stale 1.1.2."
     }
   },
   "artifacts": {
