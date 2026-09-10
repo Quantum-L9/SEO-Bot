@@ -39,11 +39,13 @@ export const POSTHOG_SITE_EMITTED_EVENTS: readonly PostHogEventName[] = [
 
 /**
  * Pre-alignment names that generated sites emitted before this contract
- * existed. Website-Bot dual-emits each alias next to its canonical event, with
- * the same properties, for a transition window so dashboards built on
- * already-deployed sites keep receiving data. SEO-Bot never queries an alias.
- * Removing an entry here is the contract change that ends the window, and like
- * every change to this file it must land on both peers.
+ * existed. Website-Bot dual-emits each alias next to its canonical event for a
+ * transition window, keeping the property shape those names always had
+ * (`cta_click`: `{ label, page }`; `form_submit`: `{ formId, page }`), so
+ * dashboards built on already-deployed sites keep receiving the data they were
+ * built on. SEO-Bot never queries an alias. Removing an entry here is the
+ * contract change that ends the window, and like every change to this file it
+ * must land on both peers.
  */
 export const POSTHOG_LEGACY_EVENT_ALIASES: Readonly<Partial<Record<PostHogEventName, string>>> = {
   cta_clicked: "cta_click",
