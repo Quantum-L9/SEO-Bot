@@ -76,12 +76,16 @@ jobs:
           set -euo pipefail
           echo "artifact-name=l9-semgrep-${MATRIX_ID}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
-      - name: Run semgrep
+      - id: scan
+        name: Run semgrep
         if: steps.gov.outputs.enabled == 'true'
         run: |
           set -euo pipefail
           pip install --only-binary :all: "semgrep==1.171.0"
           mkdir -p "artifacts/raw/semgrep/${L9_MATRIX_ID}"
+          # The provisioned SDK's `semgrep normalize` requires --provider-version;
+          # the invoke-sdk action forwards it only when this output is set.
+          echo "provider-version=$(semgrep --version)" >> "$GITHUB_OUTPUT"
           semgrep scan \
             --config p/typescript \
             --config p/javascript \
@@ -111,6 +115,7 @@ jobs:
           required: ${{ steps.gov.outputs.required-provider }}
           policy: ${{ steps.gov.outputs.sdk-policy }}
           identity-map: .github/governance/semgrep-identity-map.yaml
+          provider-version: ${{ steps.scan.outputs.provider-version }}
 
       - name: Validate canonical bundle
         if: steps.gov.outputs.enabled == 'true'
