@@ -11,7 +11,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "test": "vitest",
-    "migrate": "tsx src/core/database/migrate.ts",
+    "migrate": "node scripts/migrate.mjs",
     "seed": "tsx src/core/database/seed.ts",
     "add-client": "tsx scripts/add-client.ts",
     "request-site-build": "tsx scripts/request-site-build.ts",
