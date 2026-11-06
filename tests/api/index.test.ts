@@ -222,3 +222,62 @@ describe("GAP-010 — manual-trigger routing, allowlist, and tenant payload", ()
     expect(addJobMock).not.toHaveBeenCalled();
   });
 });
+
+describe("API error handler — fastify 5 passes `error` as unknown", () => {
+  // Routes are added to a fresh, not-yet-ready instance so the shipping error
+  // handler (not a test double) is what answers them.
+  async function appWithThrowingRoute(thrown: () => unknown): Promise<FastifyInstance> {
+    const server = await buildApiServer();
+    server.get("/api/__throws", async () => {
+      throw thrown();
+    });
+    await server.ready();
+    return server;
+  }
+
+  it("keeps a 4xx error's status and message", async () => {
+    const server = await appWithThrowingRoute(() =>
+      Object.assign(new Error("bad input"), { statusCode: 422 }),
+    );
+    try {
+      const res = await server.inject({ method: "GET", url: "/api/__throws", headers: AUTH });
+      expect(res.statusCode).toBe(422);
+      expect(res.json()).toEqual({ error: "bad input" });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("hides the message of an Error without a status (500)", async () => {
+    const server = await appWithThrowingRoute(() => new Error("db password in here"));
+    try {
+      const res = await server.inject({ method: "GET", url: "/api/__throws", headers: AUTH });
+      expect(res.statusCode).toBe(500);
+      expect(res.json()).toEqual({ error: "Internal Server Error" });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("answers a thrown non-Error value with a 500 instead of crashing the handler", async () => {
+    const server = await appWithThrowingRoute(() => "plain string");
+    try {
+      const res = await server.inject({ method: "GET", url: "/api/__throws", headers: AUTH });
+      expect(res.statusCode).toBe(500);
+      expect(res.json()).toEqual({ error: "Internal Server Error" });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("uses the statusCode and message carried by an error-like non-Error value", async () => {
+    const server = await appWithThrowingRoute(() => ({ statusCode: 409, message: "conflict" }));
+    try {
+      const res = await server.inject({ method: "GET", url: "/api/__throws", headers: AUTH });
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toEqual({ error: "conflict" });
+    } finally {
+      await server.close();
+    }
+  });
+});
