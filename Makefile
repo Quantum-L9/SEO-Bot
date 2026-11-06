@@ -1,25 +1,33 @@
-# L9 SEO Bot — Makefile (publish surface)
-# make pr is the ONLY push/PR route (48-make-pr-remediation). Checkers run
-# before any remote mutation; OPEN_PR=0 runs the gate only.
+# GENERATED repository execution facade: make-v1. DO NOT EDIT.
+#
+# This file is owned by the central repository-execution tooling and is
+# reproduced byte-for-byte into each consumer's root Makefile. It defines only
+# the portable four-phase ABI and routes every phase to a repository-owned
+# leaf in Repo.mk. Repository implementation, product logic, CI orchestration,
+# and organization governance never live here.
+#
+# Regenerate from the versioned facade template with the repository-execution
+# reconcile command; make-v1 behavior is immutable once released.
+.DEFAULT_GOAL := help
+SHELL := /usr/bin/env bash
+.SHELLFLAGS := -eu -o pipefail -c
 
-GOV_ROOT ?= $(HOME)/.cursor-governance
-OPEN_PR ?= 1
-PR_REMEDIATE ?= 1
-PR_BASE ?= origin/main
+# Composition, not isolation: the repository-owned implementation is included
+# and must exist. A repository without Repo.mk has no execution implementation
+# and fails here rather than passing silently.
+include Repo.mk
 
-.PHONY: pr pr-check
+.PHONY: help setup validate check test
 
-pr-check:
-	@echo "--- pr-check: SEO-Bot repository gates ---"
-	npx tsc -p tsconfig.check.json --noEmit
-	npx vitest run
-	npx biome check .
-	@echo "--- pr-check PASS ---"
+help: ## Show the portable repository-execution phases
+	@awk '\
+		BEGIN { FS = ":.*## "; } \
+		/^[A-Za-z0-9_.-]+:.*## / { \
+			printf "  %-24s %s\n", $$1, $$2; \
+		}' $(MAKEFILE_LIST)
 
-pr: pr-check
-	@if [ "$(OPEN_PR)" = "1" ]; then \
-		PR_BASE="$(PR_BASE)" PR_REMEDIATE="$(PR_REMEDIATE)" \
-			bash "$(GOV_ROOT)/ops/scripts/open_pr_after_gate.sh" "$(PWD)"; \
-	else \
-		echo "OPEN_PR=0 — skipped GitHub PR open (gate already PASS)"; \
-	fi
+# Portable make-v1 ABI. Each phase is exactly one repository-owned leaf.
+setup: repo-setup ## Establish repository dependencies
+validate: repo-validate ## Run repository validation
+check: repo-check ## Run repository static and quality checks
+test: repo-test ## Run repository tests
