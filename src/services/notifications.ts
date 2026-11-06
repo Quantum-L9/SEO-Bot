@@ -12,7 +12,7 @@
  */
 
 import axios from "axios";
-import nodemailer from "nodemailer";
+import nodemailer, { type Transporter } from "nodemailer";
 import { getConfig } from "../core/config.js";
 import { createModuleLogger } from "../core/logger.js";
 
@@ -30,7 +30,7 @@ interface Alert {
 }
 
 export class NotificationService {
-  private readonly transporter: nodemailer.Transporter | null = null;
+  private readonly transporter: Transporter | null = null;
 
   constructor() {
     const config = getConfig();
