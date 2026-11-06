@@ -40,6 +40,27 @@ const logger = createModuleLogger("api");
 const INBOUND_REQUEST_TIMEOUT_MS = 300_000;
 
 /**
+ * The HTTP status carried by a thrown value, if any. Fastify and its plugins
+ * attach a numeric `statusCode` to the errors they raise (validation, body
+ * parsing, …); anything else has no status of its own.
+ */
+function errorStatusCode(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null || !("statusCode" in error)) return undefined;
+  const { statusCode } = error;
+  return typeof statusCode === "number" ? statusCode : undefined;
+}
+
+/** The message of a thrown value: an Error's, an error-like object's, else its string form. */
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const { message } = error;
+    if (typeof message === "string") return message;
+  }
+  return String(error);
+}
+
+/**
  * Build the fully-configured Fastify instance WITHOUT binding a port. Extracted
  * from startApiServer so the routes (security, projections, manual trigger) are
  * injectable in tests via `app.inject` — behavior is identical to the listening
@@ -60,8 +81,9 @@ export async function buildApiServer(): Promise<FastifyInstance> {
   // unauthenticated ones on /api/clients/register, hold an incomplete request
   // body open forever. Keep a finite inbound deadline. Long generation is
   // bounded per endpoint by the handler itself and by client timeouts.
-  // The Fastify factory option is not honored by the installed fastify 4.x,
-  // so set it on the underlying Node http.Server directly.
+  // Fastify defaults its own `requestTimeout` option to 0 (disabled) and copies
+  // it onto the Node http.Server, so set the finite value on that server
+  // directly — the one place it takes effect whatever the factory default.
   app.server.requestTimeout = INBOUND_REQUEST_TIMEOUT_MS;
 
   await app.register(helmet);
@@ -82,11 +104,15 @@ export async function buildApiServer(): Promise<FastifyInstance> {
   // Rate limiting + operator authentication, before any route.
   registerApiSecurity(app);
 
+  // Fastify 5 types the handler's `error` as `unknown` (a route may throw any
+  // value), so narrow it instead of assuming a FastifyError.
   app.setErrorHandler((error, request, reply) => {
     logger.error({ err: error, url: request.url, method: request.method }, "API route error");
-    const status = error.statusCode ?? 500;
+    const status = errorStatusCode(error) ?? 500;
     // Don't leak internal error detail on 5xx; 4xx messages are safe (validation, etc.).
-    reply.status(status).send({ error: status < 500 ? error.message : "Internal Server Error" });
+    reply
+      .status(status)
+      .send({ error: status < 500 ? errorMessage(error) : "Internal Server Error" });
   });
 
   await registerDashboard(app);
