@@ -81,6 +81,52 @@ export class SeoContentBlueprintBatchInvalidError extends Error {
   }
 }
 
+/**
+ * The prefix `parseJsonFromLlm` gives a reply that is not JSON at all. Such a
+ * reply was received and rejected before the validator ran, so it is a
+ * validation failure, not a transport one.
+ */
+const NON_JSON_REPLY_PREFIX = "LLM did not return valid JSON";
+
+/**
+ * Message for a batch that failed. Three cases, told apart by evidence rather
+ * than guessed from wording:
+ *
+ * - the final error IS the validator's rejection (or a non-JSON reply): a reply
+ *   arrived and failed validation after the bounded repair — the historical
+ *   text, kept verbatim so anything that matches it still does;
+ * - the validator rejected an earlier reply but the final error is something
+ *   else: the bounded repair CALL failed (timeout, provider fallbacks);
+ * - the validator never ran and the reply was not non-JSON: the call itself
+ *   failed before any reply could be validated.
+ *
+ * Only the thrown error's own message is echoed, as before — no model output
+ * is added here.
+ */
+export function describeBatchFailure(
+  batchNumber: number,
+  error: unknown,
+  lastValidationError: unknown,
+): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const validationFailure =
+    (lastValidationError !== undefined && error === lastValidationError) ||
+    message.startsWith(NON_JSON_REPLY_PREFIX);
+  if (validationFailure) {
+    return `Batch ${batchNumber} failed validation after its bounded repair: ${message}`;
+  }
+  if (lastValidationError !== undefined) {
+    return (
+      `Batch ${batchNumber} LLM call failed during its bounded repair ` +
+      `(transport failure, not a validation failure): ${message}`
+    );
+  }
+  return (
+    `Batch ${batchNumber} LLM call failed before any reply was validated ` +
+    `(transport failure, not a validation failure): ${message}`
+  );
+}
+
 function normalizeQuery(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
@@ -316,6 +362,9 @@ export async function createSEOContentBlueprintWithEvidence(
     // Sized from THIS batch's route count, before any call: the output cap is
     // per-route budget × routes, never a flat number a full batch outgrows.
     const batchOutputTokens = seoBlueprintBatchOutputTokens(batch.length);
+    // The validator's own rejections, observed so a failed batch can be told
+    // apart from a failed call (see describeBatchFailure).
+    const batchValidation: { lastError: unknown } = { lastError: undefined };
     try {
       batchRoutes = await llm.strategizeJson<SEOContentBlueprintRoute[]>({
         clientId: request.client_id,
@@ -405,7 +454,14 @@ export async function createSEOContentBlueprintWithEvidence(
           null,
           2,
         ),
-        validate: (value) => reconcileBatch(value, batch, allRouteIds, intentById),
+        validate: (value) => {
+          try {
+            return reconcileBatch(value, batch, allRouteIds, intentById);
+          } catch (validationError) {
+            batchValidation.lastError = validationError;
+            throw validationError;
+          }
+        },
         recorder: deps.recorder,
       });
     } catch (error) {
@@ -413,11 +469,12 @@ export async function createSEOContentBlueprintWithEvidence(
       // this batch's purpose and its output cap) — never relabelled as a
       // validation failure, and it spent no repair.
       if (error instanceof LlmOutputTruncatedError) throw error;
-      // A batch that fails its one bounded repair fails the whole artifact.
+      // A batch that fails its one bounded repair fails the whole artifact —
+      // but the message says WHY: a reply that failed validation is not the
+      // same failure as a call that never produced a reply (timeout, every
+      // provider fallback failed).
       throw new SeoContentBlueprintBatchInvalidError(
-        `Batch ${batchIndex + 1} failed validation after its bounded repair: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        describeBatchFailure(batchIndex + 1, error, batchValidation.lastError),
       );
     }
     for (const route of batchRoutes) {

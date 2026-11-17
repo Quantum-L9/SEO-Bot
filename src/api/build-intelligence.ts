@@ -81,6 +81,8 @@ import {
   StructuredContentShapeError,
 } from "../build-intelligence/structured-content.js";
 import { createModuleLogger } from "../core/logger.js";
+import { LlmOutputBudgetExceededError } from "../services/improve-llm-policy.js";
+import { LlmOutputTruncatedError } from "../services/llm-parse.js";
 import { LlmRunRecorder } from "../services/llm-run-recorder.js";
 
 // Static version reads for the preflight readiness metadata. Loaded once at
@@ -584,6 +586,17 @@ function handleProducerError(reply: FastifyReply, error: unknown): FastifyReply 
   // Provider reached, individual task failed, or its payload is unusable.
   if (error instanceof DataForSeoTaskError || error instanceof SerpEvidenceInvalidError) {
     return reply.status(502).send({ error: error.code, message: error.message });
+  }
+  // The upstream model stopped at its output cap: the reply is unusable, so
+  // this is a bad upstream response, not a server fault. The message carries
+  // measurements only (operation, purpose, cap, finish reason) — never output.
+  if (error instanceof LlmOutputTruncatedError) {
+    return reply.status(502).send({ error: error.code, message: error.message });
+  }
+  // The request needs more output than the governed ceiling allows. Raised
+  // before any LLM call; the request as sized cannot be served.
+  if (error instanceof LlmOutputBudgetExceededError) {
+    return reply.status(422).send({ error: error.code, message: error.message });
   }
   if (error instanceof CompetitiveEvidenceIncompleteError) {
     return reply

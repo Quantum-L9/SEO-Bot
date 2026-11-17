@@ -131,6 +131,8 @@ import {
   DataForSeoUnavailableError,
   SerpEvidenceInvalidError,
 } from "../../src/services/dataforseo.js";
+import { LlmOutputBudgetExceededError } from "../../src/services/improve-llm-policy.js";
+import { LlmOutputTruncatedError } from "../../src/services/llm-parse.js";
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
@@ -240,6 +242,41 @@ describe("build-intelligence — producer failure never becomes a fake success",
     const res = await postWith(new SerpEvidenceInvalidError("no usable rank"));
     expect(res.statusCode).toBe(502);
     expect(res.json().error).toBe("SERP_EVIDENCE_INVALID");
+  });
+
+  it("maps a truncated LLM reply to 502 LLM_OUTPUT_TRUNCATED, not 500, with measurements only", async () => {
+    const res = await postWith(
+      new LlmOutputTruncatedError({
+        operation: "SEO_CONTENT_BLUEPRINT",
+        purpose: "[build-intelligence] seo-content-blueprint:batch-1:build-1",
+        attempt: "initial",
+        maxOutputTokens: 14_500,
+        outputTokens: 14_500,
+        finishReason: "length",
+        responseLength: 65_000,
+      }),
+    );
+    expect(res.statusCode).toBe(502);
+    const body = res.json();
+    expect(body.error).toBe("LLM_OUTPUT_TRUNCATED");
+    // No model output is echoed: the body is the code plus the measured message.
+    expect(Object.keys(body).sort()).toEqual(["error", "message"]);
+    expect(body.message).toContain("14500-token output cap");
+  });
+
+  it("maps an over-ceiling output budget to 422 LLM_OUTPUT_BUDGET_EXCEEDED, not 500", async () => {
+    const res = await postWith(
+      new LlmOutputBudgetExceededError(
+        "SEO_CONTENT_BLUEPRINT",
+        40_000,
+        32_000,
+        "batch of 11 routes",
+      ),
+    );
+    expect(res.statusCode).toBe(422);
+    const body = res.json();
+    expect(body.error).toBe("LLM_OUTPUT_BUDGET_EXCEEDED");
+    expect(Object.keys(body).sort()).toEqual(["error", "message"]);
   });
 
   it("maps an incomplete donor cohort to 422 with no artifact body", async () => {
