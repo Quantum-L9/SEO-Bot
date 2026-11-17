@@ -64,7 +64,7 @@ export function getDowngradedModel(original, provider, maxTier) {
     }
     if (maxTier === "fast")
         return GeneralModel.GPT4O_MINI;
-    return [GeneralModel.CLAUDE_OPUS, GeneralModel.O1, GeneralModel.O3].includes(original)
+    return [GeneralModel.CLAUDE_OPUS, GeneralModel.GEMINI_ARGON].includes(original)
         ? GeneralModel.CLAUDE_SONNET
         : original;
 }

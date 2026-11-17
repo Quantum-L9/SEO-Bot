@@ -14,21 +14,30 @@ export declare enum SonarModel {
 }
 /**
  * The canonical table of OpenRouter model ids: each value is the id sent on the wire.
- * The `*_VISION` members are aliases retained for 1.x source compatibility.
+ * The `*_VISION` members and the deprecated `O1` / `O3` members are aliases retained
+ * for 1.x source compatibility.
  */
 export declare enum GeneralModel {
     CLAUDE_HAIKU = "anthropic/claude-haiku-4.5",
     CLAUDE_OPUS = "anthropic/claude-opus-4.6",
     CLAUDE_SONNET = "anthropic/claude-sonnet-4.6",
     CLAUDE_SONNET_VISION = "anthropic/claude-sonnet-4.6",
+    /**
+     * The CRITICAL reasoning tier. Successor to the OpenAI o-series: `openai/o1` is
+     * delisted and `openai/o3` expires on OpenRouter 2026-12-11. No live OpenAI
+     * frontier reasoning model accepts `temperature`, which the router always sends.
+     */
+    GEMINI_ARGON = "google/gemini-4-argon",
     GEMINI_FLASH = "google/gemini-2.5-flash",
     GEMINI_FLASH_VISION = "google/gemini-2.5-flash",
     GEMINI_PRO = "google/gemini-2.5-pro",
     GPT4O = "openai/gpt-4o",
     GPT4O_MINI = "openai/gpt-4o-mini",
     GPT4O_VISION = "openai/gpt-4o",
-    O1 = "openai/o1",
-    O3 = "openai/o3"
+    /** @deprecated Retired o-series id (`openai/o1` is delisted); alias of `GEMINI_ARGON`. */
+    O1 = "google/gemini-4-argon",
+    /** @deprecated Retired o-series id (`openai/o3` expires 2026-12-11); alias of `GEMINI_ARGON`. */
+    O3 = "google/gemini-4-argon"
 }
 /**
  * Why a routing decision required (or did not require) a search provider.

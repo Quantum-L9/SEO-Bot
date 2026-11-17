@@ -16,7 +16,8 @@ export var SonarModel;
 })(SonarModel || (SonarModel = {}));
 /**
  * The canonical table of OpenRouter model ids: each value is the id sent on the wire.
- * The `*_VISION` members are aliases retained for 1.x source compatibility.
+ * The `*_VISION` members and the deprecated `O1` / `O3` members are aliases retained
+ * for 1.x source compatibility.
  */
 export var GeneralModel;
 (function (GeneralModel) {
@@ -25,6 +26,12 @@ export var GeneralModel;
     GeneralModel["CLAUDE_SONNET"] = "anthropic/claude-sonnet-4.6";
     // eslint-disable-next-line @typescript-eslint/no-duplicate-enum-values
     GeneralModel["CLAUDE_SONNET_VISION"] = "anthropic/claude-sonnet-4.6";
+    /**
+     * The CRITICAL reasoning tier. Successor to the OpenAI o-series: `openai/o1` is
+     * delisted and `openai/o3` expires on OpenRouter 2026-12-11. No live OpenAI
+     * frontier reasoning model accepts `temperature`, which the router always sends.
+     */
+    GeneralModel["GEMINI_ARGON"] = "google/gemini-4-argon";
     GeneralModel["GEMINI_FLASH"] = "google/gemini-2.5-flash";
     // eslint-disable-next-line @typescript-eslint/no-duplicate-enum-values
     GeneralModel["GEMINI_FLASH_VISION"] = "google/gemini-2.5-flash";
@@ -33,8 +40,12 @@ export var GeneralModel;
     GeneralModel["GPT4O_MINI"] = "openai/gpt-4o-mini";
     // eslint-disable-next-line @typescript-eslint/no-duplicate-enum-values
     GeneralModel["GPT4O_VISION"] = "openai/gpt-4o";
-    GeneralModel["O1"] = "openai/o1";
-    GeneralModel["O3"] = "openai/o3";
+    /** @deprecated Retired o-series id (`openai/o1` is delisted); alias of `GEMINI_ARGON`. */
+    // eslint-disable-next-line @typescript-eslint/no-duplicate-enum-values
+    GeneralModel["O1"] = "google/gemini-4-argon";
+    /** @deprecated Retired o-series id (`openai/o3` expires 2026-12-11); alias of `GEMINI_ARGON`. */
+    // eslint-disable-next-line @typescript-eslint/no-duplicate-enum-values
+    GeneralModel["O3"] = "google/gemini-4-argon";
 })(GeneralModel || (GeneralModel = {}));
 /**
  * Why a routing decision required (or did not require) a search provider.

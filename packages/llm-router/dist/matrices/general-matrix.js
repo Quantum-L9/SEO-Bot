@@ -41,7 +41,10 @@ const MAP = {
         [TaskComplexity.LOW]: { model: GeneralModel.GPT4O, reason: "Basic strategy" },
         [TaskComplexity.MEDIUM]: { model: GeneralModel.CLAUDE_SONNET, reason: "Multi-factor strategy" },
         [TaskComplexity.HIGH]: { model: GeneralModel.CLAUDE_SONNET, reason: "Complex strategy" },
-        [TaskComplexity.CRITICAL]: { model: GeneralModel.O3, reason: "Critical multi-step reasoning" },
+        [TaskComplexity.CRITICAL]: {
+            model: GeneralModel.GEMINI_ARGON,
+            reason: "Critical multi-step reasoning",
+        },
     },
     [TaskType.CODE_GENERATION]: {
         [TaskComplexity.TRIVIAL]: FAST,
@@ -51,7 +54,7 @@ const MAP = {
             model: GeneralModel.CLAUDE_SONNET,
             reason: "Architecture-sensitive code",
         },
-        [TaskComplexity.CRITICAL]: { model: GeneralModel.O3, reason: "Critical logic" },
+        [TaskComplexity.CRITICAL]: { model: GeneralModel.GEMINI_ARGON, reason: "Critical logic" },
     },
     [TaskType.COMPETITOR_RESEARCH]: {},
     [TaskType.CITATION_CHECK]: {},
@@ -62,14 +65,14 @@ const MAP = {
     [TaskType.SCREENSHOT_ANALYSIS]: {},
     [TaskType.LAYOUT_VALIDATION]: {},
 };
+/** Ordered fallbacks per primary. No chain may contain its own primary. */
 const FALLBACKS = {
     [GeneralModel.GPT4O_MINI]: [GeneralModel.GEMINI_FLASH, GeneralModel.CLAUDE_HAIKU],
     [GeneralModel.CLAUDE_HAIKU]: [GeneralModel.GPT4O_MINI, GeneralModel.GEMINI_FLASH],
     [GeneralModel.GPT4O]: [GeneralModel.CLAUDE_SONNET, GeneralModel.GEMINI_PRO],
     [GeneralModel.CLAUDE_SONNET]: [GeneralModel.GPT4O, GeneralModel.GEMINI_PRO],
-    [GeneralModel.CLAUDE_OPUS]: [GeneralModel.O3, GeneralModel.CLAUDE_SONNET],
-    [GeneralModel.O1]: [GeneralModel.O3, GeneralModel.CLAUDE_SONNET],
-    [GeneralModel.O3]: [GeneralModel.O1, GeneralModel.CLAUDE_OPUS],
+    [GeneralModel.CLAUDE_OPUS]: [GeneralModel.GEMINI_ARGON, GeneralModel.CLAUDE_SONNET],
+    [GeneralModel.GEMINI_ARGON]: [GeneralModel.CLAUDE_OPUS, GeneralModel.GEMINI_PRO],
 };
 export function estimateGeneralCost(model, maxTokens) {
     return Math.round(((maxTokens * 2.5) / 1000) * ratePer1KOutput(model) * 100000) / 100000;
