@@ -11,9 +11,11 @@ import {
   buildSeoBotRegistrationAck,
   type WebsiteFactoryHandoffV3,
 } from "@quantum-l9/bot-interop";
+import { sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { getDb, schema } from "../../core/database/index.js";
 import { createModuleLogger } from "../../core/logger.js";
+import { getScheduler } from "../../core/scheduler.js";
 import { getLlmService } from "../../services/llm.js";
 import {
   type MaintenanceReadinessDeps,
@@ -21,9 +23,24 @@ import {
   type MaintenanceReadinessResult,
   verifyMaintenanceReadiness,
 } from "../../services/maintenance-readiness.js";
+import { type EnqueueMonitoringJob, enrollClientMonitoring } from "./monitoring-enrollment.js";
 
 const logger = createModuleLogger("api:register");
-export type RegisterClientRouteDeps = MaintenanceReadinessDeps;
+export type RegisterClientRouteDeps = MaintenanceReadinessDeps & {
+  /** Queue a baseline monitoring run. Defaults to the BullMQ scheduler. */
+  enqueueJob?: EnqueueMonitoringJob;
+};
+
+const defaultEnqueue: EnqueueMonitoringJob = (jobName, data, opts) =>
+  getScheduler().addJob(jobName, data, opts);
+
+/**
+ * Re-handoff merges, it does not replace. The handoff owns the keys
+ * buildClientConfig writes; operator-set keys (`ownerEmail`, `aeoQueries`, …)
+ * must survive a Website-Bot redeploy of the same site. JSONB `||` keeps the
+ * existing object and lets the incoming top-level keys win.
+ */
+const mergedConfig = () => sql`${schema.clients.config} || excluded.config`;
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -151,7 +168,7 @@ export async function registerClientRoutes(
             industry: contract.client.industry,
             city: contract.client.city ?? null,
             state: contract.client.state ?? null,
-            config,
+            config: mergedConfig(),
             active: false,
             updatedAt: new Date(),
           },
@@ -189,7 +206,7 @@ export async function registerClientRoutes(
           industry: contract.client.industry,
           city: contract.client.city ?? null,
           state: contract.client.state ?? null,
-          config,
+          config: mergedConfig(),
           active: true,
           updatedAt: new Date(),
         },
@@ -206,6 +223,23 @@ export async function registerClientRoutes(
       );
     }
 
+    // Start monitoring now rather than at each job's next cron slot.
+    const enrollment = await enrollClientMonitoring(
+      {
+        clientId: client.id,
+        clientDomain: domain,
+        clientConfig: (client.config as Record<string, unknown> | undefined) ?? config,
+        contractDigest: contract.integrity.payload_digest,
+      },
+      deps.enqueueJob ?? defaultEnqueue,
+    );
+    if (enrollment.failed.length > 0) {
+      logger.warn(
+        { clientId: client.id, failed: enrollment.failed },
+        "Baseline monitoring enqueue failed; cron fan-out still covers the active client",
+      );
+    }
+
     const ack = buildSeoBotRegistrationAck(
       contract,
       readiness.probes
@@ -219,6 +253,7 @@ export async function registerClientRoutes(
         canonicalClientId: contract.client.id,
         domain,
         commit: readiness.verifiedCommitSha,
+        baselineJobsQueued: enrollment.queued.map((item) => item.job),
       },
       "Client registered with verified maintenance readiness",
     );

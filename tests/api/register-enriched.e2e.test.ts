@@ -106,6 +106,7 @@ async function build(fetchImpl: typeof fetch) {
     fetchImpl,
     env: { SEO_BOT_API_KEY: KEY, CLIENT_GITHUB_TOKEN: "token" } as NodeJS.ProcessEnv,
     now: () => new Date("2026-07-20T12:01:00.000Z"),
+    enqueueJob: async () => {},
   });
   await app.ready();
 }
