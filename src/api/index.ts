@@ -28,6 +28,7 @@ import { projectClientForApi } from "./client-projection.js";
 import { registerClientRoutes } from "./clients/register.js";
 import { registerDashboard } from "./dashboard.js";
 import { registerReportingRoutes } from "./reporting.js";
+import { registerOutcomeReportRoutes } from "./reports/outcome.js";
 import { registerApiSecurity } from "./security.js";
 
 const logger = createModuleLogger("api");
@@ -119,6 +120,7 @@ export async function buildApiServer(): Promise<FastifyInstance> {
   await registerClientRoutes(app);
   await registerBuildIntelligenceRoutes(app);
   await registerReportingRoutes(app);
+  await registerOutcomeReportRoutes(app);
 
   app.get("/health", async () => {
     const db = getDb();

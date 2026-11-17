@@ -17,6 +17,7 @@ import { registerBehaviorHandlers } from "./modules/behavior-intelligence/index.
 import { registerLinkHandlers } from "./modules/link-building/index.js";
 import { registerSerpHandlers } from "./modules/serp-intelligence/index.js";
 import { registerVitalsHandlers } from "./modules/web-vitals/index.js";
+import { registerOutcomeReportHandlers } from "./reporting/outcome-report-job.js";
 import { getLlmService } from "./services/llm.js";
 import { registerMemoryHandlers } from "./services/memory.js";
 import { registerPlanExecutorHandlers } from "./services/plan-executor.js";
@@ -56,6 +57,7 @@ async function main() {
   registerPlanExecutorHandlers(scheduler);
   registerMemoryHandlers(scheduler);
   registerIntelligenceHandlers(scheduler);
+  registerOutcomeReportHandlers(scheduler);
   await scheduler.start();
   logger.info("All modules registered and scheduler started");
 
