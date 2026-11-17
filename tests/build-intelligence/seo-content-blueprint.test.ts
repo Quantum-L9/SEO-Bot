@@ -18,6 +18,7 @@ import {
   chunkRoutes,
   createSEOContentBlueprint,
   createSEOContentBlueprintWithEvidence,
+  describeBatchFailure,
   type PageContentPort,
   SEO_BLUEPRINT_BATCH_SIZE,
 } from "../../src/build-intelligence/seo-content-blueprint.js";
@@ -784,6 +785,81 @@ describe("SEOContentBlueprint — full-site batching (two-phase)", () => {
     expect(batchCalls).toBe(1);
   });
 
+  /**
+   * Run 5 routes (two batches) with phase A real and batch 1 driven by
+   * `batchOne`, which receives the batch's own validator.
+   */
+  async function failBatchOne(
+    batchOne: (args: Parameters<LlmService["strategizeJson"]>[0]) => unknown,
+  ): Promise<unknown> {
+    const routes = routesFor(5);
+    const { llm: inner } = fakeLlm(modelRoutesFor(5));
+    const llm = {
+      strategizeJson: async (args: Parameters<LlmService["strategizeJson"]>[0]) => {
+        const prompt = JSON.parse(args.userPrompt) as { task?: string };
+        if (prompt.task === "global_route_intent_plan") return inner.strategizeJson(args);
+        return batchOne(args);
+      },
+    } as unknown as LlmService;
+    return createSEOContentBlueprint(
+      {
+        client_id: "client-1",
+        build_id: "build-1",
+        competitive_landscape: makeLandscape(),
+        routes,
+        business_facts: [],
+      },
+      { llm, dataForSeo: fakePages },
+    ).catch((caught: unknown) => caught);
+  }
+
+  it("labels a reply that failed validation as a validation failure (historical text kept)", async () => {
+    const error = await failBatchOne((args) => args.validate({ routes: [] }));
+    expect(error).toMatchObject({ code: "SEO_CONTENT_BLUEPRINT_BATCH_INVALID" });
+    expect((error as Error).message).toMatch(
+      /^Batch 1 failed validation after its bounded repair: /,
+    );
+    expect((error as Error).message).not.toContain("transport");
+  });
+
+  it("labels a non-JSON reply as a validation failure", async () => {
+    const error = await failBatchOne(() => {
+      throw new Error("LLM did not return valid JSON (response length=12)");
+    });
+    expect((error as Error).message).toMatch(
+      /^Batch 1 failed validation after its bounded repair: LLM did not return valid JSON/,
+    );
+  });
+
+  it("labels a call that never produced a reply as a transport failure, not validation", async () => {
+    const error = await failBatchOne(() => {
+      throw new Error("All OpenRouter fallback attempts failed");
+    });
+    expect(error).toMatchObject({ code: "SEO_CONTENT_BLUEPRINT_BATCH_INVALID" });
+    const message = (error as Error).message;
+    expect(message).toBe(
+      "Batch 1 LLM call failed before any reply was validated " +
+        "(transport failure, not a validation failure): All OpenRouter fallback attempts failed",
+    );
+    expect(message).not.toContain("failed validation after its bounded repair");
+  });
+
+  it("labels a repair call that timed out after a rejected reply as a transport failure during repair", async () => {
+    const error = await failBatchOne((args) => {
+      // Initial reply rejected by the validator, then the repair call times out.
+      try {
+        args.validate({ routes: [] });
+      } catch {
+        // swallowed exactly as LlmService does before issuing its repair call
+      }
+      throw new Error("The operation was aborted due to timeout");
+    });
+    expect((error as Error).message).toBe(
+      "Batch 1 LLM call failed during its bounded repair " +
+        "(transport failure, not a validation failure): The operation was aborted due to timeout",
+    );
+  });
+
   it("never seals a partial route set", async () => {
     const routes = routesFor(29);
     const model = modelRoutesFor(29);
@@ -792,6 +868,26 @@ describe("SEOContentBlueprint — full-site batching (two-phase)", () => {
     await expect(build(routes, model)).rejects.toMatchObject({
       code: "SEO_CONTENT_BLUEPRINT_BATCH_INVALID",
     });
+  });
+});
+
+describe("describeBatchFailure", () => {
+  it("is a validation failure only when the final error is the validator's own rejection", () => {
+    const rejection = new Error("route-5 missing");
+    expect(describeBatchFailure(2, rejection, rejection)).toBe(
+      "Batch 2 failed validation after its bounded repair: route-5 missing",
+    );
+    // A different error with the same text is not the validator's rejection.
+    expect(describeBatchFailure(2, new Error("route-5 missing"), rejection)).toContain(
+      "failed during its bounded repair",
+    );
+  });
+
+  it("treats a non-Error throw as a transport failure with its string form", () => {
+    expect(describeBatchFailure(3, "socket hang up", undefined)).toBe(
+      "Batch 3 LLM call failed before any reply was validated " +
+        "(transport failure, not a validation failure): socket hang up",
+    );
   });
 });
 
