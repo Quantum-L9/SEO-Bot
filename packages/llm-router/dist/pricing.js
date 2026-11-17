@@ -1,14 +1,14 @@
 import { GeneralModel } from "./types.js";
+/** USD per 1M tokens, from https://openrouter.ai/api/v1/models (verified 2026-11-17). */
 export const MODEL_RATES_PER_1M = {
     [GeneralModel.GPT4O_MINI]: { input: 0.15, output: 0.6 },
-    [GeneralModel.GEMINI_FLASH]: { input: 0.15, output: 0.6 },
-    [GeneralModel.CLAUDE_HAIKU]: { input: 0.8, output: 4 },
+    [GeneralModel.GEMINI_FLASH]: { input: 0.3, output: 2.5 },
+    [GeneralModel.CLAUDE_HAIKU]: { input: 1, output: 5 },
     [GeneralModel.GPT4O]: { input: 2.5, output: 10 },
     [GeneralModel.CLAUDE_SONNET]: { input: 3, output: 15 },
     [GeneralModel.GEMINI_PRO]: { input: 1.25, output: 10 },
     [GeneralModel.CLAUDE_OPUS]: { input: 5, output: 25 },
-    [GeneralModel.O1]: { input: 15, output: 60 },
-    [GeneralModel.O3]: { input: 15, output: 60 },
+    [GeneralModel.GEMINI_ARGON]: { input: 2, output: 10 },
 };
 export function ratePer1KOutput(model) {
     return MODEL_RATES_PER_1M[model].output / 1000;
