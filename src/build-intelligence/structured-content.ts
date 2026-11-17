@@ -36,6 +36,7 @@ import {
 } from "@quantum-l9/bot-interop";
 import { createModuleLogger } from "../core/logger.js";
 import { getLlmService, type LlmCallCounter, type LlmService } from "../services/llm.js";
+import { LlmOutputTruncatedError } from "../services/llm-parse.js";
 import type { LlmRunRecorder } from "../services/llm-run-recorder.js";
 import {
   buildFactCorpus,
@@ -350,7 +351,7 @@ async function produceRoute(args: {
     // A provider/transport/budget/circuit failure is not a content-shape
     // failure: it must surface as itself (typed, at the real boundary), and
     // the route's one bounded repair is never spent on it (L2-S6-001).
-    if (isLlmTransportFailure(error)) throw error;
+    if (isTerminalLlmFailure(error)) throw error;
     schemaFailures = schemaFailureDetails(error);
     schemaFailureCount += 1;
     logger.warn(
@@ -411,7 +412,7 @@ async function produceRoute(args: {
       recorder,
     );
   } catch (error) {
-    if (isLlmTransportFailure(error)) throw error;
+    if (isTerminalLlmFailure(error)) throw error;
     const repairFailures = schemaFailureDetails(error);
     if (repairFailures.length > 0) {
       // A repair that still violates the strict output SHAPE is terminal with
@@ -650,6 +651,15 @@ const LLM_TRANSPORT_FAILURE_NAMES = new Set([
 ]);
 function isLlmTransportFailure(error: unknown): boolean {
   return error instanceof Error && LLM_TRANSPORT_FAILURE_NAMES.has(error.name);
+}
+
+/**
+ * A generation reply cut at its output cap is incomplete, not wrong: the
+ * route's one bounded repair is never spent on it (a repair under the same cap
+ * would be cut the same way), and it surfaces as its own typed error.
+ */
+function isTerminalLlmFailure(error: unknown): boolean {
+  return isLlmTransportFailure(error) || error instanceof LlmOutputTruncatedError;
 }
 
 /**
