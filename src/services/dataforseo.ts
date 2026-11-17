@@ -102,6 +102,24 @@ const RETRY_AFTER_CAP_MS = 2000;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Task-level statuses that report a transient condition on the search
+ * engine's side, not a defect in the request. 40101 "Internal SE Server
+ * Error" is documented as "the requested search engine was unable to process
+ * your request and responded with an error"
+ * (https://docs.dataforseo.com/v3/appendix/errors/). Every other task status
+ * (invalid field, empty result, ...) is deterministic and never retried.
+ */
+const RETRYABLE_TASK_STATUS = new Set([40101]);
+/** One initial live SERP task plus at most two re-submissions of the same task. */
+const MAX_TASK_ATTEMPTS = 3;
+/** Backoff before re-submitting a task the search engine failed. */
+export const TASK_RETRY_DELAY_MS = 2000;
+
+export function isRetryableTaskStatus(status: number | undefined): boolean {
+  return status !== undefined && RETRYABLE_TASK_STATUS.has(status);
+}
+
 /** Per-attempt telemetry; never contains credentials or auth headers. */
 export interface DataForSeoAttemptRecord {
   endpoint: string;
@@ -180,7 +198,7 @@ export class DataForSeoClient {
   private readonly timeoutMs: number;
   private readonly attemptLog: DataForSeoAttemptRecord[] = [];
 
-  constructor() {
+  constructor(private readonly pause: (ms: number) => Promise<void> = sleep) {
     const config = getConfig();
     this.auth = Buffer.from(`${config.DATAFORSEO_LOGIN}:${config.DATAFORSEO_PASSWORD}`).toString(
       "base64",
@@ -256,10 +274,42 @@ export class DataForSeoClient {
           }
           throw error;
         }
-        await sleep(retryAfterDelayMs(error));
+        await this.pause(retryAfterDelayMs(error));
       }
     }
     throw new DataForSeoUnavailableError(`DataForSEO request to ${endpoint} exhausted retries`);
+  }
+
+  /**
+   * Submit one live organic SERP task. Task-level errors (e.g. invalid
+   * location_name) return `result: null` under a top-level 20000; they fail
+   * instead of silently producing zero organic items, because a real provider
+   * error must not masquerade as "no results". A search-engine-side error
+   * (RETRYABLE_TASK_STATUS) is re-submitted with a short backoff, a bounded
+   * number of times, and still fails closed when it persists. The query is
+   * named in every task error so a failing portfolio query is diagnosable.
+   */
+  private async organicSerpTask(
+    keyword: string,
+    task: Record<string, unknown>,
+  ): Promise<DataForSeoTaskContainer | undefined> {
+    const endpoint = "/serp/google/organic/live/advanced";
+    for (let attempt = 1; ; attempt++) {
+      const result = await this.request(endpoint, [task]);
+      const container = result.tasks?.[0];
+      const status = container?.status_code;
+      if (status === undefined || status === 20000) return container;
+      const retry = isRetryableTaskStatus(status) && attempt < MAX_TASK_ATTEMPTS;
+      // The HTTP call itself succeeded; record the task outcome on its entry.
+      const last = this.attemptLog.at(-1);
+      if (last) Object.assign(last, { status: `task ${status}`, retry });
+      if (!retry) {
+        throw new DataForSeoTaskError(
+          `DataForSEO task error for "${keyword}": ${container?.status_message ?? "unknown"} (status ${status}${attempt > 1 ? `, after ${attempt} attempts` : ""})`,
+        );
+      }
+      await this.pause(TASK_RETRY_DELAY_MS);
+    }
   }
 
   /**
@@ -277,28 +327,16 @@ export class DataForSeoClient {
     const locationName = params.locationName ?? "United States";
     const languageName = params.languageName ?? "English";
     const device = params.device ?? "desktop";
-    const result = await this.request("/serp/google/organic/live/advanced", [
-      {
-        keyword: params.keyword,
-        location_name: locationName,
-        language_name: languageName,
-        device,
-        depth: params.depth ?? 20,
-      },
-    ]);
-
-    // Task-level errors (e.g. invalid location_name) return `result: null` with a
-    // top-level 20000. Treat them as failures instead of silently producing zero
-    // organic items — a real provider error must not masquerade as "no results".
-    const taskContainer = result.tasks?.[0];
-    if (taskContainer?.status_code !== undefined && taskContainer.status_code !== 20000) {
-      throw new DataForSeoTaskError(
-        `DataForSEO task error: ${taskContainer.status_message ?? "unknown"} (status ${taskContainer.status_code})`,
-      );
-    }
+    const taskContainer = await this.organicSerpTask(params.keyword, {
+      keyword: params.keyword,
+      location_name: locationName,
+      language_name: languageName,
+      device,
+      depth: params.depth ?? 20,
+    });
     if (!Array.isArray(taskContainer?.result) || taskContainer.result.length === 0) {
       throw new DataForSeoTaskError(
-        `DataForSEO task error: ${taskContainer?.status_message ?? "no result returned"} (status ${taskContainer?.status_code ?? "unknown"})`,
+        `DataForSEO task error for "${params.keyword}": ${taskContainer?.status_message ?? "no result returned"} (status ${taskContainer?.status_code ?? "unknown"})`,
       );
     }
     const task = taskContainer.result[0];
