@@ -107,10 +107,18 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
  * engine's side, not a defect in the request. 40101 "Internal SE Server
  * Error" is documented as "the requested search engine was unable to process
  * your request and responded with an error"
- * (https://docs.dataforseo.com/v3/appendix/errors/). Every other task status
- * (invalid field, empty result, ...) is deterministic and never retried.
+ * (https://docs.dataforseo.com/v3/appendix/errors/). 40106 is a finished
+ * partial result, not a transient failure: DataForSEO already retried the
+ * pages it could not retrieve and did not charge for them, so another live
+ * submission would spend a call for the same outcome. Every other task
+ * status (invalid field, empty result, ...) is deterministic and never retried.
  */
 const RETRYABLE_TASK_STATUS = new Set([40101]);
+/**
+ * Task finished with a result array after DataForSEO's own page retries.
+ * Accepted only when `result` is present; a missing result still fails closed.
+ */
+const PARTIAL_RESULT_TASK_STATUS = 40106;
 /**
  * Billable HTTP calls one organic SERP query may make, shared by the
  * transport retry and the task re-submission. Without a shared budget each
@@ -301,7 +309,11 @@ export class DataForSeoClient {
    * Submit one live organic SERP task. Task-level errors (e.g. invalid
    * location_name) return `result: null` under a top-level 20000; they fail
    * instead of silently producing zero organic items, because a real provider
-   * error must not masquerade as "no results". A search-engine-side error
+   * error must not masquerade as "no results". Status 40106 is the exception
+   * that still carries evidence: when its `result` array is present, the
+   * organic items are parsed on the same path as status 20000 and the attempt
+   * is recorded as partial. A 40106 task with no result array fails closed
+   * and is not re-submitted. A search-engine-side error
    * (RETRYABLE_TASK_STATUS) is re-submitted with a short backoff, and still
    * fails closed when it persists. Transport retries and re-submissions draw
    * on one MAX_SERP_CALLS_PER_QUERY budget, so a query never makes more than
@@ -319,6 +331,17 @@ export class DataForSeoClient {
       const container = result.tasks?.[0];
       const status = container?.status_code;
       if (status === undefined || status === 20000) return container;
+      if (status === PARTIAL_RESULT_TASK_STATUS && Array.isArray(container?.result)) {
+        // The HTTP call succeeded. Record the partial outcome, then parse the
+        // returned items on the same path as a completed task. Do not retry:
+        // DataForSEO already retried the pages that are missing.
+        const last = this.attemptLog.at(-1);
+        if (last) {
+          last.status = `task ${status} partial`;
+          last.retry = false;
+        }
+        return container;
+      }
       const retry = isRetryableTaskStatus(status) && budget.remaining > 0;
       // The HTTP call itself succeeded; record the task outcome on its entry.
       const last = this.attemptLog.at(-1);
