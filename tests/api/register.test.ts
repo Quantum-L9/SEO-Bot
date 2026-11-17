@@ -112,6 +112,7 @@ beforeEach(async () => {
   await registerClientRoutes(app, {
     fetchImpl: githubFetch(),
     env: { SEO_BOT_API_KEY: KEY, CLIENT_GITHUB_TOKEN: "token" } as NodeJS.ProcessEnv,
+    enqueueJob: async () => {},
   });
   await app.ready();
 });
