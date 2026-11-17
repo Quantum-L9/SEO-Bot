@@ -148,6 +148,22 @@ function stripTrailingSlashes(value) {
         end--;
     return value.slice(0, end);
 }
+/** Map one chat-completion result to the router's response shape. */
+function toLlmResponse(model, response, started) {
+    return {
+        content: response.choices[0]?.message?.content ?? "",
+        model,
+        provider: Provider.OPENROUTER,
+        inputTokens: response.usage?.prompt_tokens ?? 0,
+        outputTokens: response.usage?.completion_tokens ?? 0,
+        totalTokens: response.usage?.total_tokens ?? 0,
+        cost: calculateOpenRouterCost(model, response.usage),
+        latencyMs: Date.now() - started,
+        cached: false,
+        requestId: response._request_id ?? response.id,
+        finishReason: response.choices[0]?.finish_reason ?? undefined,
+    };
+}
 export class OpenRouterClient {
     transport;
     constructor(apiKey, appName = "L9-LLM-Router", timeoutMs = 60_000, transport, baseUrl) {
@@ -178,19 +194,7 @@ export class OpenRouterClient {
                     ? { response_format: { type: "json_object" } }
                     : {}),
             }, { signal });
-            return {
-                content: response.choices[0]?.message?.content ?? "",
-                model: config.model,
-                provider: Provider.OPENROUTER,
-                inputTokens: response.usage?.prompt_tokens ?? 0,
-                outputTokens: response.usage?.completion_tokens ?? 0,
-                totalTokens: response.usage?.total_tokens ?? 0,
-                cost: calculateOpenRouterCost(config.model, response.usage),
-                latencyMs: Date.now() - started,
-                cached: false,
-                requestId: response._request_id ?? response.id,
-                finishReason: response.choices[0]?.finish_reason ?? undefined,
-            };
+            return toLlmResponse(config.model, response, started);
         }
         catch (error) {
             throw classifyProviderError(error, Provider.OPENROUTER);
@@ -218,19 +222,7 @@ export class OpenRouterClient {
                 temperature: 0.2,
                 max_tokens: config.maxTokens,
             }, { signal });
-            return {
-                content: response.choices[0]?.message?.content ?? "",
-                model: config.model,
-                provider: Provider.OPENROUTER,
-                inputTokens: response.usage?.prompt_tokens ?? 0,
-                outputTokens: response.usage?.completion_tokens ?? 0,
-                totalTokens: response.usage?.total_tokens ?? 0,
-                cost: calculateOpenRouterCost(config.model, response.usage),
-                latencyMs: Date.now() - started,
-                cached: false,
-                requestId: response._request_id ?? response.id,
-                finishReason: response.choices[0]?.finish_reason ?? undefined,
-            };
+            return toLlmResponse(config.model, response, started);
         }
         catch (error) {
             throw classifyProviderError(error, Provider.OPENROUTER);
