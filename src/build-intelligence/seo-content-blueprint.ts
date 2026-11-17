@@ -42,7 +42,12 @@ import {
 import { z } from "zod";
 import { createModuleLogger } from "../core/logger.js";
 import { DataForSeoClient } from "../services/dataforseo.js";
+import {
+  seoBlueprintBatchOutputTokens,
+  seoBlueprintGlobalIntentOutputTokens,
+} from "../services/improve-llm-policy.js";
 import { getLlmService, type LlmService } from "../services/llm.js";
+import { LlmOutputTruncatedError } from "../services/llm-parse.js";
 import type { LlmRunRecorder } from "../services/llm-run-recorder.js";
 import { PRODUCER } from "./producer.js";
 import {
@@ -271,6 +276,7 @@ export async function createSEOContentBlueprintWithEvidence(
   // ── PHASE A — global route intent plan (one compact call for ALL routes) ────
   const globalIntentPlan = await llm.strategizeJson<GlobalRouteIntentRoute[]>({
     clientId: request.client_id,
+    expectedOutputTokens: seoBlueprintGlobalIntentOutputTokens(request.routes.length),
     module: "build-intelligence",
     purpose: `seo-content-blueprint:global-intent:${request.build_id}`,
     systemPrompt,
@@ -307,9 +313,13 @@ export async function createSEOContentBlueprintWithEvidence(
   let completedBatches = 0;
   for (const [batchIndex, batch] of batches.entries()) {
     let batchRoutes: SEOContentBlueprintRoute[];
+    // Sized from THIS batch's route count, before any call: the output cap is
+    // per-route budget × routes, never a flat number a full batch outgrows.
+    const batchOutputTokens = seoBlueprintBatchOutputTokens(batch.length);
     try {
       batchRoutes = await llm.strategizeJson<SEOContentBlueprintRoute[]>({
         clientId: request.client_id,
+        expectedOutputTokens: batchOutputTokens,
         module: "build-intelligence",
         purpose: `seo-content-blueprint:batch-${batchIndex + 1}:${request.build_id}`,
         systemPrompt,
@@ -399,6 +409,10 @@ export async function createSEOContentBlueprintWithEvidence(
         recorder: deps.recorder,
       });
     } catch (error) {
+      // A truncated reply is its own typed failure (it names the operation,
+      // this batch's purpose and its output cap) — never relabelled as a
+      // validation failure, and it spent no repair.
+      if (error instanceof LlmOutputTruncatedError) throw error;
       // A batch that fails its one bounded repair fails the whole artifact.
       throw new SeoContentBlueprintBatchInvalidError(
         `Batch ${batchIndex + 1} failed validation after its bounded repair: ${

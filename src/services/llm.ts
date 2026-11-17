@@ -20,7 +20,13 @@ import { getDb, schema } from "../core/database/index.js";
 import { createModuleLogger } from "../core/logger.js";
 import type { ModuleName } from "../types/index.js";
 import { type SeoImproveLlmOperation, seoImproveTask } from "./improve-llm-policy.js";
-import { parseJsonFromLlm, parseScore } from "./llm-parse.js";
+import {
+  isTruncatedFinish,
+  LlmOutputTruncatedError,
+  parseJsonFromLlm,
+  parseScore,
+  type TruncatedAttempt,
+} from "./llm-parse.js";
 import {
   type LlmRunRecorder,
   type OperationAttempt,
@@ -64,6 +70,21 @@ export interface LlmCallCounter {
 const ROUTER_ATTRIBUTION_WINDOW = 50;
 
 /**
+ * Per-attempt provider timeout handed to the router (its default is 60s).
+ *
+ * The output cap and the timeout are one budget: a reply can only reach its
+ * cap if the provider is allowed the time to write it. Evidence from
+ * Website-Bot build qap-e2e-001: 4-route blueprint batches returned ~5,000
+ * tokens (cut at the old cap) inside the 60s timeout, i.e. at >= ~83 tokens/s,
+ * and one attempt hit the timeout outright. The largest governed cap
+ * (SEO_IMPROVE_OUTPUT_TOKEN_CEILING, 16,000 tokens) at a conservative
+ * 67 tokens/s needs ~240s, so the old 60s would turn a now-complete reply into
+ * a timeout. The timeout is an upper bound only — a healthy short call returns
+ * as soon as the provider answers.
+ */
+export const LLM_PROVIDER_TIMEOUT_MS = 240_000;
+
+/**
  * A capability combination the router refuses is raised from route resolution,
  * BEFORE the decision is appended to the call log — so it is invisible to log
  * attribution and must be recognised where it surfaces.
@@ -93,6 +114,7 @@ export class LlmService {
       openrouterApiKey: config.OPENROUTER_API_KEY,
       appName: "L9-SEO-Bot",
       budget,
+      providerTimeoutMs: LLM_PROVIDER_TIMEOUT_MS,
     });
     logger.info("LLM Service initialized; cognitive memory is delegated to l9-graphiti-memory");
   }
@@ -342,6 +364,17 @@ export class LlmService {
    * the one total repair for the route (StructuredContentPackage does this so
    * a route can never consume more than two generation calls). The default of
    * 1 keeps every pre-existing caller's behavior unchanged.
+   *
+   * A reply that stopped at its output cap (provider finish reason `length`,
+   * or no finish reason and output tokens at the cap) is NOT a parse failure:
+   * it throws {@link LlmOutputTruncatedError} before any parse, and the bounded
+   * repair is not spent on it — re-sending under a comparable cap would be cut
+   * the same way. The operation fails closed on the first truncation.
+   *
+   * `expectedOutputTokens` overrides the policy's output cap for a call that
+   * sizes its own budget (e.g. a blueprint batch derives it from its route
+   * count); it is bounded by SEO_IMPROVE_OUTPUT_TOKEN_CEILING and checked
+   * before any call is made.
    */
   async executePolicyJson<T>(
     operation: SeoImproveLlmOperation,
@@ -358,13 +391,17 @@ export class LlmService {
       callCounter?: LlmCallCounter;
       /** Records the router's own decision for each actual call, when supplied. */
       recorder?: LlmRunRecorder;
+      /** Output-token cap for this call; defaults to the operation's policy value. */
+      expectedOutputTokens?: number;
     },
   ): Promise<T> {
     const repairAttempts = args.schemaRepairAttempts ?? 1;
     if (repairAttempts !== 0 && repairAttempts !== 1) {
       throw new Error("schemaRepairAttempts must be 0 or 1");
     }
-    const task = seoImproveTask(operation, args.clientId, `[${args.module}] ${args.purpose}`);
+    const task = seoImproveTask(operation, args.clientId, `[${args.module}] ${args.purpose}`, {
+      expectedOutputTokens: args.expectedOutputTokens,
+    });
     const purpose = `[${args.module}] ${args.purpose}`;
     let countsForOperation = this.policyCallCounts.get(operation);
     if (!countsForOperation) {
@@ -374,6 +411,8 @@ export class LlmService {
     countsForOperation.set(args.clientId, (countsForOperation.get(args.clientId) ?? 0) + 1);
     const first = await this.executeGoverned(operation, task, args, purpose, "initial");
     if (args.callCounter) args.callCounter.value += 1;
+    // Outside the try: a truncation is terminal and must not reach the repair.
+    this.assertNotTruncated(operation, args.clientId, purpose, "initial", task, first);
     try {
       return args.validate(parseJsonFromLlm<unknown>(first.content));
     } catch (error) {
@@ -398,9 +437,51 @@ export class LlmService {
         "repair",
       );
       if (args.callCounter) args.callCounter.value += 1;
+      this.assertNotTruncated(operation, args.clientId, purpose, "repair", task, second);
       // A second failure throws the validator's terminal error — no further retry.
       return args.validate(parseJsonFromLlm<unknown>(second.content));
     }
+  }
+
+  /**
+   * Fail closed on a reply that stopped at its output cap. Logs and throws
+   * measurements only — never the reply.
+   */
+  private assertNotTruncated(
+    operation: SeoImproveLlmOperation,
+    clientId: string,
+    purpose: string,
+    attempt: TruncatedAttempt,
+    task: TaskDescriptor,
+    response: LLMResponse,
+  ): void {
+    const maxOutputTokens = task.expectedOutputTokens ?? 0;
+    if (!isTruncatedFinish(response.finishReason, response.outputTokens, maxOutputTokens)) {
+      return;
+    }
+    const error = new LlmOutputTruncatedError({
+      operation,
+      purpose,
+      attempt,
+      maxOutputTokens,
+      outputTokens: response.outputTokens,
+      finishReason: response.finishReason,
+      responseLength: String(response.content ?? "").length,
+    });
+    logger.warn(
+      {
+        operation,
+        clientId,
+        purpose,
+        attempt,
+        maxOutputTokens,
+        outputTokens: error.outputTokens,
+        finishReason: error.finishReason,
+        responseLength: error.responseLength,
+      },
+      "Policy JSON reply truncated at its output cap; failing closed without repair",
+    );
+    throw error;
   }
 
   /**
@@ -488,6 +569,8 @@ export class LlmService {
     validate: (value: unknown) => T;
     /** Records the router's own decision for each actual call, when supplied. */
     recorder?: LlmRunRecorder;
+    /** Output-token cap for this call; defaults to the policy value. */
+    expectedOutputTokens?: number;
   }): Promise<T> {
     return this.executePolicyJson("SEO_CONTENT_BLUEPRINT", args);
   }

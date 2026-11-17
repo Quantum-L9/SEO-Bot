@@ -25,6 +25,7 @@ import {
   StructuredContentShapeError,
 } from "../../src/build-intelligence/structured-content.js";
 import type { LlmService } from "../../src/services/llm.js";
+import { LlmOutputTruncatedError } from "../../src/services/llm-parse.js";
 
 vi.mock("../../src/core/logger.js", () => ({
   createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
@@ -877,6 +878,65 @@ describe("StructuredContentPackage — provider failures are not shape failures 
       expect(counts.gen).toBe(1);
     });
   }
+});
+
+describe("StructuredContentPackage — a truncated generation is terminal, never repaired", () => {
+  function truncation(attempt: "initial" | "repair"): LlmOutputTruncatedError {
+    return new LlmOutputTruncatedError({
+      operation: "STRUCTURED_CONTENT_GENERATION",
+      purpose: "[build-intelligence] structured-content:home",
+      attempt,
+      maxOutputTokens: 12_000,
+      outputTokens: 12_000,
+      finishReason: "length",
+      responseLength: 54_000,
+    });
+  }
+
+  it("a truncated first generation surfaces as itself and spends no route repair", async () => {
+    const counts = { gen: 0 };
+    const llm = {
+      async executePolicyJson(operation: string, args: { callCounter?: { value: number } }) {
+        if (args.callCounter) args.callCounter.value += 1;
+        if (operation === "STRUCTURED_CONTENT_GENERATION") {
+          counts.gen += 1;
+          throw truncation("initial");
+        }
+        throw new Error(`unexpected op ${operation}`);
+      },
+    } as unknown as LlmService;
+    const caught = await createStructuredContentPackage(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+      { llm },
+    ).catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(LlmOutputTruncatedError);
+    expect(caught).not.toBeInstanceOf(StructuredContentShapeError);
+    expect((caught as LlmOutputTruncatedError).maxOutputTokens).toBe(12_000);
+    expect(counts.gen).toBe(1);
+  });
+
+  it("a truncated repair surfaces as truncation, not as a shape failure — two calls total", async () => {
+    const counts = { gen: 0 };
+    const llm = {
+      async executePolicyJson(operation: string, args: { callCounter?: { value: number } }) {
+        if (args.callCounter) args.callCounter.value += 1;
+        if (operation === "STRUCTURED_CONTENT_GENERATION") {
+          counts.gen += 1;
+          if (counts.gen === 1)
+            throw new Error("LLM did not return valid JSON (response length=10)");
+          throw truncation("initial");
+        }
+        throw new Error(`unexpected op ${operation}`);
+      },
+    } as unknown as LlmService;
+    const caught = await createStructuredContentPackage(
+      { client_id: "client-1", build_id: "build-1", page_content_contract: makeContract() },
+      { llm },
+    ).catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(LlmOutputTruncatedError);
+    expect(caught).not.toBeInstanceOf(StructuredContentShapeError);
+    expect(counts.gen).toBe(2);
+  });
 });
 
 describe("StructuredContentPackage — blocks-union output contract (schema regression)", () => {

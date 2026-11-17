@@ -122,10 +122,16 @@ const hydrateMock = vi.hoisted(() => vi.fn().mockResolvedValue("\n\n[MEMORY-CONT
 vi.mock("../../src/services/memory.js", () => ({ hydrateSeoContext: hydrateMock }));
 
 // Parsers are pure; stub to decouple task-type tests from response formatting.
-vi.mock("../../src/services/llm-parse.js", () => ({
-  parseJsonFromLlm: vi.fn(() => ({ ok: true })),
-  parseScore: vi.fn(() => 50),
-}));
+// The truncation detector and its typed error stay real: they are the contract
+// under test in the truncation suite below.
+vi.mock("../../src/services/llm-parse.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/services/llm-parse.js")>();
+  return {
+    ...actual,
+    parseJsonFromLlm: vi.fn(() => ({ ok: true })),
+    parseScore: vi.fn(() => 50),
+  };
+});
 
 import {
   BudgetExhaustedError,
@@ -134,6 +140,7 @@ import {
   UnsupportedCapabilityCombinationError,
 } from "@quantum-l9/llm-router";
 import { DailyBudgetExhaustedError, LlmService } from "../../src/services/llm.js";
+import { LlmOutputTruncatedError, parseJsonFromLlm } from "../../src/services/llm-parse.js";
 import { LlmRunRecorder } from "../../src/services/llm-run-recorder.js";
 
 const okResponse = {
@@ -171,6 +178,9 @@ describe("LlmService constructor — budget + router wiring (GAP-005)", () => {
         globalMonthlyHardCeiling: 5000,
         surgeThreshold: 0.9,
       },
+      // The output cap and the timeout are one budget: 16,000 tokens cannot be
+      // written inside the router's 60s default.
+      providerTimeoutMs: 240_000,
     });
   });
 });
@@ -444,6 +454,143 @@ describe("LlmService.executePolicyJson — schemaRepairAttempts + actual-call co
       ),
     ).rejects.toThrow("bad");
     expect(counter.value).toBe(1);
+  });
+});
+
+/**
+ * A reply that stopped at its output cap is incomplete, not wrong. Evidence:
+ * Website-Bot build qap-e2e-001 saw 4-route blueprint batches fail as "LLM did
+ * not return valid JSON (response length=22730)" after a repair re-sent under
+ * the same 5,000-token cap — consistent with a cut at the cap both times. These
+ * tests pin the typed, fail-closed behaviour that replaces that.
+ */
+describe("LlmService.executePolicyJson — output-cap truncation is a typed, terminal failure", () => {
+  const baseArgs = (validate: (v: unknown) => unknown, extra: Record<string, unknown> = {}) => ({
+    clientId: "c1",
+    module: "build-intelligence" as const,
+    purpose: "seo-content-blueprint:batch-1:qap-e2e-001",
+    systemPrompt: "sys",
+    userPrompt: "user",
+    validate,
+    ...extra,
+  });
+  const SECRET_REPLY = '{"routes":[{"route_id":"home","path":"/","search_intent":{"pri';
+
+  it("finish_reason=length throws LlmOutputTruncatedError naming operation, batch and cap — no parse, no repair", async () => {
+    const svc = new LlmService();
+    executeMock.mockResolvedValue({
+      ...okResponse,
+      content: SECRET_REPLY,
+      outputTokens: 14_500,
+      finishReason: "length",
+    });
+    const validate = vi.fn((value: unknown) => value);
+    const counter = { value: 0 };
+    vi.mocked(parseJsonFromLlm).mockClear();
+
+    const error = await svc
+      .executePolicyJson(
+        "SEO_CONTENT_BLUEPRINT",
+        baseArgs(validate, { expectedOutputTokens: 14_500, callCounter: counter }),
+      )
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(LlmOutputTruncatedError);
+    const truncated = error as LlmOutputTruncatedError;
+    expect(truncated.code).toBe("LLM_OUTPUT_TRUNCATED");
+    expect(truncated.operation).toBe("SEO_CONTENT_BLUEPRINT");
+    expect(truncated.purpose).toContain("batch-1");
+    expect(truncated.maxOutputTokens).toBe(14_500);
+    expect(truncated.attempt).toBe("initial");
+    expect(truncated.finishReason).toBe("length");
+    expect(truncated.message).toContain("SEO_CONTENT_BLUEPRINT");
+    expect(truncated.message).toContain("batch-1");
+    expect(truncated.message).toContain("14500-token output cap");
+    // Never echoes the model output.
+    expect(truncated.message).not.toContain("search_intent");
+    // One actual call, counted; the reply was never parsed or validated, and
+    // the bounded repair was not spent on it.
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    expect(counter.value).toBe(1);
+    expect(parseJsonFromLlm).not.toHaveBeenCalled();
+    expect(validate).not.toHaveBeenCalled();
+  });
+
+  it("the router receives the sized cap as the task's expectedOutputTokens", async () => {
+    const svc = new LlmService();
+    await svc.executePolicyJson(
+      "SEO_CONTENT_BLUEPRINT",
+      baseArgs((v) => v, { expectedOutputTokens: 14_500 }),
+    );
+    expect(executeMock.mock.calls[0]?.[0]).toMatchObject({ expectedOutputTokens: 14_500 });
+  });
+
+  it("recognises the native provider spellings (max_tokens, MAX_TOKENS)", async () => {
+    for (const finishReason of ["max_tokens", "MAX_TOKENS"]) {
+      const svc = new LlmService();
+      executeMock.mockResolvedValue({ ...okResponse, outputTokens: 10, finishReason });
+      await expect(
+        svc.executePolicyJson(
+          "STRUCTURED_CONTENT_GENERATION",
+          baseArgs((v) => v),
+        ),
+      ).rejects.toBeInstanceOf(LlmOutputTruncatedError);
+    }
+  });
+
+  it("with no finish reason, output tokens at the cap are treated as truncated", async () => {
+    const svc = new LlmService();
+    executeMock.mockResolvedValue({ ...okResponse, outputTokens: 12_000 });
+    const error = await svc
+      .executePolicyJson(
+        "STRUCTURED_CONTENT_GENERATION",
+        baseArgs((v) => v),
+      )
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(LlmOutputTruncatedError);
+    expect((error as LlmOutputTruncatedError).finishReason).toBeNull();
+    expect((error as LlmOutputTruncatedError).maxOutputTokens).toBe(12_000);
+  });
+
+  it("finish_reason=stop under the cap parses normally", async () => {
+    const svc = new LlmService();
+    executeMock.mockResolvedValue({ ...okResponse, outputTokens: 900, finishReason: "stop" });
+    await expect(
+      svc.executePolicyJson(
+        "SEO_CONTENT_BLUEPRINT",
+        baseArgs((v) => v),
+      ),
+    ).resolves.toEqual({ ok: true });
+  });
+
+  it("a truncated REPAIR is also terminal: two calls total, typed error names the repair", async () => {
+    const svc = new LlmService();
+    executeMock
+      .mockResolvedValueOnce({ ...okResponse, outputTokens: 800, finishReason: "stop" })
+      .mockResolvedValueOnce({ ...okResponse, outputTokens: 5000, finishReason: "length" });
+    const counter = { value: 0 };
+    const validate = vi.fn().mockImplementationOnce(() => {
+      throw new Error("schema mismatch");
+    });
+    const error = await svc
+      .executePolicyJson("SEO_CONTENT_BLUEPRINT", baseArgs(validate, { callCounter: counter }))
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(LlmOutputTruncatedError);
+    expect((error as LlmOutputTruncatedError).attempt).toBe("repair");
+    expect(executeMock).toHaveBeenCalledTimes(2);
+    expect(counter.value).toBe(2);
+    expect(validate).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a cap above the ceiling before spending any call", async () => {
+    const svc = new LlmService();
+    await expect(
+      svc.executePolicyJson(
+        "SEO_CONTENT_BLUEPRINT",
+        baseArgs((v) => v, { expectedOutputTokens: 16_001 }),
+      ),
+    ).rejects.toThrow("LLM_OUTPUT_BUDGET_EXCEEDED");
+    expect(executeMock).not.toHaveBeenCalled();
   });
 });
 

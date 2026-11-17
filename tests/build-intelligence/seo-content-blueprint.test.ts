@@ -22,6 +22,7 @@ import {
   SEO_BLUEPRINT_BATCH_SIZE,
 } from "../../src/build-intelligence/seo-content-blueprint.js";
 import type { LlmService } from "../../src/services/llm.js";
+import { LlmOutputTruncatedError } from "../../src/services/llm-parse.js";
 
 vi.mock("../../src/core/logger.js", () => ({
   createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
@@ -719,6 +720,68 @@ describe("SEOContentBlueprint — full-site batching (two-phase)", () => {
         { llm, dataForSeo: fakePages },
       ),
     ).rejects.toMatchObject({ code: "SEO_CONTENT_BLUEPRINT_BATCH_INVALID" });
+  });
+
+  it("sizes every call's output cap from its own route count (per-route budget × routes)", async () => {
+    const routes = routesFor(9);
+    const { llm: inner } = fakeLlm(modelRoutesFor(9));
+    const caps: Array<number | undefined> = [];
+    const llm = {
+      strategizeJson: (args: Parameters<LlmService["strategizeJson"]>[0]) => {
+        caps.push(args.expectedOutputTokens);
+        return inner.strategizeJson(args);
+      },
+    } as unknown as LlmService;
+    await createSEOContentBlueprint(
+      {
+        client_id: "client-1",
+        build_id: "build-1",
+        competitive_landscape: makeLandscape(),
+        routes,
+        business_facts: [],
+      },
+      { llm, dataForSeo: fakePages },
+    );
+    // Phase A keeps the 5,000 floor; full 4-route batches get 500 + 3,500 × 4;
+    // the 1-route tail batch gets 500 + 3,500.
+    expect(caps).toEqual([5000, 14_500, 14_500, 4000]);
+  });
+
+  it("a truncated batch fails closed with the typed truncation error — not relabelled, no later batch", async () => {
+    const routes = routesFor(9);
+    const { llm: inner } = fakeLlm(modelRoutesFor(9));
+    let batchCalls = 0;
+    const llm = {
+      strategizeJson: (args: Parameters<LlmService["strategizeJson"]>[0]) => {
+        const prompt = JSON.parse(args.userPrompt) as { task?: string };
+        if (prompt.task === "global_route_intent_plan") return inner.strategizeJson(args);
+        batchCalls += 1;
+        throw new LlmOutputTruncatedError({
+          operation: "SEO_CONTENT_BLUEPRINT",
+          purpose: `[${args.module}] ${args.purpose}`,
+          attempt: "initial",
+          maxOutputTokens: args.expectedOutputTokens ?? 0,
+          outputTokens: args.expectedOutputTokens ?? 0,
+          finishReason: "length",
+          responseLength: 65_000,
+        });
+      },
+    } as unknown as LlmService;
+    const error = await createSEOContentBlueprint(
+      {
+        client_id: "client-1",
+        build_id: "build-1",
+        competitive_landscape: makeLandscape(),
+        routes,
+        business_facts: [],
+      },
+      { llm, dataForSeo: fakePages },
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(LlmOutputTruncatedError);
+    expect((error as LlmOutputTruncatedError).code).toBe("LLM_OUTPUT_TRUNCATED");
+    expect((error as LlmOutputTruncatedError).purpose).toContain("batch-1");
+    expect((error as LlmOutputTruncatedError).maxOutputTokens).toBe(14_500);
+    expect(batchCalls).toBe(1);
   });
 
   it("never seals a partial route set", async () => {
