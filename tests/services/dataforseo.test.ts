@@ -29,7 +29,9 @@ vi.mock("../../src/core/config.js", () => ({ getConfig: () => config }));
 import {
   DataForSeoClient,
   DataForSeoTaskError,
+  DataForSeoUnavailableError,
   failureClass,
+  isRetryableTaskStatus,
   isRetryableTransportFailure,
   normalizeSerpDatetime,
   retryAfterDelayMs,
@@ -120,8 +122,10 @@ describe("DataForSeoClient.getOrganicSerp", () => {
       },
     });
     await expect(new DataForSeoClient().getOrganicSerp({ keyword: "x" })).rejects.toThrow(
-      /DataForSEO task error: Invalid Field: 'location_name'/,
+      /DataForSEO task error for "x": Invalid Field: 'location_name'/,
     );
+    // Deterministic task errors are never re-submitted.
+    expect(post).toHaveBeenCalledTimes(1);
   });
 
   it("rejects tasks that return no result array instead of returning zero items", async () => {
@@ -259,5 +263,106 @@ describe("DataForSeoClient bounded retry", () => {
     expect(JSON.stringify(record)).not.toContain("login");
     expect(JSON.stringify(record)).not.toContain("pass");
     expect(client.getProviderAttemptLog()).toEqual([]);
+  });
+});
+
+describe("DataForSeoClient search-engine task errors (40101)", () => {
+  // Observed in the QAP rebuild (2026-11-13): the competitive landscape failed
+  // twice on `Internal SE Server Error. (status 40101)` with no record of which
+  // portfolio query the search engine rejected.
+  const seError = {
+    data: {
+      status_code: 20000,
+      tasks: [{ status_code: 40101, status_message: "Internal SE Server Error.", result: null }],
+    },
+  };
+  const okTask = {
+    data: {
+      status_code: 20000,
+      tasks: [
+        {
+          status_code: 20000,
+          time: "0.1 sec",
+          result: [{ datetime: "2026-11-13 12:00:00 +00:00", item_types: ["organic"], items: [] }],
+        },
+      ],
+    },
+  };
+  const pauses: number[] = [];
+  const client = () =>
+    new DataForSeoClient(async (ms) => {
+      pauses.push(ms);
+    });
+  beforeEach(() => {
+    pauses.length = 0;
+  });
+
+  it("re-submits a task the search engine failed and returns its evidence", async () => {
+    post.mockResolvedValueOnce(seError).mockResolvedValueOnce(okTask);
+    const c = client();
+    await expect(c.getOrganicSerp({ keyword: "ai consulting" })).resolves.toMatchObject({
+      items: [],
+    });
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(pauses).toEqual([2000]);
+    expect(c.getProviderAttemptLog().map((entry) => [entry.status, entry.retry])).toEqual([
+      ["task 40101", true],
+      ["ok", false],
+    ]);
+  });
+
+  it("fails closed after three attempts and names the query", async () => {
+    post.mockResolvedValue(seError);
+    const c = client();
+    const failure = c.getOrganicSerp({ keyword: "ai consulting firms" });
+    await expect(failure).rejects.toBeInstanceOf(DataForSeoTaskError);
+    await expect(failure).rejects.toThrow(
+      /task error for "ai consulting firms": Internal SE Server Error\. \(status 40101, after 3 attempts\)/,
+    );
+    expect(post).toHaveBeenCalledTimes(3);
+    expect(c.providerAttempts).toBe(3);
+    expect(pauses).toEqual([2000, 2000]);
+  });
+
+  it("shares one three-call budget per query across transport and task retries", async () => {
+    // Without a shared budget each task submission re-armed the transport
+    // retry, so 503 → 40101 → 503 → 40101 → 503 → 40101 cost six billable
+    // calls for one query. The budget is per query: the third call is the last.
+    const unavailable = () =>
+      axiosError("service unavailable", { response: { status: 503, headers: {} } });
+    post
+      .mockRejectedValueOnce(unavailable())
+      .mockResolvedValueOnce(seError)
+      .mockRejectedValueOnce(unavailable())
+      .mockResolvedValue(okTask);
+    const c = client();
+    await expect(c.getOrganicSerp({ keyword: "ai consulting" })).rejects.toBeInstanceOf(
+      DataForSeoUnavailableError,
+    );
+    expect(post).toHaveBeenCalledTimes(3);
+    expect(c.getProviderAttemptLog().map((entry) => [entry.status, entry.retry])).toEqual([
+      ["HTTP 503", true],
+      ["task 40101", true],
+      ["HTTP 503", false],
+    ]);
+  });
+
+  it("recovers within the shared budget when the last call succeeds", async () => {
+    post
+      .mockRejectedValueOnce(axiosError("socket hang up"))
+      .mockResolvedValueOnce(seError)
+      .mockResolvedValueOnce(okTask);
+    const c = client();
+    await expect(c.getOrganicSerp({ keyword: "ai consulting" })).resolves.toMatchObject({
+      items: [],
+    });
+    expect(post).toHaveBeenCalledTimes(3);
+  });
+
+  it("treats only search-engine-side task statuses as retryable", () => {
+    expect(isRetryableTaskStatus(40101)).toBe(true);
+    for (const status of [20000, 40000, 40006, 40501, undefined]) {
+      expect(isRetryableTaskStatus(status)).toBe(false);
+    }
   });
 });
