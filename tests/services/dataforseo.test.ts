@@ -29,6 +29,7 @@ vi.mock("../../src/core/config.js", () => ({ getConfig: () => config }));
 import {
   DataForSeoClient,
   DataForSeoTaskError,
+  DataForSeoUnavailableError,
   failureClass,
   isRetryableTaskStatus,
   isRetryableTransportFailure,
@@ -321,6 +322,41 @@ describe("DataForSeoClient search-engine task errors (40101)", () => {
     expect(post).toHaveBeenCalledTimes(3);
     expect(c.providerAttempts).toBe(3);
     expect(pauses).toEqual([2000, 2000]);
+  });
+
+  it("shares one three-call budget per query across transport and task retries", async () => {
+    // Without a shared budget each task submission re-armed the transport
+    // retry, so 503 → 40101 → 503 → 40101 → 503 → 40101 cost six billable
+    // calls for one query. The budget is per query: the third call is the last.
+    const unavailable = () =>
+      axiosError("service unavailable", { response: { status: 503, headers: {} } });
+    post
+      .mockRejectedValueOnce(unavailable())
+      .mockResolvedValueOnce(seError)
+      .mockRejectedValueOnce(unavailable())
+      .mockResolvedValue(okTask);
+    const c = client();
+    await expect(c.getOrganicSerp({ keyword: "ai consulting" })).rejects.toBeInstanceOf(
+      DataForSeoUnavailableError,
+    );
+    expect(post).toHaveBeenCalledTimes(3);
+    expect(c.getProviderAttemptLog().map((entry) => [entry.status, entry.retry])).toEqual([
+      ["HTTP 503", true],
+      ["task 40101", true],
+      ["HTTP 503", false],
+    ]);
+  });
+
+  it("recovers within the shared budget when the last call succeeds", async () => {
+    post
+      .mockRejectedValueOnce(axiosError("socket hang up"))
+      .mockResolvedValueOnce(seError)
+      .mockResolvedValueOnce(okTask);
+    const c = client();
+    await expect(c.getOrganicSerp({ keyword: "ai consulting" })).resolves.toMatchObject({
+      items: [],
+    });
+    expect(post).toHaveBeenCalledTimes(3);
   });
 
   it("treats only search-engine-side task statuses as retryable", () => {

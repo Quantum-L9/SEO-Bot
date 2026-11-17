@@ -111,8 +111,12 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
  * (invalid field, empty result, ...) is deterministic and never retried.
  */
 const RETRYABLE_TASK_STATUS = new Set([40101]);
-/** One initial live SERP task plus at most two re-submissions of the same task. */
-const MAX_TASK_ATTEMPTS = 3;
+/**
+ * Billable HTTP calls one organic SERP query may make, shared by the
+ * transport retry and the task re-submission. Without a shared budget each
+ * task submission re-armed the transport retry (up to six calls per query).
+ */
+const MAX_SERP_CALLS_PER_QUERY = 3;
 /** Backoff before re-submitting a task the search engine failed. */
 export const TASK_RETRY_DELAY_MS = 2000;
 
@@ -247,8 +251,18 @@ export class DataForSeoClient {
     return response.data;
   }
 
-  private async request(endpoint: string, data: unknown[]): Promise<DataForSeoResponse> {
-    for (let attempt = 1; attempt <= MAX_DATAFORSEO_ATTEMPTS; attempt++) {
+  /**
+   * `budget.remaining` is the number of HTTP calls the caller may still spend;
+   * each call here consumes one, and a transport retry is taken only while the
+   * budget allows it. Callers that pass no budget get MAX_DATAFORSEO_ATTEMPTS.
+   */
+  private async request(
+    endpoint: string,
+    data: unknown[],
+    budget: { remaining: number } = { remaining: MAX_DATAFORSEO_ATTEMPTS },
+  ): Promise<DataForSeoResponse> {
+    for (let attempt = 1; attempt <= MAX_DATAFORSEO_ATTEMPTS && budget.remaining > 0; attempt++) {
+      budget.remaining--;
       try {
         const result = await this.requestOnce(endpoint, data);
         this.attemptLog.push({ endpoint, attempt, status: "ok", retry: false });
@@ -261,7 +275,10 @@ export class DataForSeoClient {
           throw error;
         }
         const status = failureClass(error);
-        const retry = attempt < MAX_DATAFORSEO_ATTEMPTS && isRetryableTransportFailure(error);
+        const retry =
+          attempt < MAX_DATAFORSEO_ATTEMPTS &&
+          budget.remaining > 0 &&
+          isRetryableTransportFailure(error);
         this.attemptLog.push({ endpoint, attempt, status, retry });
         if (!retry) {
           // Transport-class failures become DATAFORSEO_UNAVAILABLE; task-level
@@ -285,27 +302,31 @@ export class DataForSeoClient {
    * location_name) return `result: null` under a top-level 20000; they fail
    * instead of silently producing zero organic items, because a real provider
    * error must not masquerade as "no results". A search-engine-side error
-   * (RETRYABLE_TASK_STATUS) is re-submitted with a short backoff, a bounded
-   * number of times, and still fails closed when it persists. The query is
-   * named in every task error so a failing portfolio query is diagnosable.
+   * (RETRYABLE_TASK_STATUS) is re-submitted with a short backoff, and still
+   * fails closed when it persists. Transport retries and re-submissions draw
+   * on one MAX_SERP_CALLS_PER_QUERY budget, so a query never makes more than
+   * that many billable calls. The query is named in every task error so a
+   * failing portfolio query is diagnosable.
    */
   private async organicSerpTask(
     keyword: string,
     task: Record<string, unknown>,
   ): Promise<DataForSeoTaskContainer | undefined> {
     const endpoint = "/serp/google/organic/live/advanced";
+    const budget = { remaining: MAX_SERP_CALLS_PER_QUERY };
     for (let attempt = 1; ; attempt++) {
-      const result = await this.request(endpoint, [task]);
+      const result = await this.request(endpoint, [task], budget);
       const container = result.tasks?.[0];
       const status = container?.status_code;
       if (status === undefined || status === 20000) return container;
-      const retry = isRetryableTaskStatus(status) && attempt < MAX_TASK_ATTEMPTS;
+      const retry = isRetryableTaskStatus(status) && budget.remaining > 0;
       // The HTTP call itself succeeded; record the task outcome on its entry.
       const last = this.attemptLog.at(-1);
       if (last) Object.assign(last, { status: `task ${status}`, retry });
       if (!retry) {
+        const attempts = attempt > 1 ? `, after ${attempt} attempts` : "";
         throw new DataForSeoTaskError(
-          `DataForSEO task error for "${keyword}": ${container?.status_message ?? "unknown"} (status ${status}${attempt > 1 ? `, after ${attempt} attempts` : ""})`,
+          `DataForSEO task error for "${keyword}": ${container?.status_message ?? "unknown"} (status ${status}${attempts})`,
         );
       }
       await this.pause(TASK_RETRY_DELAY_MS);
