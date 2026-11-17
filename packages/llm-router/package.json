@@ -34,7 +34,7 @@
   "dependencies": {
     "@quantum-l9/graphiti-memory-client": "file:../graphiti-memory-client",
     "openai": "^7.10.0",
-    "zod": "^4.5.4"
+    "zod": "^4.6.7"
   },
   "overrides": {
     "@quantum-l9/graphiti-memory-client": "file:../graphiti-memory-client"

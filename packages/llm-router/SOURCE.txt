@@ -1,3 +1,3 @@
 Quantum-L9/LLM-Router
 tag: unreleased (Quantum-L9/LLM-Router#128 head)
-commit: 87741e220d5abb9921f2b45f6324918167d69ae4
+commit: 0c67c177bdb4afe6272ce377cc70a66c370ee3fd
