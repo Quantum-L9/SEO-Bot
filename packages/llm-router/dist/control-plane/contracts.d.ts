@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from "zod";
 export declare const ProviderIdSchema: z.ZodEnum<{
     openrouter: "openrouter";
     perplexity: "perplexity";
@@ -179,7 +179,7 @@ export declare const TaskProfileSchema: z.ZodObject<{
     task_profile_hash: z.ZodString;
 }, z.core.$strict>;
 export type TaskProfile = z.infer<typeof TaskProfileSchema>;
-export type TaskProfileInput = Omit<TaskProfile, 'schema_version' | 'task_profile_hash'>;
+export type TaskProfileInput = Omit<TaskProfile, "schema_version" | "task_profile_hash">;
 export declare const SelectedRouteSchema: z.ZodObject<{
     provider: z.ZodEnum<{
         openrouter: "openrouter";
@@ -376,7 +376,7 @@ export declare const LLMRoutePlanSchema: z.ZodObject<{
     content_hash: z.ZodString;
 }, z.core.$strict>;
 export type LLMRoutePlan = z.infer<typeof LLMRoutePlanSchema>;
-export type LLMRoutePlanInput = Omit<LLMRoutePlan, 'schema_version' | 'route_fingerprint' | 'plan_id' | 'content_hash'>;
+export type LLMRoutePlanInput = Omit<LLMRoutePlan, "schema_version" | "route_fingerprint" | "plan_id" | "content_hash">;
 export declare const LLM_EXECUTION_RECORD_SCHEMA_VERSION: "l9-llm-execution-record/v1";
 export declare const LLMExecutionRecordSchema: z.ZodObject<{
     schema_version: z.ZodLiteral<"l9-llm-execution-record/v1">;
@@ -437,7 +437,7 @@ export declare const LLMExecutionRecordSchema: z.ZodObject<{
     content_hash: z.ZodString;
 }, z.core.$strict>;
 export type LLMExecutionRecord = z.infer<typeof LLMExecutionRecordSchema>;
-export type LLMExecutionRecordInput = Omit<LLMExecutionRecord, 'schema_version' | 'content_hash'>;
+export type LLMExecutionRecordInput = Omit<LLMExecutionRecord, "schema_version" | "content_hash">;
 export declare const LLM_FEEDBACK_SIGNAL_SCHEMA_VERSION: "l9-llm-router-signal/v1";
 export declare const LLMFeedbackSignalSchema: z.ZodObject<{
     schema_version: z.ZodLiteral<"l9-llm-router-signal/v1">;
@@ -474,5 +474,5 @@ export declare const LLMFeedbackSignalSchema: z.ZodObject<{
     content_hash: z.ZodString;
 }, z.core.$strict>;
 export type LLMFeedbackSignal = z.infer<typeof LLMFeedbackSignalSchema>;
-export type LLMFeedbackSignalInput = Omit<LLMFeedbackSignal, 'schema_version' | 'signal_family' | 'content_hash'>;
+export type LLMFeedbackSignalInput = Omit<LLMFeedbackSignal, "schema_version" | "signal_family" | "content_hash">;
 //# sourceMappingURL=contracts.d.ts.map

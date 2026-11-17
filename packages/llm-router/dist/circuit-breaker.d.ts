@@ -1,4 +1,4 @@
-import type { CircuitBreakerConfig, CircuitBreakerState, Provider } from './types.js';
+import type { CircuitBreakerConfig, CircuitBreakerState, Provider } from "./types.js";
 export declare const DEFAULT_CIRCUIT_BREAKER_CONFIG: CircuitBreakerConfig;
 export interface CircuitPermit {
     readonly provider: Provider;
