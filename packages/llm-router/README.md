@@ -16,13 +16,15 @@
 
 ## Installation
 
-The package is published to GitHub Packages.
+Install from public git. No `NODE_AUTH_TOKEN` and no `npm.pkg.github.com`.
 
 ```bash
-npm install @quantum-l9/llm-router
+npm install git+https://github.com/Quantum-L9/LLM-Router.git#v1.3.1
 ```
 
-Configure the `@quantum-l9` registry and authentication through the consuming environment. Do not commit package tokens or provider credentials.
+The tag includes compiled `dist/` so hosted `npm ci --ignore-scripts` gets a real `dist/index.js`. Nested `@quantum-l9/graphiti-memory-client` is vendored as `file:packages/graphiti-memory-client` and does not resolve on the public npm registry.
+
+Operator `npm publish` still uses `publishConfig.registry` (GitHub Packages). Consumers do not need that registry. Do not commit package tokens or provider credentials.
 
 ## Supported runtimes
 

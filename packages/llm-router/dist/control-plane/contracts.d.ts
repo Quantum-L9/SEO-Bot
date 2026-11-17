@@ -10,10 +10,10 @@ export declare const ProviderIdSchema: z.ZodEnum<{
 }>;
 export declare const TaskFamilySchema: z.ZodEnum<{
     classification: "classification";
-    extraction: "extraction";
-    scoring: "scoring";
     code_generation: "code_generation";
+    extraction: "extraction";
     fact_verification: "fact_verification";
+    scoring: "scoring";
     proposal_generation: "proposal_generation";
     friction_analysis: "friction_analysis";
     architecture_review: "architecture_review";
@@ -31,11 +31,11 @@ export declare const TaskFamilySchema: z.ZodEnum<{
     vision_analysis: "vision_analysis";
 }>;
 export declare const TaskComplexityLevelSchema: z.ZodEnum<{
+    high: "high";
     low: "low";
     medium: "medium";
-    high: "high";
-    trivial: "trivial";
     critical: "critical";
+    trivial: "trivial";
 }>;
 export declare const DataSensitivitySchema: z.ZodEnum<{
     public: "public";
@@ -44,12 +44,12 @@ export declare const DataSensitivitySchema: z.ZodEnum<{
     restricted: "restricted";
 }>;
 export declare const FreshnessRequirementSchema: z.ZodEnum<{
-    hour: "hour";
     day: "day";
-    week: "week";
+    hour: "hour";
     month: "month";
-    year: "year";
     none: "none";
+    week: "week";
+    year: "year";
 }>;
 export declare const ModalitySchema: z.ZodEnum<{
     text: "text";
@@ -70,9 +70,9 @@ export declare const ValidationProfileSchema: z.ZodEnum<{
     visual: "visual";
 }>;
 export declare const ReasoningDepthSchema: z.ZodEnum<{
+    high: "high";
     low: "low";
     medium: "medium";
-    high: "high";
     none: "none";
 }>;
 export declare const ResponseFormatSchema: z.ZodEnum<{
@@ -80,27 +80,27 @@ export declare const ResponseFormatSchema: z.ZodEnum<{
     text: "text";
 }>;
 export declare const SearchModeSchema: z.ZodEnum<{
-    web: "web";
     academic: "academic";
     sec: "sec";
+    web: "web";
 }>;
 export declare const SearchContextSizeSchema: z.ZodEnum<{
+    high: "high";
     low: "low";
     medium: "medium";
-    high: "high";
 }>;
 export declare const RecencyFilterSchema: z.ZodEnum<{
-    hour: "hour";
     day: "day";
-    week: "week";
+    hour: "hour";
     month: "month";
-    year: "year";
     none: "none";
+    week: "week";
+    year: "year";
 }>;
 export declare const ReasoningEffortSchema: z.ZodEnum<{
+    high: "high";
     low: "low";
     medium: "medium";
-    high: "high";
 }>;
 export declare const TASK_PROFILE_SCHEMA_VERSION: "l9-llm-task-profile/v1";
 export declare const TaskProfileSchema: z.ZodObject<{
@@ -110,10 +110,10 @@ export declare const TaskProfileSchema: z.ZodObject<{
     tenant_id: z.ZodString;
     task_family: z.ZodEnum<{
         classification: "classification";
-        extraction: "extraction";
-        scoring: "scoring";
         code_generation: "code_generation";
+        extraction: "extraction";
         fact_verification: "fact_verification";
+        scoring: "scoring";
         proposal_generation: "proposal_generation";
         friction_analysis: "friction_analysis";
         architecture_review: "architecture_review";
@@ -131,11 +131,11 @@ export declare const TaskProfileSchema: z.ZodObject<{
         vision_analysis: "vision_analysis";
     }>;
     complexity: z.ZodEnum<{
+        high: "high";
         low: "low";
         medium: "medium";
-        high: "high";
-        trivial: "trivial";
         critical: "critical";
+        trivial: "trivial";
     }>;
     data_sensitivity: z.ZodEnum<{
         public: "public";
@@ -148,12 +148,12 @@ export declare const TaskProfileSchema: z.ZodObject<{
     requires_json: z.ZodBoolean;
     required_output_schema: z.ZodNullable<z.ZodString>;
     freshness_requirement: z.ZodEnum<{
-        hour: "hour";
         day: "day";
-        week: "week";
+        hour: "hour";
         month: "month";
-        year: "year";
         none: "none";
+        week: "week";
+        year: "year";
     }>;
     modality: z.ZodEnum<{
         text: "text";
@@ -194,9 +194,9 @@ export declare const SelectedRouteSchema: z.ZodObject<{
     temperature: z.ZodNumber;
     max_tokens: z.ZodNumber;
     reasoning_depth: z.ZodEnum<{
+        high: "high";
         low: "low";
         medium: "medium";
-        high: "high";
         none: "none";
     }>;
     response_format: z.ZodEnum<{
@@ -208,28 +208,28 @@ export declare const SearchDecisionSchema: z.ZodObject<{
     enabled: z.ZodBoolean;
     provider: z.ZodNullable<z.ZodLiteral<"perplexity">>;
     search_mode: z.ZodNullable<z.ZodEnum<{
-        web: "web";
         academic: "academic";
         sec: "sec";
+        web: "web";
     }>>;
     search_context_size: z.ZodNullable<z.ZodEnum<{
+        high: "high";
         low: "low";
         medium: "medium";
-        high: "high";
     }>>;
     recency_filter: z.ZodNullable<z.ZodEnum<{
-        hour: "hour";
         day: "day";
-        week: "week";
+        hour: "hour";
         month: "month";
-        year: "year";
         none: "none";
+        week: "week";
+        year: "year";
     }>>;
     variations: z.ZodNullable<z.ZodNumber>;
     reasoning_effort: z.ZodNullable<z.ZodEnum<{
+        high: "high";
         low: "low";
         medium: "medium";
-        high: "high";
     }>>;
 }, z.core.$strict>;
 export declare const RouteTargetSchema: z.ZodObject<{
@@ -294,9 +294,9 @@ export declare const LLMRoutePlanSchema: z.ZodObject<{
         temperature: z.ZodNumber;
         max_tokens: z.ZodNumber;
         reasoning_depth: z.ZodEnum<{
+            high: "high";
             low: "low";
             medium: "medium";
-            high: "high";
             none: "none";
         }>;
         response_format: z.ZodEnum<{
@@ -308,28 +308,28 @@ export declare const LLMRoutePlanSchema: z.ZodObject<{
         enabled: z.ZodBoolean;
         provider: z.ZodNullable<z.ZodLiteral<"perplexity">>;
         search_mode: z.ZodNullable<z.ZodEnum<{
-            web: "web";
             academic: "academic";
             sec: "sec";
+            web: "web";
         }>>;
         search_context_size: z.ZodNullable<z.ZodEnum<{
+            high: "high";
             low: "low";
             medium: "medium";
-            high: "high";
         }>>;
         recency_filter: z.ZodNullable<z.ZodEnum<{
-            hour: "hour";
             day: "day";
-            week: "week";
+            hour: "hour";
             month: "month";
-            year: "year";
             none: "none";
+            week: "week";
+            year: "year";
         }>>;
         variations: z.ZodNullable<z.ZodNumber>;
         reasoning_effort: z.ZodNullable<z.ZodEnum<{
+            high: "high";
             low: "low";
             medium: "medium";
-            high: "high";
         }>>;
     }, z.core.$strict>;
     fallback_chain: z.ZodArray<z.ZodObject<{
@@ -461,9 +461,9 @@ export declare const LLMFeedbackSignalSchema: z.ZodObject<{
         best_config_candidate: "best_config_candidate";
     }>;
     severity: z.ZodEnum<{
+        high: "high";
         low: "low";
         medium: "medium";
-        high: "high";
         critical: "critical";
         info: "info";
     }>;

@@ -1,6 +1,6 @@
-import { ProviderRequestError } from '../provider-errors.js';
-import { type GeneralModel, type GeneralModelConfig, type LLMResponse, type VisionConfig } from '../types.js';
-import { type ChatTransport } from './openai-transport.js';
+import { ProviderRequestError } from "../provider-errors.js";
+import { type GeneralModel, type GeneralModelConfig, type LLMResponse, type VisionConfig } from "../types.js";
+import { type ChatTransport } from "./openai-transport.js";
 export declare class UnsafeImageUrlError extends Error {
     readonly url: string;
     constructor(message: string, url: string);
@@ -15,8 +15,8 @@ export interface OpenRouterClientLike {
 export declare const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 export declare class InvalidBaseUrlError extends Error {
     readonly url: string;
-    readonly source: 'config' | 'env';
-    constructor(message: string, url: string, source: 'config' | 'env');
+    readonly source: "config" | "env";
+    constructor(message: string, url: string, source: "config" | "env");
     toJSON(): Record<string, unknown>;
 }
 /**

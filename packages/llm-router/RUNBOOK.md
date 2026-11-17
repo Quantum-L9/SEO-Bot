@@ -8,7 +8,7 @@ This runbook covers local setup, deterministic validation, package inspection, c
 
 - Node.js 20.19.0 or newer
 - npm 10.9.2 or a compatible npm 10 release
-- Access to the package registry when installing dependencies
+- Public npm only for install (`registry.npmjs.org`). No `NODE_AUTH_TOKEN` and no GitHub Packages auth
 - No provider credentials are required for tests
 
 The 1.x package retains Node 20 compatibility, but release and supply-chain workflows use Node 24 LTS.
@@ -68,8 +68,15 @@ The tarball may contain only:
 - `ARCHITECTURE.md`
 - `RUNBOOK.md`
 - compiled `dist/` files
+- vendored `packages/graphiti-memory-client/` (source + tracked `dist/`)
 
-`npm run verify:package` enforces this allowlist, installs the tarball into an isolated temporary consumer, and checks the root plus supported subpath exports.
+`npm run verify:package` enforces this allowlist, installs the tarball into an isolated temporary consumer without `NODE_AUTH_TOKEN` or a GitHub Packages `.npmrc`, and checks the root plus supported subpath exports.
+
+Consumers install from public git:
+
+```bash
+npm install git+https://github.com/Quantum-L9/LLM-Router.git#v1.3.1
+```
 
 ## Provider-boundary failure
 
