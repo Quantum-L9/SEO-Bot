@@ -322,7 +322,10 @@ export class DataForSeoClient {
       const retry = isRetryableTaskStatus(status) && budget.remaining > 0;
       // The HTTP call itself succeeded; record the task outcome on its entry.
       const last = this.attemptLog.at(-1);
-      if (last) Object.assign(last, { status: `task ${status}`, retry });
+      if (last) {
+        last.status = `task ${status}`;
+        last.retry = retry;
+      }
       if (!retry) {
         const attempts = attempt > 1 ? `, after ${attempt} attempts` : "";
         throw new DataForSeoTaskError(
