@@ -1,4 +1,4 @@
-import { GeneralModel } from './types.js';
+import { GeneralModel } from "./types.js";
 export interface ModelRate {
     input: number;
     output: number;

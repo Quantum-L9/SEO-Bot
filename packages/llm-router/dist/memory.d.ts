@@ -1,7 +1,7 @@
-import { type GraphitiMemoryClient, type MemoryClass } from '@quantum-l9/graphiti-memory-client';
+import { type GraphitiMemoryClient, type MemoryClass } from "@quantum-l9/graphiti-memory-client";
 export interface RouterMemoryConfig {
     client: GraphitiMemoryClient;
-    mode?: 'optional' | 'required';
+    mode?: "optional" | "required";
     tokenBudget?: number;
     maxRecords?: number;
     memoryClasses?: MemoryClass[];

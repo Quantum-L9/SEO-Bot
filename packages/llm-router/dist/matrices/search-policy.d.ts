@@ -1,4 +1,4 @@
-import { SearchPolicySource, TaskType, type SearchPolicyResolution, type TaskDescriptor } from '../types.js';
+import { type SearchPolicyResolution, SearchPolicySource, type TaskDescriptor, TaskType } from "../types.js";
 /**
  * Task types whose *default* capability implies a vision-backed provider.
  *
@@ -69,7 +69,7 @@ export declare function resolveCapabilities(task: TaskDescriptor): ResolvedCapab
  *   SEARCH_MODIFIER_WITHOUT_SEARCH      — recency/domainFilter without search
  *   CONSENSUS_REQUIRES_SEARCH           — consensus on a non-search route
  */
-export type CapabilityConflictCode = 'UNSUPPORTED_CAPABILITY_COMBINATION' | 'VISION_INPUT_REQUIRED' | 'IMAGES_NOT_SUPPORTED_FOR_TASK' | 'SEARCH_MODIFIER_WITHOUT_SEARCH' | 'CONSENSUS_REQUIRES_SEARCH';
+export type CapabilityConflictCode = "UNSUPPORTED_CAPABILITY_COMBINATION" | "VISION_INPUT_REQUIRED" | "IMAGES_NOT_SUPPORTED_FOR_TASK" | "SEARCH_MODIFIER_WITHOUT_SEARCH" | "CONSENSUS_REQUIRES_SEARCH";
 /**
  * Fail-closed error for a task that asks for capabilities the router has no
  * provider contract able to satisfy faithfully.

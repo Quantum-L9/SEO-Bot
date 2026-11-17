@@ -1,17 +1,17 @@
 export interface ChatTextPart {
-    type: 'text';
+    type: "text";
     text: string;
 }
 export interface ChatImagePart {
-    type: 'image_url';
+    type: "image_url";
     image_url: {
         url: string;
-        detail?: 'low' | 'high' | 'auto';
+        detail?: "low" | "high" | "auto";
     };
 }
 export type ChatContentPart = ChatTextPart | ChatImagePart;
 export interface ChatMessage {
-    role: 'system' | 'user' | 'assistant';
+    role: "system" | "user" | "assistant";
     content: string | ChatContentPart[];
 }
 export interface ChatCompletionRequest {
@@ -20,7 +20,7 @@ export interface ChatCompletionRequest {
     temperature?: number;
     max_tokens?: number;
     response_format?: {
-        type: 'json_object';
+        type: "json_object";
     };
     [key: string]: unknown;
 }

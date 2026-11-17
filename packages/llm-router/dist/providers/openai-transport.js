@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import OpenAI from "openai";
 /** Isolates the OpenAI SDK from provider and router contracts. */
 export class OpenAIChatTransport {
     client;
