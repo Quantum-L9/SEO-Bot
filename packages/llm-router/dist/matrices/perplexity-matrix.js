@@ -1,8 +1,8 @@
-import { MessageStrategy, RecencyFilter, SearchContextSize, SearchMode, SonarModel, TaskComplexity, TaskType, complexityRank, } from '../types.js';
+import { complexityRank, MessageStrategy, RecencyFilter, SearchContextSize, SearchMode, SonarModel, TaskComplexity, TaskType, } from "../types.js";
 // Re-exported for backward compatibility: `isSearchTask` historically lived in
 // this module. Its canonical home is now ./search-policy.ts.
-export { isSearchTask } from './search-policy.js';
-import { resolveSearchPolicy } from './search-policy.js';
+export { isSearchTask } from "./search-policy.js";
+import { resolveSearchPolicy } from "./search-policy.js";
 function selectSonarModel(complexity, rank) {
     if (complexity === TaskComplexity.CRITICAL)
         return SonarModel.SONAR_DEEP_RESEARCH;
@@ -27,14 +27,14 @@ function selectVariations(complexity, rank) {
 function selectReasoningEffort(model, complexity) {
     if (model !== SonarModel.SONAR_REASONING_PRO)
         return undefined;
-    return complexity === TaskComplexity.CRITICAL ? 'high' : 'medium';
+    return complexity === TaskComplexity.CRITICAL ? "high" : "medium";
 }
 export function resolvePerplexityConfig(task) {
     // Provider config and routing authority must agree: a Perplexity config is
     // only ever produced for a route that resolved to search. A non-search task
     // reaching this resolver is a contract violation, not a configurable state.
     if (!resolveSearchPolicy(task).required) {
-        throw new Error('resolvePerplexityConfig called for a non-search task');
+        throw new Error("resolvePerplexityConfig called for a non-search task");
     }
     const rank = complexityRank(task.complexity);
     const model = selectSonarModel(task.complexity, rank);
@@ -46,8 +46,11 @@ export function resolvePerplexityConfig(task) {
         model,
         searchContextSize,
         searchMode: SearchMode.WEB,
-        recencyFilter: task.recency ?? (task.type === TaskType.COMPETITOR_RESEARCH ? RecencyFilter.WEEK : RecencyFilter.NONE),
-        messageStrategy: task.requiresReasoning || rank >= complexityRank(TaskComplexity.HIGH) ? MessageStrategy.SYSTEM_USER_ASSISTANT : MessageStrategy.SYSTEM_USER,
+        recencyFilter: task.recency ??
+            (task.type === TaskType.COMPETITOR_RESEARCH ? RecencyFilter.WEEK : RecencyFilter.NONE),
+        messageStrategy: task.requiresReasoning || rank >= complexityRank(TaskComplexity.HIGH)
+            ? MessageStrategy.SYSTEM_USER_ASSISTANT
+            : MessageStrategy.SYSTEM_USER,
         temperature: task.type === TaskType.CONTENT_GENERATION ? 0.7 : 0.2,
         maxTokens,
         domainFilter: task.domainFilter ?? [],

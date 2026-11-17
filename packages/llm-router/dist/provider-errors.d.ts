@@ -1,4 +1,4 @@
-import type { Provider, ProviderErrorMetadata, ProviderFailureKind } from './types.js';
+import type { Provider, ProviderErrorMetadata, ProviderFailureKind } from "./types.js";
 export declare class ProviderRequestError extends Error {
     readonly provider: Provider;
     readonly kind: ProviderFailureKind;

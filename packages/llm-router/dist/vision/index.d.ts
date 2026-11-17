@@ -1,4 +1,4 @@
-import { TaskComplexity, TaskType, type VisionConfig } from '../types.js';
+import { TaskComplexity, TaskType, type VisionConfig } from "../types.js";
 export interface ViewportConfig {
     name: string;
     width: number;

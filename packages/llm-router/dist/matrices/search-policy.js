@@ -1,4 +1,4 @@
-import { SearchPolicySource, TaskType } from '../types.js';
+import { SearchPolicySource, TaskType, } from "../types.js";
 /**
  * Task types whose *default* capability implies a search-backed provider.
  *
@@ -56,7 +56,7 @@ export function isSearchTask(type) {
  * it distinguishes "the caller asked for this" from "the task type implied it".
  */
 export function resolveSearchPolicy(task) {
-    if (typeof task.requiresSearch === 'boolean') {
+    if (typeof task.requiresSearch === "boolean") {
         return { required: task.requiresSearch, source: SearchPolicySource.EXPLICIT };
     }
     return { required: isSearchTask(task.type), source: SearchPolicySource.TASK_DEFAULT };
@@ -92,10 +92,10 @@ export function resolveCapabilities(task) {
 export class UnsupportedCapabilityCombinationError extends Error {
     requested;
     code;
-    constructor(message, requested, code = 'UNSUPPORTED_CAPABILITY_COMBINATION') {
+    constructor(message, requested, code = "UNSUPPORTED_CAPABILITY_COMBINATION") {
         super(message);
         this.requested = requested;
-        this.name = 'UnsupportedCapabilityCombinationError';
+        this.name = "UnsupportedCapabilityCombinationError";
         this.code = code;
     }
     toJSON() {
@@ -119,14 +119,14 @@ export class UnsupportedCapabilityCombinationError extends Error {
  */
 export function validateCapabilities(capabilities, task) {
     if (capabilities.visionRequired && !capabilities.imagesProvided) {
-        throw new UnsupportedCapabilityCombinationError('Visual task requires at least one image', undefined, 'VISION_INPUT_REQUIRED');
+        throw new UnsupportedCapabilityCombinationError("Visual task requires at least one image", undefined, "VISION_INPUT_REQUIRED");
     }
     if (capabilities.searchRequired && capabilities.visionRequired) {
         const imageCount = task.images?.length ?? 0;
         throw new UnsupportedCapabilityCombinationError(`Task[${task.type}] supplied ${imageCount} image(s) and requires search, but no provider in this router serves search and vision together. Split the work into a vision task and a search task.`, { taskType: task.type, searchRequired: true, imageCount });
     }
     if (capabilities.imagesProvided && !capabilities.visionRequired) {
-        throw new UnsupportedCapabilityCombinationError(`Task ${task.type} does not consume images`, undefined, 'IMAGES_NOT_SUPPORTED_FOR_TASK');
+        throw new UnsupportedCapabilityCombinationError(`Task ${task.type} does not consume images`, undefined, "IMAGES_NOT_SUPPORTED_FOR_TASK");
     }
 }
 /**
@@ -142,7 +142,7 @@ export function resolveAndValidateCapabilities(task) {
     validateCapabilities(capabilities, task);
     const hasSearchModifiers = task.recency !== undefined || (task.domainFilter?.length ?? 0) > 0;
     if (!capabilities.searchRequired && hasSearchModifiers) {
-        throw new UnsupportedCapabilityCombinationError('Search modifiers require search capability', undefined, 'SEARCH_MODIFIER_WITHOUT_SEARCH');
+        throw new UnsupportedCapabilityCombinationError("Search modifiers require search capability", undefined, "SEARCH_MODIFIER_WITHOUT_SEARCH");
     }
     return capabilities;
 }

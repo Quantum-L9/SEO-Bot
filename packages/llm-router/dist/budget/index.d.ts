@@ -1,16 +1,16 @@
-import { type BudgetConfig, type BudgetReservation, type BudgetState, type TaskDescriptor } from '../types.js';
+import { type BudgetConfig, type BudgetReservation, type BudgetState, type TaskDescriptor } from "../types.js";
 export declare const DEFAULT_BUDGET_CONFIG: BudgetConfig;
 export declare enum ThrottleLevel {
+    HARD = "hard",
     NONE = "none",
-    SOFT = "soft",
-    HARD = "hard"
+    SOFT = "soft"
 }
 export interface ThrottleDecision {
     level: ThrottleLevel;
     reason: string;
     allowTask: boolean;
     forceDowngrade: boolean;
-    maxModelTier: 'fast' | 'strategic' | 'critical';
+    maxModelTier: "fast" | "strategic" | "critical";
 }
 export interface GlobalBudgetState {
     monthSpend: number;

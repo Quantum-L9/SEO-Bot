@@ -1,6 +1,6 @@
-import { ProviderRequestError } from '../provider-errors.js';
-import { type LLMResponse, type PerplexityConfig } from '../types.js';
-import { type ChatMessage, type ChatTransport } from './openai-transport.js';
+import { ProviderRequestError } from "../provider-errors.js";
+import { type LLMResponse, type PerplexityConfig } from "../types.js";
+import { type ChatMessage, type ChatTransport } from "./openai-transport.js";
 export interface PerplexityClientLike {
     complete(config: PerplexityConfig, systemPrompt: string, userPrompt: string, assistantContext?: string, signal?: AbortSignal): Promise<LLMResponse>;
     completeWithConsensus(config: PerplexityConfig, systemPrompt: string, userPrompt: string, assistantContext?: string, signal?: AbortSignal): Promise<PerplexityConsensusResult>;
