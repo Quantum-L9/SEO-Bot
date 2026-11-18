@@ -72,6 +72,16 @@ class FakePort implements DataForSeoOrganicPort {
   }
 }
 
+function companySerp(keyword: string, count: number): OrganicSerpResult {
+  return serp(
+    keyword,
+    Array.from({ length: count }, (_, i) => ({
+      rank: i + 1,
+      url: `https://co-${String(i + 1).padStart(2, "0")}.com/${encodeURIComponent(keyword)}`,
+    })),
+  );
+}
+
 /** Emits N qualifying operating-company domains for every query it is asked about. */
 function cohortPort(companyCount: number, extras: Array<{ rank: number; url: string }> = []) {
   return new FakePort({}, (keyword) =>
@@ -428,15 +438,30 @@ describe("CompetitiveLandscape — bounded deterministic query expansion", () =>
 
 describe("CompetitiveLandscape — SERP evidence integrity", () => {
   class ThrowingPort implements DataForSeoOrganicPort {
+    public readonly keywords: string[] = [];
     constructor(
       private readonly error: Error,
       private readonly failOn?: string,
+      private readonly success: (keyword: string) => OrganicSerpResult = (keyword) =>
+        serp(keyword, [{ rank: 1, url: "https://ok.com/a" }]),
     ) {}
     async getOrganicSerp(params: { keyword: string }): Promise<OrganicSerpResult> {
+      this.keywords.push(params.keyword);
       if (!this.failOn || params.keyword === this.failOn) throw this.error;
-      return serp(params.keyword, [{ rank: 1, url: "https://ok.com/a" }]);
+      return this.success(params.keyword);
     }
   }
+
+  const INCOMPLETE_DETAIL_KEYS = [
+    "excluded",
+    "expansion_rounds_used",
+    "observations",
+    "qualified",
+    "queries",
+    "required",
+    "selected",
+    "unknown",
+  ];
 
   it("surfaces a provider outage rather than degrading to zero observations", async () => {
     await expect(
@@ -446,12 +471,16 @@ describe("CompetitiveLandscape — SERP evidence integrity", () => {
     ).rejects.toBeInstanceOf(DataForSeoUnavailableError);
   });
 
-  it("surfaces a task-level provider error rather than an empty landscape", async () => {
+  it("aborts the landscape when one query raises DataForSeoUnavailableError", async () => {
+    const port = new ThrowingPort(
+      new DataForSeoUnavailableError("connect ETIMEDOUT"),
+      "roof repair",
+      (keyword) => companySerp(keyword, 10),
+    );
     await expect(
-      createCompetitiveLandscape(baseRequest, {
-        dataForSeo: new ThrowingPort(new DataForSeoTaskError("invalid location_name")),
-      }),
-    ).rejects.toBeInstanceOf(DataForSeoTaskError);
+      createCompetitiveLandscape({ ...baseRequest, desired_donor_count: 10 }, { dataForSeo: port }),
+    ).rejects.toBeInstanceOf(DataForSeoUnavailableError);
+    expect(port.keywords).toEqual(["metal roofing", "roof repair"]);
   });
 
   it("surfaces malformed SERP evidence rather than silently skipping it", async () => {
@@ -462,20 +491,102 @@ describe("CompetitiveLandscape — SERP evidence integrity", () => {
     ).rejects.toBeInstanceOf(SerpEvidenceInvalidError);
   });
 
-  it("fails the whole artifact when only ONE query fails (no partial evidence)", async () => {
-    await expect(
-      createCompetitiveLandscape(baseRequest, {
-        dataForSeo: new ThrowingPort(new DataForSeoTaskError("quota"), "roof repair"),
-      }),
-    ).rejects.toBeInstanceOf(DataForSeoTaskError);
+  it("seals from the surviving observations when one query's task fails and the cohort is met", async () => {
+    const port = new ThrowingPort(new DataForSeoTaskError("quota"), "roof repair", (keyword) =>
+      companySerp(keyword, 10),
+    );
+    const { artifact, evidence } = await createCompetitiveLandscape(
+      { ...baseRequest, desired_donor_count: 10 },
+      { dataForSeo: port },
+    );
+    expect(artifact.payload.selected_donors).toHaveLength(10);
+    expect(artifact.payload.observations.map((observation) => observation.query_id)).toEqual(
+      Array.from({ length: 10 }, () => "q1"),
+    );
+    expect(evidence.serp_observation_count).toBe(10);
+    expect(evidence.unavailable_queries).toEqual([{ query_id: "q2", query: "roof repair" }]);
+    expect(artifact.payload).not.toHaveProperty("unavailable_queries");
+    expect(port.keywords).toEqual(["metal roofing", "roof repair"]);
+  });
+
+  it("names a task-failed query as unavailable and does not submit it again when the cohort is short", async () => {
+    const port = new ThrowingPort(new DataForSeoTaskError("quota"), "roof repair", (keyword) =>
+      companySerp(keyword, 4),
+    );
+    const error = await createCompetitiveLandscape(
+      { ...baseRequest, desired_donor_count: 10 },
+      { dataForSeo: port },
+    ).then(
+      () => {
+        throw new Error("expected CompetitiveEvidenceIncompleteError");
+      },
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    if (!(error instanceof CompetitiveEvidenceIncompleteError)) return;
+    expect(error.message).toContain('Unavailable query: q2 ("roof repair").');
+    expect(error.message).not.toMatch(/valid empty/i);
+    expect(error.detail.observations).toBeGreaterThan(0);
+    expect(error.detail.required).toBe(10);
+    expect(error.detail.selected).toBeLessThan(10);
+    expect(Object.keys(error.detail).sort()).toEqual(INCOMPLETE_DETAIL_KEYS);
+    expect(port.keywords.filter((keyword) => keyword === "roof repair")).toEqual(["roof repair"]);
+    expect(port.keywords.length).toBeGreaterThan(baseRequest.seed_queries.length);
+    expect(new Set(port.keywords).size).toBe(port.keywords.length);
+  });
+
+  it("does not seal a landscape when every query's task fails", async () => {
+    const port = new ThrowingPort(new DataForSeoTaskError("invalid location_name"));
+    const error = await createCompetitiveLandscape(baseRequest, { dataForSeo: port }).then(
+      () => {
+        throw new Error("expected CompetitiveEvidenceIncompleteError");
+      },
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    expect(error).not.toBeInstanceOf(DataForSeoTaskError);
+    if (!(error instanceof CompetitiveEvidenceIncompleteError)) return;
+    expect(error.message).toContain(
+      'Unavailable queries: q1 ("metal roofing"), q2 ("roof repair")',
+    );
+    expect(error.detail.observations).toBe(0);
+    expect(Object.keys(error.detail).sort()).toEqual(INCOMPLETE_DETAIL_KEYS);
   });
 
   it("treats a genuinely empty SERP as a valid empty result, not a failure", async () => {
     // Empty results are legal; they simply cannot form a cohort, so the donor
-    // invariant (not a provider error) is what fails.
-    await expect(
-      createCompetitiveLandscape(baseRequest, { dataForSeo: new FakePort({}) }),
-    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    // invariant (not a provider error) is what fails. They are not unavailable.
+    const error = await createCompetitiveLandscape(baseRequest, {
+      dataForSeo: new FakePort({}),
+    }).then(
+      () => {
+        throw new Error("expected CompetitiveEvidenceIncompleteError");
+      },
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    expect(error).not.toBeInstanceOf(DataForSeoTaskError);
+    if (!(error instanceof CompetitiveEvidenceIncompleteError)) return;
+    expect(error.message).not.toMatch(/unavailable/i);
+    expect(error.detail.observations).toBe(0);
+  });
+
+  it("does not record a valid empty items result as an unavailable query", async () => {
+    const port = new FakePort({
+      "metal roofing": companySerp("metal roofing", 10),
+      "roof repair": serp("roof repair", []),
+    });
+    const { artifact, evidence } = await createCompetitiveLandscape(
+      { ...baseRequest, desired_donor_count: 10 },
+      { dataForSeo: port },
+    );
+    expect(artifact.payload.selected_donors).toHaveLength(10);
+    expect(
+      artifact.payload.observations.every((observation) => observation.query_id === "q1"),
+    ).toBe(true);
+    expect(artifact.payload.query_portfolio.map((query) => query.query)).toContain("roof repair");
+    expect(evidence.unavailable_queries).toEqual([]);
+    expect(port.keywords).toEqual(["metal roofing", "roof repair"]);
   });
 
   it("distinguishes thin evidence from failed qualification", async () => {

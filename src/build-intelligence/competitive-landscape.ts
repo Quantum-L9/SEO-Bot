@@ -16,8 +16,10 @@
  *
  * FAIL CLOSED. Three separate gates stand between SERP evidence and a sealed
  * artifact:
- *   1. Every portfolio query must yield real evidence. A provider or task
- *      failure surfaces as a failure — it never degrades into zero observations.
+ *   1. A provider outage or malformed SERP payload fails the landscape. A task
+ *      error on one query is recorded as unavailable, contributes no
+ *      observations, and is not fetched again. That is distinct from a valid
+ *      empty items array, which is a successful empty query.
  *   2. The donor cohort must reach the requested size (10) using only QUALIFIED
  *      operating-company domains. UNKNOWN and excluded domains never count.
  *   3. When the seed portfolio cannot reach the cohort, the portfolio is
@@ -37,7 +39,11 @@ import {
   WEBSITE_INTELLIGENCE_SCHEMAS,
 } from "@quantum-l9/bot-interop";
 import { createModuleLogger } from "../core/logger.js";
-import { DataForSeoClient, type OrganicSerpResult } from "../services/dataforseo.js";
+import {
+  DataForSeoClient,
+  DataForSeoTaskError,
+  type OrganicSerpResult,
+} from "../services/dataforseo.js";
 import {
   canonicalizeDomain,
   type DomainExclusionReason,
@@ -136,6 +142,16 @@ export class CompetitiveDonorQualificationError extends Error {
   }
 }
 
+/**
+ * A portfolio query whose DataForSEO task failed. Recorded on the evidence
+ * summary only — never on the sealed landscape payload, and never as a valid
+ * empty SERP.
+ */
+export interface UnavailableQueryRecord {
+  query_id: string;
+  query: string;
+}
+
 /** A sealed landscape failed its own post-seal invariant check. */
 export class CompetitiveLandscapeInvalidError extends Error {
   readonly code = "COMPETITIVE_LANDSCAPE_INVALID";
@@ -182,6 +198,11 @@ export interface CompetitiveEvidenceSummary {
   ranking_llm_calls: 0;
   /** Total DataForSEO provider attempts across all calls (requests are billable). */
   provider_attempts: number;
+  /**
+   * Queries that raised DataForSeoTaskError. Absent from observations. A query
+   * with an empty items array is not listed here.
+   */
+  unavailable_queries: UnavailableQueryRecord[];
 }
 
 export interface CompetitiveLandscapeResult {
@@ -245,11 +266,12 @@ export async function createCompetitiveLandscape(
   // Observations accumulate across expansion rounds; a query is fetched once.
   const observations: Observation[] = [];
   const fetched = new Set<string>();
+  const unavailableQueries: UnavailableQueryRecord[] = [];
   let selection: DonorSelection | null = null;
   let expansionCeilingReached = false;
 
   for (;;) {
-    await fetchPendingQueries(portfolio, fetched, observations, {
+    await fetchPendingQueries(portfolio, fetched, observations, unavailableQueries, {
       dataForSeo,
       locationName,
       languageName: request.market.language,
@@ -317,6 +339,7 @@ export async function createCompetitiveLandscape(
     qualification_ledger: selection.ledger,
     ranking_llm_calls: 0,
     provider_attempts: dataForSeo.providerAttempts ?? 0,
+    unavailable_queries: unavailableQueries,
   };
 
   assertDonorCohort(selection, desiredDonorCount, evidence);
@@ -374,16 +397,19 @@ export async function createCompetitiveLandscape(
 }
 
 /**
- * Fetch every portfolio query that has not been fetched yet. A provider or task
- * failure is FATAL: the typed DataForSEO error propagates so the caller can
- * distinguish DATAFORSEO_UNAVAILABLE / DATAFORSEO_TASK_ERROR /
- * SERP_EVIDENCE_INVALID. A query that legitimately returns zero organic results
- * is recorded as zero observations — that is a valid empty result, not failure.
+ * Fetch every portfolio query that has not been fetched yet.
+ *
+ * DataForSeoTaskError records that query as unavailable, marks it fetched so a
+ * later expansion round does not buy it again, adds no observations, and
+ * continues. DataForSeoUnavailableError and SerpEvidenceInvalidError still
+ * propagate. A query that legitimately returns zero organic results is recorded
+ * as zero observations — that is a valid empty result, not an unavailable query.
  */
 async function fetchPendingQueries(
   portfolio: QueryPortfolio,
   fetched: Set<string>,
   observations: Observation[],
+  unavailableQueries: UnavailableQueryRecord[],
   ctx: {
     dataForSeo: DataForSeoOrganicPort;
     locationName: string;
@@ -402,6 +428,19 @@ async function fetchPendingQueries(
         device: ctx.device,
       });
     } catch (error) {
+      if (error instanceof DataForSeoTaskError) {
+        logger.error(
+          {
+            queryId: query.query_id,
+            query: query.query,
+            error: error.message,
+          },
+          "SERP task failed for a portfolio query; recording it unavailable and continuing",
+        );
+        unavailableQueries.push({ query_id: query.query_id, query: query.query });
+        fetched.add(query.query_id);
+        continue;
+      }
       logger.error(
         {
           queryId: query.query_id,
@@ -592,7 +631,8 @@ function assertDonorCohort(
   throw new CompetitiveEvidenceIncompleteError(
     `Only ${selection.selected.length} of ${desired} required donors could be formed from ` +
       `${evidence.serp_observation_count} observation(s) across ${evidence.final_query_count} quer(ies) ` +
-      `after ${evidence.expansion_rounds_used} bounded expansion round(s).`,
+      `after ${evidence.expansion_rounds_used} bounded expansion round(s).` +
+      formatUnavailableQueries(evidence.unavailable_queries),
     {
       selected: selection.selected.length,
       required: desired,
@@ -646,6 +686,14 @@ function assertPayloadInvariants(payload: CompetitiveLandscapeV1, desired: numbe
       "evidence_complete must be true for a sealed landscape",
     );
   }
+}
+
+/** Names task-failed queries in CompetitiveEvidenceIncompleteError's message. */
+function formatUnavailableQueries(queries: UnavailableQueryRecord[]): string {
+  if (queries.length === 0) return "";
+  const named = queries.map((entry) => `${entry.query_id} ("${entry.query}")`).join(", ");
+  const noun = queries.length === 1 ? "query" : "queries";
+  return ` Unavailable ${noun}: ${named}.`;
 }
 
 function compareAggregates(a: DomainAggregate, b: DomainAggregate): number {
