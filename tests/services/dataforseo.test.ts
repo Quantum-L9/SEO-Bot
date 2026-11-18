@@ -361,8 +361,120 @@ describe("DataForSeoClient search-engine task errors (40101)", () => {
 
   it("treats only search-engine-side task statuses as retryable", () => {
     expect(isRetryableTaskStatus(40101)).toBe(true);
-    for (const status of [20000, 40000, 40006, 40501, undefined]) {
+    for (const status of [20000, 40000, 40006, 40106, 40501, undefined]) {
       expect(isRetryableTaskStatus(status)).toBe(false);
     }
+  });
+});
+
+describe("DataForSeoClient partial task results (40106)", () => {
+  // Observed live: a portfolio query SEO-Bot added while filling donors
+  // ("turn crm data into revenue company") came back 40106. DataForSEO had
+  // already retried the pages it could not retrieve and did not charge for
+  // them. The result array is usable evidence; resubmitting spends another call.
+  const keyword = "turn crm data into revenue company";
+  const pauses: number[] = [];
+  const client = () =>
+    new DataForSeoClient(async (ms) => {
+      pauses.push(ms);
+    });
+  beforeEach(() => {
+    pauses.length = 0;
+  });
+
+  function taskResponse(result: unknown) {
+    return {
+      data: {
+        status_code: 20000,
+        tasks: [
+          {
+            status_code: 40106,
+            status_message: "Some pages could not be retrieved after retries and were not charged.",
+            time: "0.4 sec",
+            result,
+          },
+        ],
+      },
+    };
+  }
+
+  const partialResult = [
+    {
+      datetime: "2026-11-17 18:00:00 +00:00",
+      item_types: ["organic", "paid"],
+      items: [
+        { type: "paid", rank_absolute: 1, url: "https://ads.example.com" },
+        {
+          type: "organic",
+          rank_group: 1,
+          rank_absolute: 2,
+          url: "https://www.Example.com/crm",
+          title: "CRM",
+          description: "revenue",
+        },
+      ],
+    },
+  ];
+
+  it("parses a 40106 result array the same way as a completed task and records it partial", async () => {
+    post.mockResolvedValue(taskResponse(partialResult));
+    const c = client();
+    const result = await c.getOrganicSerp({ keyword });
+    expect(result.items).toEqual([
+      expect.objectContaining({
+        rankGroup: 1,
+        rankAbsolute: 2,
+        domain: "example.com",
+        url: "https://www.Example.com/crm",
+        title: "CRM",
+        snippet: "revenue",
+      }),
+    ]);
+    expect(result.observedAt).toBe("2026-11-17T18:00:00.000Z");
+    expect(result.serpFeatures).toEqual(["organic", "paid"]);
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(pauses).toEqual([]);
+    expect(c.getProviderAttemptLog()).toEqual([
+      {
+        endpoint: "/serp/google/organic/live/advanced",
+        attempt: 1,
+        status: "task 40106 partial",
+        retry: false,
+      },
+    ]);
+  });
+
+  it("treats a 40106 result with an empty item list as a valid empty query", async () => {
+    post.mockResolvedValue(
+      taskResponse([
+        {
+          datetime: "2026-11-17 18:00:00 +00:00",
+          item_types: ["organic"],
+          items: [],
+        },
+      ]),
+    );
+    const c = client();
+    await expect(c.getOrganicSerp({ keyword })).resolves.toMatchObject({ items: [] });
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(pauses).toEqual([]);
+    expect(c.getProviderAttemptLog().map((entry) => [entry.status, entry.retry])).toEqual([
+      ["task 40106 partial", false],
+    ]);
+  });
+
+  it("fails closed when a 40106 task has no result array and does not resubmit", async () => {
+    post.mockResolvedValue(taskResponse(null));
+    const c = client();
+    const failure = c.getOrganicSerp({ keyword });
+    await expect(failure).rejects.toBeInstanceOf(DataForSeoTaskError);
+    await expect(failure).rejects.toThrow(
+      /task error for "turn crm data into revenue company": .* \(status 40106\)/,
+    );
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(pauses).toEqual([]);
+    expect(c.getProviderAttemptLog().map((entry) => [entry.status, entry.retry])).toEqual([
+      ["task 40106", false],
+    ]);
   });
 });
