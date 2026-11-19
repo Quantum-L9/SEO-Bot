@@ -42,11 +42,19 @@
         "ClientVision": "Website-Bot",
         "DesignReferenceIntelligence": "Website-Bot",
         "CompetitiveLandscape": "SEO-Bot",
+        "FirstPartyAuthority": "Website-Bot",
         "PatternPortfolio": "Website-Bot",
         "DomainSpec": "Website-Bot"
       },
+      "market_authority": {
+        "rule": "exactly_one",
+        "forms": [
+          "provenance.competitive_landscape_ref",
+          "provenance.first_party_authority"
+        ],
+        "note": "A first-party record (market_research=not_requested, donor_count=0, domain_spec_digest) is the authority when the spec does not request research. It is not a landscape and does not satisfy a requested cohort."
+      },
       "required_provenance": [
-        "provenance.competitive_landscape_ref",
         "provenance.baseline_digest",
         "provenance.client_vision_digest",
         "provenance.design_reference_intelligence_digest",
@@ -94,6 +102,7 @@
   "authority": {
     "serp_truth": "SEO-Bot",
     "competitive_landscape": "SEO-Bot",
+    "first_party_authority": "Website-Bot",
     "visual_pattern_portfolio": "Website-Bot",
     "website_build_blueprint": "Website-Bot",
     "seo_content_blueprint": "SEO-Bot",

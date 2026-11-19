@@ -33,6 +33,7 @@ import { fileURLToPath } from "node:url";
 import {
   assertIntelligenceArtifactIntegrity,
   type CompetitiveLandscapeArtifact,
+  FIRST_PARTY_AUTHORITY_SCHEMA,
   type IntelligenceArtifactType,
   type PageContentContractArtifact,
   type SEOContentBlueprintArtifact,
@@ -222,17 +223,38 @@ const verifiedBusinessFactSchema = z
   })
   .strict();
 
+const firstPartyAuthoritySchema = z
+  .object({
+    schema: z.literal(FIRST_PARTY_AUTHORITY_SCHEMA),
+    market_research: z.literal("not_requested"),
+    domain_spec_digest: z.string().regex(/^[0-9a-f]{64}$/),
+    donor_count: z.literal(0),
+  })
+  .strict();
+
 const seoContentBlueprintBody = z
   .object({
     client_id: z.string().min(1),
     build_id: z.string().min(1),
     run_ref: runRefSchema,
-    competitive_landscape: artifactEnvelope,
+    competitive_landscape: artifactEnvelope.optional(),
+    first_party_authority: firstPartyAuthoritySchema.optional(),
     routes: z.array(routeIdentitySchema).min(1),
     business_facts: z.array(verifiedBusinessFactSchema),
     seo_config: seoConfigSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    const hasLandscape = value.competitive_landscape !== undefined;
+    const hasFirstParty = value.first_party_authority !== undefined;
+    if (hasLandscape === hasFirstParty) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "exactly one of competitive_landscape or first_party_authority is required",
+      });
+    }
+  });
 
 const structuredContentBody = z
   .object({
@@ -380,19 +402,21 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
   app.post("/api/build-intelligence/seo-content-blueprint", async (request, reply) => {
     const parsed = seoContentBlueprintBody.safeParse(request.body);
     if (!parsed.success) return badRequest(reply, "invalid request body", parsed.error.issues);
-    let landscape: CompetitiveLandscapeArtifact;
-    try {
-      landscape = requireArtifact(
-        parsed.data.competitive_landscape,
-        "competitive_landscape",
-        parsed.data.client_id,
-      );
-    } catch (error) {
-      return badRequest(
-        reply,
-        "invalid competitive_landscape artifact",
-        error instanceof Error ? error.message : String(error),
-      );
+    let landscape: CompetitiveLandscapeArtifact | undefined;
+    if (parsed.data.competitive_landscape) {
+      try {
+        landscape = requireArtifact(
+          parsed.data.competitive_landscape,
+          "competitive_landscape",
+          parsed.data.client_id,
+        );
+      } catch (error) {
+        return badRequest(
+          reply,
+          "invalid competitive_landscape artifact",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
     }
     const recorder = openRunRecorder(parsed.data.client_id, parsed.data.build_id);
     if (!recorder) return badRequest(reply, "invalid run identity");
@@ -401,7 +425,10 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
         {
           client_id: parsed.data.client_id,
           build_id: parsed.data.build_id,
-          competitive_landscape: landscape,
+          ...(landscape ? { competitive_landscape: landscape } : {}),
+          ...(parsed.data.first_party_authority
+            ? { first_party_authority: parsed.data.first_party_authority }
+            : {}),
           routes: parsed.data.routes,
           business_facts: parsed.data.business_facts as unknown as VerifiedBusinessFact[],
           seo_config: parsed.data.seo_config,

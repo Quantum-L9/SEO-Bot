@@ -28,13 +28,17 @@
  */
 
 import {
+  assertFirstPartyAuthorityRecord,
   assertIntelligenceArtifactIntegrity,
   type CompetitiveLandscapeArtifact,
+  type FirstPartyAuthorityRecord,
+  readMarketAuthority,
   refForArtifact,
   type SEOContentBlueprintArtifact,
   type SEOContentBlueprintRoute,
   type SEOContentBlueprintV1,
   sameArtifactRef,
+  sameMarketAuthority,
   sealIntelligenceArtifact,
   type VerifiedBusinessFact,
   WEBSITE_INTELLIGENCE_SCHEMAS,
@@ -184,7 +188,10 @@ export interface PageContentPort {
 export interface SEOContentBlueprintRequest {
   client_id: string;
   build_id: string;
-  competitive_landscape: CompetitiveLandscapeArtifact;
+  /** Exclusive with first_party_authority. */
+  competitive_landscape?: CompetitiveLandscapeArtifact;
+  /** Exclusive with competitive_landscape. Routes and verified facts are sufficient. */
+  first_party_authority?: FirstPartyAuthorityRecord;
   routes: Array<{ route_id: string; path: string; purpose: string }>;
   business_facts: VerifiedBusinessFact[];
   seo_config?: {
@@ -294,13 +301,35 @@ export async function createSEOContentBlueprintWithEvidence(
   deps: { llm?: LlmService; dataForSeo?: PageContentPort; recorder?: LlmRunRecorder } = {},
 ): Promise<SEOContentBlueprintResult> {
   assertRouteSet(request.routes);
-  assertLandscapeUsable(request.competitive_landscape);
+  const hasLandscape = request.competitive_landscape !== undefined;
+  const hasFirstParty = request.first_party_authority !== undefined;
+  if (hasLandscape === hasFirstParty) {
+    throw new CompetitiveLandscapeInputInvalidError(
+      "SEOContentBlueprint requires exactly one market authority: competitive_landscape or first_party_authority",
+    );
+  }
+  if (request.first_party_authority) {
+    try {
+      assertFirstPartyAuthorityRecord(request.first_party_authority);
+    } catch (error) {
+      throw new CompetitiveLandscapeInputInvalidError(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  } else if (request.competitive_landscape) {
+    assertLandscapeUsable(request.competitive_landscape);
+  }
 
   const llm = deps.llm ?? getLlmService();
-  const dataForSeo = deps.dataForSeo ?? new DataForSeoClient();
-  const landscape = request.competitive_landscape.payload;
-
-  const evidence = await gatherDonorEvidence(landscape, dataForSeo);
+  const landscape = request.competitive_landscape?.payload;
+  // A first-party request has no donor URLs, so it must not construct a
+  // DataForSEO client or fetch page-content metrics.
+  const evidence = landscape
+    ? await gatherDonorEvidence(landscape, deps.dataForSeo ?? new DataForSeoClient())
+    : [];
+  const market = landscape?.market ?? { market_research: "not_requested" as const };
+  const queryPortfolio = landscape?.query_portfolio ?? [];
+  const selectedDonors = landscape?.selected_donors ?? [];
 
   const systemPrompt =
     "You are a senior SEO content strategist. You produce a STRATEGIC content " +
@@ -329,7 +358,7 @@ export async function createSEOContentBlueprintWithEvidence(
     userPrompt: JSON.stringify(
       {
         task: "global_route_intent_plan",
-        market: landscape.market,
+        market,
         routes: allRouteIndex,
         verified_business_facts: request.business_facts,
         seo_config: request.seo_config ?? {},
@@ -375,9 +404,9 @@ export async function createSEOContentBlueprintWithEvidence(
         userPrompt: JSON.stringify(
           {
             task: "seo_content_blueprint_batch",
-            market: landscape.market,
-            query_portfolio: landscape.query_portfolio,
-            selected_donors: landscape.selected_donors,
+            market,
+            query_portfolio: queryPortfolio,
+            selected_donors: selectedDonors,
             normalized_donor_evidence: evidence,
             all_route_index: allRouteIndex,
             global_route_intent_plan: globalIntentPlan,
@@ -448,7 +477,11 @@ export async function createSEOContentBlueprintWithEvidence(
                 "conversion",
                 "metadata",
               ],
-              note: 'Return a single JSON object whose only top-level key is "routes": an array of exactly one route object per route_id in the current_batch, in the same order, matching route_shape exactly. The global strategy is already decided — do not silently change it in this batch. The verified business facts are COMPLETE: never demand case studies, substantiated innovations, client examples, metrics, credentials, or industry-specific proof the facts cannot support — such requirements make the contract unsatisfiable and the build fails closed.',
+              note: `Return a single JSON object whose only top-level key is "routes": an array of exactly one route object per route_id in the current_batch, in the same order, matching route_shape exactly. The global strategy is already decided — do not silently change it in this batch. The verified business facts are COMPLETE: never demand case studies, substantiated innovations, client examples, metrics, credentials, or industry-specific proof the facts cannot support — such requirements make the contract unsatisfiable and the build fails closed.${
+                landscape
+                  ? ""
+                  : " Market research was not requested: competitive_gaps must be an empty array and donor_domains must stay empty. Do not invent competitor domains."
+              }`,
             },
           },
           null,
@@ -494,21 +527,49 @@ export async function createSEOContentBlueprintWithEvidence(
     return produced;
   });
   assertWholeSiteBlueprint(routes, request.routes, allRouteIds);
+  if (!landscape) {
+    for (const route of routes) {
+      for (const gap of route.competitive_gaps) {
+        if (gap.donor_domains.length > 0) {
+          throw new SeoContentBlueprintInvalidError(
+            "first-party SEOContentBlueprint must not name donor domains",
+          );
+        }
+      }
+    }
+  }
 
-  const landscapeRef = refForArtifact(request.competitive_landscape);
+  const landscapeRef = request.competitive_landscape
+    ? refForArtifact(request.competitive_landscape)
+    : undefined;
   const payload: SEOContentBlueprintV1 = {
     schema: WEBSITE_INTELLIGENCE_SCHEMAS.seoContentBlueprint,
-    competitive_landscape_ref: landscapeRef,
+    ...(landscapeRef ? { competitive_landscape_ref: landscapeRef } : {}),
+    ...(request.first_party_authority
+      ? { first_party_authority: request.first_party_authority }
+      : {}),
     batch_size: SEO_BLUEPRINT_BATCH_SIZE,
     batch_count: chunkRoutes(request.routes, SEO_BLUEPRINT_BATCH_SIZE).length,
     routes,
   };
 
-  // Exact lineage, proven rather than assumed: the sealed blueprint must point
-  // at precisely the landscape artifact this call consumed.
-  if (!sameArtifactRef(payload.competitive_landscape_ref, landscapeRef)) {
+  // Exact lineage, proven rather than assumed.
+  readMarketAuthority(payload);
+  if (
+    landscapeRef &&
+    (!payload.competitive_landscape_ref ||
+      !sameArtifactRef(payload.competitive_landscape_ref, landscapeRef))
+  ) {
     throw new CompetitiveLandscapeRefMismatchError(
       "Sealed blueprint does not reference the exact CompetitiveLandscape supplied in the request",
+    );
+  }
+  if (
+    request.first_party_authority &&
+    !sameMarketAuthority(payload, { first_party_authority: request.first_party_authority })
+  ) {
+    throw new CompetitiveLandscapeRefMismatchError(
+      "Sealed blueprint does not cite the first-party authority supplied in the request",
     );
   }
 
@@ -517,7 +578,7 @@ export async function createSEOContentBlueprintWithEvidence(
     client_id: request.client_id,
     build_id: request.build_id,
     producer: PRODUCER,
-    input_refs: [landscapeRef],
+    input_refs: landscapeRef ? [landscapeRef] : [],
     payload,
   });
 
@@ -527,7 +588,8 @@ export async function createSEOContentBlueprintWithEvidence(
       buildId: request.build_id,
       routes: routes.length,
       batches: batches.length,
-      competitiveLandscapeRef: payload.competitive_landscape_ref.artifact_id,
+      competitiveLandscapeRef: payload.competitive_landscape_ref?.artifact_id,
+      firstPartyDigest: payload.first_party_authority?.domain_spec_digest,
       artifactId: artifact.artifact_id,
     },
     "SEOContentBlueprint sealed",
