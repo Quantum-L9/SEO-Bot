@@ -7,9 +7,10 @@
 /**
  * Static architecture proof for the build-intelligence producer surface:
  *
- *   1. NO module under src/build-intelligence/ may call a provider SDK or a
- *      provider HTTP endpoint directly — every LLM call goes through
- *      @quantum-l9/llm-router, reached via src/services/llm.ts.
+ *   1. NO module under src/build-intelligence/ may call OpenAI, Anthropic,
+ *      OpenRouter, or Perplexity directly. Build-intelligence LLM calls go
+ *      through src/build-intelligence/deepseek-llm.ts, which is the only
+ *      module allowed to name the DeepSeek endpoint.
  *   2. The CompetitiveLandscape ranking path must not import an LLM service at
  *      all: rank authority is deterministic DataForSEO evidence, and the
  *      absence of the import is the structural proof.
@@ -57,14 +58,22 @@ describe("build-intelligence — no direct provider bypass", () => {
     expect(violations).toEqual([]);
   });
 
-  it("routes every LLM call through the shared llm service", () => {
+  it("routes every LLM call through the DeepSeek build-intelligence client", () => {
     for (const file of producerFiles()) {
       const source = readFileSync(file, "utf8");
+      if (file.endsWith("/deepseek-llm.ts")) continue;
       if (!/llm\.(execute|executePolicyJson|strategizeJson)/.test(source)) continue;
-      expect(source, `${file} must import the shared llm service`).toMatch(
-        /from\s+["']\.\.\/services\/llm\.js["']/,
+      expect(source, `${file} must import the DeepSeek build-intelligence client`).toMatch(
+        /from\s+["']\.\/deepseek-llm\.js["']/,
       );
     }
+  });
+
+  it("names the DeepSeek endpoint only inside the build-intelligence client", () => {
+    const hits = producerFiles().filter((file) =>
+      /api\.deepseek\.com/.test(readFileSync(file, "utf8")),
+    );
+    expect(hits.map((file) => file.split("/").pop())).toEqual(["deepseek-llm.ts"]);
   });
 });
 
