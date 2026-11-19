@@ -39,6 +39,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import {
+  type ArtifactRef,
   type PageContentContractArtifact,
   refForArtifact,
   type VerifiedBusinessFact,
@@ -53,6 +54,16 @@ import { createSEOContentBlueprint } from "../../src/build-intelligence/seo-cont
 import { createStructuredContentPackageWithEvidence } from "../../src/build-intelligence/structured-content.js";
 
 const require = createRequire(import.meta.url);
+
+function requireLandscapeRef(blueprint: {
+  payload: { competitive_landscape_ref?: ArtifactRef };
+}): ArtifactRef {
+  const ref = blueprint.payload.competitive_landscape_ref;
+  if (!ref) {
+    throw new Error("producer seam proof requires a blueprint that cites its landscape");
+  }
+  return ref;
+}
 
 interface SeamProofConfig {
   client_id: string;
@@ -216,7 +227,7 @@ async function main(): Promise<number> {
     },
     seo_blueprint: {
       artifact_ref: refForArtifact(blueprint),
-      competitive_landscape_ref: blueprint.payload.competitive_landscape_ref,
+      competitive_landscape_ref: requireLandscapeRef(blueprint),
       route_count: blueprint.payload.routes.length,
       // Invalid slots cannot survive: the zod enum rejects them before sealing.
       invalid_slot_count: 0,

@@ -405,7 +405,7 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
     let landscape: CompetitiveLandscapeArtifact | undefined;
     if (parsed.data.competitive_landscape) {
       try {
-        landscape = requireArtifact(
+        landscape = requireArtifact<CompetitiveLandscapeArtifact>(
           parsed.data.competitive_landscape,
           "competitive_landscape",
           parsed.data.client_id,
