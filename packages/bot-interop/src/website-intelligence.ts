@@ -12,6 +12,13 @@ export const WEBSITE_INTELLIGENCE_SCHEMAS = {
   structuredContentPackage: "l9://website-intelligence/structured-content-package/v1",
 } as const;
 
+/**
+ * Explicit record that the domain spec did not request market research.
+ * It is not a competitive landscape and must not be sealed as one.
+ */
+export const FIRST_PARTY_AUTHORITY_SCHEMA =
+  "l9.website-intelligence.first-party-authority/v1" as const;
+
 export type IntelligenceArtifactType =
   | "competitive_landscape"
   | "website_build_blueprint"
@@ -38,6 +45,18 @@ export interface ArtifactRef {
   artifact_type: IntelligenceArtifactType;
   artifact_id: string;
   payload_digest: string;
+}
+
+/**
+ * First-party market authority. `donor_count` is fixed at 0: this record
+ * exists only when no donor cohort was requested, purchased, or crawled.
+ */
+export interface FirstPartyAuthorityRecord {
+  schema: typeof FIRST_PARTY_AUTHORITY_SCHEMA;
+  market_research: "not_requested";
+  /** sha256 hex digest of the canonical domain spec that authorized the build. */
+  domain_spec_digest: string;
+  donor_count: 0;
 }
 
 export interface IntelligenceArtifact<TType extends IntelligenceArtifactType, TPayload> {
@@ -178,7 +197,13 @@ export interface BlueprintDesignDirection {
  * record is complete provenance; a placeholder or empty string is not.
  */
 export interface BlueprintProvenance {
-  competitive_landscape_ref: ArtifactRef;
+  /**
+   * Market authority is exactly one of these two forms. A landscape ref is
+   * present only when research was requested and a cohort was sealed. A
+   * first-party record is present only when the spec did not request research.
+   */
+  competitive_landscape_ref?: ArtifactRef;
+  first_party_authority?: FirstPartyAuthorityRecord;
   baseline_digest: string;
   client_vision_digest: string;
   design_reference_intelligence_digest: string;
@@ -288,7 +313,13 @@ export type RequirementPlacement = "FIRST_MATCH" | "ALL_MATCHES";
 
 export interface SEOContentBlueprintV1 {
   schema: typeof WEBSITE_INTELLIGENCE_SCHEMAS.seoContentBlueprint;
-  competitive_landscape_ref: ArtifactRef;
+  /**
+   * Same exclusive market authority as {@link BlueprintProvenance}. The SEO
+   * blueprint cites the landscape it consumed, or the first-party record when
+   * the request carried no landscape.
+   */
+  competitive_landscape_ref?: ArtifactRef;
+  first_party_authority?: FirstPartyAuthorityRecord;
   /**
    * Deterministic blueprint generation batching. Routes are produced in groups
    * of `batch_size`; `batch_count` = ceil(route_count / batch_size). The golden
@@ -761,19 +792,98 @@ export function assertPaletteNonAuthority(authority: PaletteAuthority): void {
   }
 }
 
+export type MarketAuthoritySource = {
+  competitive_landscape_ref?: ArtifactRef;
+  first_party_authority?: FirstPartyAuthorityRecord;
+};
+
+export type MarketAuthority =
+  | { kind: "competitive_landscape"; ref: ArtifactRef }
+  | { kind: "first_party"; record: FirstPartyAuthorityRecord };
+
+/**
+ * A first-party record is complete only when it says research was not
+ * requested, names zero donors, and carries a real spec digest.
+ */
+export function assertFirstPartyAuthorityRecord(
+  record: FirstPartyAuthorityRecord | undefined,
+): asserts record is FirstPartyAuthorityRecord {
+  if (
+    record?.schema !== FIRST_PARTY_AUTHORITY_SCHEMA ||
+    record.market_research !== "not_requested" ||
+    record.donor_count !== 0 ||
+    !isHexDigest(record.domain_spec_digest)
+  ) {
+    throw new BlueprintContractError(
+      "BLUEPRINT_PROVENANCE_INCOMPLETE",
+      "first_party_authority must be market_research=not_requested, donor_count=0, and a sha256 domain_spec_digest",
+    );
+  }
+}
+
+function assertLandscapeRef(ref: ArtifactRef | undefined): asserts ref is ArtifactRef {
+  if (
+    ref?.artifact_type !== "competitive_landscape" ||
+    !ref.artifact_id ||
+    !isHexDigest(ref.payload_digest)
+  ) {
+    throw new BlueprintContractError(
+      "BLUEPRINT_PROVENANCE_INCOMPLETE",
+      "competitive_landscape_ref must be a complete competitive_landscape ArtifactRef",
+    );
+  }
+}
+
+/**
+ * Exactly one market authority is present. Neither and both are incomplete.
+ * A first-party record is not a substitute landscape.
+ */
+export function readMarketAuthority(source: MarketAuthoritySource): MarketAuthority {
+  const hasLandscape = source.competitive_landscape_ref !== undefined;
+  const hasFirstParty = source.first_party_authority !== undefined;
+  if (hasLandscape === hasFirstParty) {
+    throw new BlueprintContractError(
+      "BLUEPRINT_PROVENANCE_INCOMPLETE",
+      "market authority must cite exactly one of competitive_landscape_ref or first_party_authority",
+    );
+  }
+  if (hasLandscape) {
+    assertLandscapeRef(source.competitive_landscape_ref);
+    return { kind: "competitive_landscape", ref: source.competitive_landscape_ref };
+  }
+  assertFirstPartyAuthorityRecord(source.first_party_authority);
+  return { kind: "first_party", record: source.first_party_authority };
+}
+
+/** True when both sides cite the same exclusive market authority. */
+export function sameMarketAuthority(
+  left: MarketAuthoritySource,
+  right: MarketAuthoritySource,
+): boolean {
+  const a = readMarketAuthority(left);
+  const b = readMarketAuthority(right);
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "competitive_landscape" && b.kind === "competitive_landscape") {
+    return sameArtifactRef(a.ref, b.ref);
+  }
+  if (a.kind === "first_party" && b.kind === "first_party") {
+    return (
+      a.record.schema === b.record.schema &&
+      a.record.market_research === b.record.market_research &&
+      a.record.donor_count === b.record.donor_count &&
+      a.record.domain_spec_digest === b.record.domain_spec_digest
+    );
+  }
+  return false;
+}
+
 /**
  * WBV2-009: every sealed blueprint carries provenance for each authoritative
  * semantic input. Structural completeness only — the compiler additionally
  * proves each digest equals the digest of the input it claims to describe.
  */
 export function assertProvenanceCompleteness(provenance: BlueprintProvenance): void {
-  const ref = provenance.competitive_landscape_ref;
-  if (ref?.artifact_type !== "competitive_landscape" || !ref.artifact_id || !ref.payload_digest) {
-    throw new BlueprintContractError(
-      "BLUEPRINT_PROVENANCE_INCOMPLETE",
-      "provenance.competitive_landscape_ref must be a complete competitive_landscape ArtifactRef",
-    );
-  }
+  readMarketAuthority(provenance);
   for (const field of [
     "baseline_digest",
     "client_vision_digest",

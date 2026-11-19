@@ -8,6 +8,7 @@ import {
   assertIntelligenceArtifactIntegrity,
   type CompetitiveLandscapeArtifact,
   type CompetitiveLandscapeV1,
+  FIRST_PARTY_AUTHORITY_SCHEMA,
   refForArtifact,
   type SEOContentBlueprintRoute,
   sealIntelligenceArtifact,
@@ -156,6 +157,99 @@ const fakePages: PageContentPort = {
 };
 
 describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
+  it("builds from routes and facts when research was not requested", async () => {
+    const record = {
+      schema: FIRST_PARTY_AUTHORITY_SCHEMA,
+      market_research: "not_requested" as const,
+      domain_spec_digest: "ab".repeat(32),
+      donor_count: 0 as const,
+    };
+    const route = blueprintRoute("home", "/");
+    route.competitive_gaps = [];
+    const { llm } = fakeLlm([route]);
+    const artifact = await createSEOContentBlueprint(
+      {
+        client_id: "client-1",
+        build_id: "build-1",
+        first_party_authority: record,
+        routes: requestedRoutes,
+        business_facts: [],
+      },
+      {
+        llm,
+        dataForSeo: {
+          async getPageContent() {
+            throw new Error("DataForSEO must not be called");
+          },
+        },
+      },
+    );
+    expect(artifact.payload.competitive_landscape_ref).toBeUndefined();
+    expect(artifact.payload.first_party_authority).toEqual(record);
+    expect(artifact.input_refs).toEqual([]);
+    expect(artifact.payload.routes[0]?.competitive_gaps).toEqual([]);
+  });
+
+  it("rejects invented donor domains when research was not requested", async () => {
+    const record = {
+      schema: FIRST_PARTY_AUTHORITY_SCHEMA,
+      market_research: "not_requested" as const,
+      domain_spec_digest: "ab".repeat(32),
+      donor_count: 0 as const,
+    };
+    const { llm } = fakeLlm([blueprintRoute("home", "/")]);
+    await expect(
+      createSEOContentBlueprint(
+        {
+          client_id: "client-1",
+          build_id: "build-1",
+          first_party_authority: record,
+          routes: requestedRoutes,
+          business_facts: [],
+        },
+        {
+          llm,
+          dataForSeo: {
+            async getPageContent() {
+              throw new Error("DataForSEO must not be called");
+            },
+          },
+        },
+      ),
+    ).rejects.toThrow(/must not carry competitive gaps/);
+  });
+
+  it("rejects a competitive gap that names no donors when research was not requested", async () => {
+    const record = {
+      schema: FIRST_PARTY_AUTHORITY_SCHEMA,
+      market_research: "not_requested" as const,
+      domain_spec_digest: "ab".repeat(32),
+      donor_count: 0 as const,
+    };
+    const route = blueprintRoute("home", "/");
+    route.competitive_gaps = [
+      {
+        gap_id: "g1",
+        description: "no pricing",
+        donor_domains: [],
+        opportunity: "add pricing",
+      },
+    ];
+    const { llm } = fakeLlm([route]);
+    await expect(
+      createSEOContentBlueprint(
+        {
+          client_id: "client-1",
+          build_id: "build-1",
+          first_party_authority: record,
+          routes: requestedRoutes,
+          business_facts: [],
+        },
+        { llm, dataForSeo: fakePages },
+      ),
+    ).rejects.toThrow(/must not carry competitive gaps/);
+  });
+
   it("references the EXACT CompetitiveLandscape artifact", async () => {
     const landscape = makeLandscape();
     const { llm } = fakeLlm([blueprintRoute("home", "/")]);
