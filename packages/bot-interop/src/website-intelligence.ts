@@ -856,7 +856,10 @@ export function readMarketAuthority(source: MarketAuthoritySource): MarketAuthor
 }
 
 /** True when both sides cite the same exclusive market authority. */
-export function sameMarketAuthority(left: MarketAuthoritySource, right: MarketAuthoritySource): boolean {
+export function sameMarketAuthority(
+  left: MarketAuthoritySource,
+  right: MarketAuthoritySource,
+): boolean {
   const a = readMarketAuthority(left);
   const b = readMarketAuthority(right);
   if (a.kind !== b.kind) return false;

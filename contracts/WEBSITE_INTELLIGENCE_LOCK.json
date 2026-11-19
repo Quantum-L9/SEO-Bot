@@ -48,10 +48,7 @@
       },
       "market_authority": {
         "rule": "exactly_one",
-        "forms": [
-          "provenance.competitive_landscape_ref",
-          "provenance.first_party_authority"
-        ],
+        "forms": ["provenance.competitive_landscape_ref", "provenance.first_party_authority"],
         "note": "A first-party record (market_research=not_requested, donor_count=0, domain_spec_digest) is the authority when the spec does not request research. It is not a landscape and does not satisfy a requested cohort."
       },
       "required_provenance": [

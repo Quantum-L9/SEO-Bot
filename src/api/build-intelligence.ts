@@ -250,8 +250,7 @@ const seoContentBlueprintBody = z
     if (hasLandscape === hasFirstParty) {
       ctx.addIssue({
         code: "custom",
-        message:
-          "exactly one of competitive_landscape or first_party_authority is required",
+        message: "exactly one of competitive_landscape or first_party_authority is required",
       });
     }
   });
