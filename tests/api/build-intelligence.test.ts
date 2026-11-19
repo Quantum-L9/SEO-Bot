@@ -366,8 +366,7 @@ describe("GET /api/build-intelligence/preflight", () => {
     SEO_BOT_API_KEY: "machine-key",
     DATAFORSEO_LOGIN: "login",
     DATAFORSEO_PASSWORD: "password",
-    OPENROUTER_API_KEY: "or-key",
-    PERPLEXITY_API_KEY: "pplx-key",
+    DEEPSEEK_API_KEY: "deepseek-key",
   };
 
   it("returns non-secret readiness metadata for an authenticated machine call", async () => {

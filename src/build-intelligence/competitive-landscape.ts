@@ -163,6 +163,39 @@ export class CompetitiveLandscapeInvalidError extends Error {
 
 const DEFAULT_DONOR_COUNT = 10;
 
+/**
+ * Failed and empty SERP purchases, keyed by build id. A later call in the same
+ * build must not buy that query again. A SERP that returned ranking items is
+ * not stored here, including a result that later selects one domain.
+ */
+const failedSerpFingerprints = new Map<string, Set<string>>();
+
+export function resetFailedSerpFingerprints(): void {
+  failedSerpFingerprints.clear();
+}
+
+function serpPurchaseFingerprint(
+  query: string,
+  locationName: string,
+  languageName: string,
+  device: string,
+): string {
+  const normalizedQuery = query.trim().toLowerCase().replace(/\s+/g, " ");
+  return [normalizedQuery, locationName.trim().toLowerCase(), languageName.trim().toLowerCase(), device].join(
+    "\n",
+  );
+}
+
+function rememberFailedSerp(buildId: string, fingerprint: string): void {
+  const seen = failedSerpFingerprints.get(buildId) ?? new Set<string>();
+  seen.add(fingerprint);
+  failedSerpFingerprints.set(buildId, seen);
+}
+
+function failedSerpAlreadyPurchased(buildId: string, fingerprint: string): boolean {
+  return failedSerpFingerprints.get(buildId)?.has(fingerprint) ?? false;
+}
+
 /** Per-domain qualification decision plus the evidence that produced it. */
 export interface DomainQualificationRecord {
   domain: string;
@@ -273,6 +306,7 @@ export async function createCompetitiveLandscape(
   for (;;) {
     await fetchPendingQueries(portfolio, fetched, observations, unavailableQueries, {
       dataForSeo,
+      buildId: request.build_id,
       locationName,
       languageName: request.market.language,
       device,
@@ -412,6 +446,7 @@ async function fetchPendingQueries(
   unavailableQueries: UnavailableQueryRecord[],
   ctx: {
     dataForSeo: DataForSeoOrganicPort;
+    buildId: string;
     locationName: string;
     languageName: string;
     device: "desktop" | "mobile";
@@ -419,6 +454,16 @@ async function fetchPendingQueries(
 ): Promise<void> {
   for (const query of portfolio.queries) {
     if (fetched.has(query.query_id)) continue;
+    const fingerprint = serpPurchaseFingerprint(
+      query.query,
+      ctx.locationName,
+      ctx.languageName,
+      ctx.device,
+    );
+    if (failedSerpAlreadyPurchased(ctx.buildId, fingerprint)) {
+      fetched.add(query.query_id);
+      continue;
+    }
     let serp: OrganicSerpResult;
     try {
       serp = await ctx.dataForSeo.getOrganicSerp({
@@ -437,6 +482,7 @@ async function fetchPendingQueries(
           },
           "SERP task failed for a portfolio query; recording it unavailable and continuing",
         );
+        rememberFailedSerp(ctx.buildId, fingerprint);
         unavailableQueries.push({ query_id: query.query_id, query: query.query });
         fetched.add(query.query_id);
         continue;
@@ -452,6 +498,7 @@ async function fetchPendingQueries(
       throw error;
     }
     fetched.add(query.query_id);
+    if (serp.items.length === 0) rememberFailedSerp(ctx.buildId, fingerprint);
 
     // Deduplicate identical ranking URLs within one query: the same semantic
     // observation must never contribute visibility twice.

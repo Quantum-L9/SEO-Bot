@@ -69,8 +69,8 @@ function passingReceipt(): SeoBuildIntelligenceIntegrityReceipt {
       competitive_landscape_ref: landscapeRef,
       route_count: 5,
       invalid_slot_count: 0,
-      router_only_llm: true,
-      direct_provider_calls: 0,
+      router_only_llm: false,
+      direct_provider_calls: 1,
     },
     structured_content: {
       executed: true,
@@ -83,8 +83,8 @@ function passingReceipt(): SeoBuildIntelligenceIntegrityReceipt {
       failed_requirement_count: 0,
       repair_attempts: 1,
       repaired_route_count: 1,
-      router_only_llm: true,
-      direct_provider_calls: 0,
+      router_only_llm: false,
+      direct_provider_calls: 1,
     },
     interop: { artifact_schema_parity: true, notes: [] },
   };
@@ -93,6 +93,19 @@ function passingReceipt(): SeoBuildIntelligenceIntegrityReceipt {
 describe("SeoBuildIntelligenceIntegrityReceipt — PASS requires all three legs", () => {
   it("passes a complete, invariant-satisfying run", () => {
     expect(validateIntegrityReceipt(passingReceipt())).toEqual({ verdict: "PASS", violations: [] });
+  });
+
+  it("fails when seo_blueprint or structured_content still claims router-only calls", () => {
+    const receipt = passingReceipt();
+    receipt.seo_blueprint.router_only_llm = true;
+    receipt.seo_blueprint.direct_provider_calls = 0;
+    if (receipt.structured_content.executed) {
+      receipt.structured_content.router_only_llm = true;
+      receipt.structured_content.direct_provider_calls = 0;
+    }
+    const result = validateIntegrityReceipt(receipt);
+    expect(result.verdict).toBe("FAIL");
+    expect(result.violations.join(" ")).toMatch(/direct DeepSeek call/);
   });
 
   it("fails when the donor cohort is not exactly ten", () => {
@@ -147,14 +160,16 @@ describe("SeoBuildIntelligenceIntegrityReceipt — PASS requires all three legs"
     expect(validateIntegrityReceipt(receipt).verdict).toBe("FAIL");
   });
 
-  it("fails when any leg bypassed llm-router", () => {
+  it("fails when a leg still records router-only calls", () => {
     const blueprintBypass = passingReceipt();
-    blueprintBypass.seo_blueprint.direct_provider_calls = 1;
+    blueprintBypass.seo_blueprint.router_only_llm = true;
+    blueprintBypass.seo_blueprint.direct_provider_calls = 0;
     expect(validateIntegrityReceipt(blueprintBypass).verdict).toBe("FAIL");
 
     const contentBypass = passingReceipt();
     if (contentBypass.structured_content.executed) {
-      contentBypass.structured_content.direct_provider_calls = 2;
+      contentBypass.structured_content.router_only_llm = true;
+      contentBypass.structured_content.direct_provider_calls = 0;
     }
     expect(validateIntegrityReceipt(contentBypass).verdict).toBe("FAIL");
   });

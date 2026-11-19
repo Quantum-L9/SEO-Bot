@@ -9,8 +9,8 @@
  * Build-intelligence preflight — nine REAL runtime checks, no hardcoded PASS.
  *
  * Each check probes a concrete runtime fact:
- *  - env configuration (DataForSEO, OpenRouter, Perplexity, machine secret),
- *  - package/protocol compatibility (bot-interop contract, llm-router),
+ *  - env configuration (DataForSEO, DeepSeek, machine secret),
+ *  - package/protocol compatibility (bot-interop contract),
  *  - capability readiness derived from those probes.
  *
  * UNKNOWN means the probe itself failed in an unexpected way (the check could
@@ -27,7 +27,6 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WEBSITE_INTELLIGENCE_PROTOCOL } from "@quantum-l9/bot-interop";
-import { L9LLMRouter } from "@quantum-l9/llm-router";
 
 const require = createRequire(import.meta.url);
 
@@ -203,37 +202,31 @@ function checkLandscapeCapability(dataForSeo: PreflightCheck): PreflightCheck {
   };
 }
 
-/** 5. LLM provider configuration (used by every governed LLM op). */
+/** 5. LLM provider configuration for build-intelligence (direct DeepSeek). */
 function checkLlmProviders(): PreflightCheck {
   return probe("llm_provider_configured", () => {
-    requireEnv("OPENROUTER_API_KEY");
-    requireEnv("PERPLEXITY_API_KEY");
-    return "OPENROUTER_API_KEY and PERPLEXITY_API_KEY present";
+    requireEnv("DEEPSEEK_API_KEY");
+    return "DEEPSEEK_API_KEY present";
   });
 }
 
-/** 6. SEO-content-blueprint capability = LLM providers + router importable. */
+/** 6. SEO-content-blueprint capability = DeepSeek configured. */
 function checkBlueprintCapability(): PreflightCheck {
   return probe("seo_content_blueprint_capability", () => {
-    if (!env("OPENROUTER_API_KEY")) {
-      throw new PreflightCheckFailure("OPENROUTER_API_KEY is required for blueprint strategy");
+    if (!env("DEEPSEEK_API_KEY")) {
+      throw new PreflightCheckFailure("DEEPSEEK_API_KEY is required for blueprint strategy");
     }
-    const routerVersion = packageVersion("@quantum-l9/llm-router");
-    if (!routerVersion) throw new PreflightCheckFailure("@quantum-l9/llm-router is not resolvable");
-    if (typeof L9LLMRouter !== "function") {
-      throw new PreflightCheckFailure("L9LLMRouter export is missing");
-    }
-    return "LLM strategy stack present and importable";
+    return "DeepSeek strategy stack configured";
   });
 }
 
-/** 7. Structured-content capability = LLM providers + strict schema importable. */
+/** 7. Structured-content capability = DeepSeek configured. */
 function checkStructuredContentCapability(): PreflightCheck {
   return probe("structured_content_capability", () => {
-    if (!env("OPENROUTER_API_KEY") || !env("PERPLEXITY_API_KEY")) {
-      throw new PreflightCheckFailure("LLM provider keys are required for prose generation");
+    if (!env("DEEPSEEK_API_KEY")) {
+      throw new PreflightCheckFailure("DEEPSEEK_API_KEY is required for prose generation");
     }
-    return "structured-content LLM stack present";
+    return "structured-content DeepSeek stack configured";
   });
 }
 
@@ -255,17 +248,15 @@ function checkBotInteropCompatible(): PreflightCheck {
 }
 
 /**
- * 9. llm-router compatibility: the package resolves and the router class is the
- * one the LlmService constructs.
+ * 9. Build-intelligence calls DeepSeek directly. The check keeps its historical
+ * name. A missing @quantum-l9/llm-router package is not a failure.
  */
 function checkLlmRouterCompatible(): PreflightCheck {
   return probe("llm_router_compatible", () => {
-    const version = packageVersion("@quantum-l9/llm-router");
-    if (!version) throw new PreflightCheckFailure("@quantum-l9/llm-router is not resolvable");
-    if (typeof L9LLMRouter !== "function") {
-      throw new PreflightCheckFailure("L9LLMRouter export is missing");
+    if (!env("DEEPSEEK_API_KEY")) {
+      throw new PreflightCheckFailure("DEEPSEEK_API_KEY is required for build-intelligence");
     }
-    return `llm-router ${version} resolves; L9LLMRouter present`;
+    return "build-intelligence calls DeepSeek directly; llm-router is not required";
   });
 }
 

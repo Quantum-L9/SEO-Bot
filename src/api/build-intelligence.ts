@@ -508,8 +508,8 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
     }
   });
 
-  // 5. LLM router audit — per-call records for the three governed operations,
-  //    projected from the router's own call log (machine-authed by prefix).
+  // 5. Router-log audit. Build-intelligence producers call DeepSeek directly and
+  //    record those calls on the request recorder, not on this router singleton.
   app.get("/api/build-intelligence/llm-audit", async (request, reply) => {
     const query = request.query as { client_id?: string };
     const projection = projectLlmAudit(getLlmService(), {

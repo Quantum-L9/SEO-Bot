@@ -23,8 +23,7 @@ const ALL_KEYS = {
   SEO_BOT_API_KEY: "secret",
   DATAFORSEO_LOGIN: "login",
   DATAFORSEO_PASSWORD: "password",
-  OPENROUTER_API_KEY: "or-key",
-  PERPLEXITY_API_KEY: "pplx-key",
+  DEEPSEEK_API_KEY: "deepseek-key",
 };
 
 describe("preflight — nine REAL runtime checks (no hardcoded PASS)", () => {
@@ -51,8 +50,7 @@ describe("preflight — nine REAL runtime checks (no hardcoded PASS)", () => {
 
   it("FAILs dataforseo_configured and the derived landscape capability when the DataForSEO login is missing", () => {
     vi.stubEnv("SEO_BOT_API_KEY", ALL_KEYS.SEO_BOT_API_KEY);
-    vi.stubEnv("OPENROUTER_API_KEY", ALL_KEYS.OPENROUTER_API_KEY);
-    vi.stubEnv("PERPLEXITY_API_KEY", ALL_KEYS.PERPLEXITY_API_KEY);
+    vi.stubEnv("DEEPSEEK_API_KEY", ALL_KEYS.DEEPSEEK_API_KEY);
     vi.stubEnv("DATAFORSEO_PASSWORD", ALL_KEYS.DATAFORSEO_PASSWORD);
     // DATAFORSEO_LOGIN deliberately unset.
     const report = runPreflight(true);
@@ -79,12 +77,22 @@ describe("preflight — nine REAL runtime checks (no hardcoded PASS)", () => {
     expect(byName.seo_bot_machine_auth!.detail).toContain("not configured");
   });
 
-  it("FAILs llm_provider_configured and structured_content_capability when Perplexity is missing", () => {
+  it("FAILs llm_provider_configured and structured_content_capability when DeepSeek is missing", () => {
     vi.stubEnv("SEO_BOT_API_KEY", ALL_KEYS.SEO_BOT_API_KEY);
-    vi.stubEnv("OPENROUTER_API_KEY", ALL_KEYS.OPENROUTER_API_KEY);
     const report = runPreflight(true);
     const byName = Object.fromEntries(report.checks.map((c) => [c.name, c]));
     expect(byName.llm_provider_configured!.status).toBe("FAIL");
     expect(byName.structured_content_capability!.status).toBe("FAIL");
+    expect(byName.llm_router_compatible!.status).toBe("FAIL");
+  });
+
+  it("passes the build-intelligence LLM checks without OpenRouter, Perplexity, or a router pin", () => {
+    vi.stubEnv("DEEPSEEK_API_KEY", ALL_KEYS.DEEPSEEK_API_KEY);
+    const report = runPreflight(false);
+    const byName = Object.fromEntries(report.checks.map((c) => [c.name, c]));
+    expect(byName.llm_provider_configured!.status).toBe("PASS");
+    expect(byName.seo_content_blueprint_capability!.status).toBe("PASS");
+    expect(byName.structured_content_capability!.status).toBe("PASS");
+    expect(byName.llm_router_compatible!.detail).toContain("DeepSeek directly");
   });
 });

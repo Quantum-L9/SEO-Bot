@@ -35,7 +35,7 @@ import {
   WEBSITE_INTELLIGENCE_SCHEMAS,
 } from "@quantum-l9/bot-interop";
 import { createModuleLogger } from "../core/logger.js";
-import { getLlmService, type LlmCallCounter, type LlmService } from "../services/llm.js";
+import type { LlmCallCounter } from "../services/llm.js";
 import { LlmOutputTruncatedError } from "../services/llm-parse.js";
 import type { LlmRunRecorder } from "../services/llm-run-recorder.js";
 import {
@@ -47,6 +47,7 @@ import {
   unsatisfiedProofRequirements,
 } from "./claim-grounding.js";
 import { type RouteValidationVerdict, validateRoute } from "./content-validator.js";
+import { type BuildIntelligenceLlm, getDeepSeekBuildIntelligenceLlm } from "./deepseek-llm.js";
 import { byCodeUnit } from "./ordering.js";
 import { PRODUCER } from "./producer.js";
 import {
@@ -174,20 +175,20 @@ export interface StructuredContentResult {
  */
 export async function createStructuredContentPackage(
   request: StructuredContentRequest,
-  deps: { llm?: LlmService; recorder?: LlmRunRecorder } = {},
+  deps: { llm?: BuildIntelligenceLlm; recorder?: LlmRunRecorder } = {},
 ): Promise<StructuredContentPackageArtifact> {
   return (await createStructuredContentPackageWithEvidence(request, deps)).artifact;
 }
 
 export async function createStructuredContentPackageWithEvidence(
   request: StructuredContentRequest,
-  deps: { llm?: LlmService; recorder?: LlmRunRecorder } = {},
+  deps: { llm?: BuildIntelligenceLlm; recorder?: LlmRunRecorder } = {},
 ): Promise<StructuredContentResult> {
   // ── Lineage first: reject a tampered/invalid/foreign contract BEFORE any
   //    LLM spend. Integrity, identity, and structure are all checked here.
   assertContractUsable(request);
 
-  const llm = deps.llm ?? getLlmService();
+  const llm = deps.llm ?? getDeepSeekBuildIntelligenceLlm();
   const contract = request.page_content_contract.payload;
 
   // Package totals, accumulated from the PER-ROUTE counters below — the route
@@ -316,7 +317,7 @@ interface ProducedRoute {
  * second repair, and the counters returned describe exactly what was spent.
  */
 async function produceRoute(args: {
-  llm: LlmService;
+  llm: BuildIntelligenceLlm;
   request: StructuredContentRequest;
   contractRoute: PageContentContractRoute;
   recorder?: LlmRunRecorder;
@@ -673,7 +674,7 @@ function isTerminalLlmFailure(error: unknown): boolean {
  * The caller-supplied counter records the call honestly for run evidence.
  */
 async function generateRoute(
-  llm: LlmService,
+  llm: BuildIntelligenceLlm,
   request: StructuredContentRequest,
   contractRoute: PageContentContractRoute,
   repair?: {
@@ -805,15 +806,18 @@ function reconcileStructuredRoute(
  * validator's own default `schemaRepairAttempts: 1` may perform.
  */
 function countingValidationLlm(
-  llm: LlmService,
+  llm: BuildIntelligenceLlm,
   calls: LlmCallCounter,
   recorder?: LlmRunRecorder,
-): LlmService {
+): BuildIntelligenceLlm {
   const target = llm;
   return {
     async executePolicyJson(
-      operation: Parameters<LlmService["executePolicyJson"]>[0],
-      args: Omit<Parameters<LlmService["executePolicyJson"]>[1], "callCounter" | "recorder">,
+      operation: Parameters<BuildIntelligenceLlm["executePolicyJson"]>[0],
+      args: Omit<
+        Parameters<BuildIntelligenceLlm["executePolicyJson"]>[1],
+        "callCounter" | "recorder"
+      >,
     ): Promise<unknown> {
       return target.executePolicyJson<unknown>(operation, {
         ...args,
@@ -821,7 +825,7 @@ function countingValidationLlm(
         recorder,
       });
     },
-  } as unknown as LlmService;
+  } as unknown as BuildIntelligenceLlm;
 }
 
 /**
