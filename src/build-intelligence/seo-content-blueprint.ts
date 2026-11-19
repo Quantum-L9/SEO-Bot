@@ -529,12 +529,10 @@ export async function createSEOContentBlueprintWithEvidence(
   assertWholeSiteBlueprint(routes, request.routes, allRouteIds);
   if (!landscape) {
     for (const route of routes) {
-      for (const gap of route.competitive_gaps) {
-        if (gap.donor_domains.length > 0) {
-          throw new SeoContentBlueprintInvalidError(
-            "first-party SEOContentBlueprint must not name donor domains",
-          );
-        }
+      if (route.competitive_gaps.length > 0) {
+        throw new SeoContentBlueprintInvalidError(
+          "first-party SEOContentBlueprint must not carry competitive gaps",
+        );
       }
     }
   }

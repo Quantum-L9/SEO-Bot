@@ -216,7 +216,38 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
           },
         },
       ),
-    ).rejects.toThrow(/must not name donor domains/);
+    ).rejects.toThrow(/must not carry competitive gaps/);
+  });
+
+  it("rejects a competitive gap that names no donors when research was not requested", async () => {
+    const record = {
+      schema: FIRST_PARTY_AUTHORITY_SCHEMA,
+      market_research: "not_requested" as const,
+      domain_spec_digest: "ab".repeat(32),
+      donor_count: 0 as const,
+    };
+    const route = blueprintRoute("home", "/");
+    route.competitive_gaps = [
+      {
+        gap_id: "g1",
+        description: "no pricing",
+        donor_domains: [],
+        opportunity: "add pricing",
+      },
+    ];
+    const { llm } = fakeLlm([route]);
+    await expect(
+      createSEOContentBlueprint(
+        {
+          client_id: "client-1",
+          build_id: "build-1",
+          first_party_authority: record,
+          routes: requestedRoutes,
+          business_facts: [],
+        },
+        { llm, dataForSeo: fakePages },
+      ),
+    ).rejects.toThrow(/must not carry competitive gaps/);
   });
 
   it("references the EXACT CompetitiveLandscape artifact", async () => {
