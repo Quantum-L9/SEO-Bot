@@ -181,9 +181,12 @@ function serpPurchaseFingerprint(
   device: string,
 ): string {
   const normalizedQuery = query.trim().toLowerCase().replace(/\s+/g, " ");
-  return [normalizedQuery, locationName.trim().toLowerCase(), languageName.trim().toLowerCase(), device].join(
-    "\n",
-  );
+  return [
+    normalizedQuery,
+    locationName.trim().toLowerCase(),
+    languageName.trim().toLowerCase(),
+    device,
+  ].join("\n");
 }
 
 function rememberFailedSerp(buildId: string, fingerprint: string): void {

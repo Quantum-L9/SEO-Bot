@@ -642,9 +642,9 @@ describe("CompetitiveLandscape — SERP evidence integrity", () => {
     );
     expect(first.keywords).toContain("roof repair");
     const second = new ThrowingPort(new DataForSeoTaskError("quota"));
-    await expect(createCompetitiveLandscape(request, { dataForSeo: second })).rejects.toBeInstanceOf(
-      CompetitiveEvidenceIncompleteError,
-    );
+    await expect(
+      createCompetitiveLandscape(request, { dataForSeo: second }),
+    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
     expect(second.keywords).toEqual([]);
 
     const emptyBuild: CompetitiveLandscapeRequest = { ...request, build_id: "build-empty-rebuy" };
