@@ -17,6 +17,12 @@ import {
 } from "../services/llm-parse.js";
 import { LLM_PROVIDER_TIMEOUT_MS } from "../services/llm-provider-timeout.js";
 import type { LlmRunRecorder, OperationAttempt } from "../services/llm-run-recorder.js";
+import {
+  clearSpendLedger,
+  type DirectSpendCeilings,
+  defaultSpendLedgerDir,
+  reserveDirectSpend,
+} from "./spend-ledger.js";
 
 const DEEPSEEK_PROVIDER = "deepseek";
 const DEFAULT_MODEL = "deepseek-flash";
@@ -88,41 +94,22 @@ interface Completion {
   usage?: { completion_tokens?: number };
 }
 
-interface SpendCeilings {
-  monthlyUsd: number;
-  weeklyUsd: number;
-  globalMonthlyUsd: number;
-  dailyUsd?: number;
-}
-
 interface DeepSeekSettings {
   apiKey: string;
   model: string;
   baseUrl: string;
-  ceilings: SpendCeilings;
+  ceilings: DirectSpendCeilings;
 }
 
-const spend = {
-  byClientMonth: new Map<string, number>(),
-  byClientWeek: new Map<string, number>(),
-  byBuild: new Map<string, number>(),
-  globalMonth: 0,
-  daily: 0,
-};
-
 export function resetDeepSeekSpendForTests(): void {
-  spend.byClientMonth.clear();
-  spend.byClientWeek.clear();
-  spend.byBuild.clear();
-  spend.globalMonth = 0;
-  spend.daily = 0;
+  clearSpendLedger();
 }
 
 function settingsFromParts(
   apiKey: string | undefined,
   model: string | undefined,
   baseUrl: string | undefined,
-  ceilings: SpendCeilings,
+  ceilings: DirectSpendCeilings,
 ): DeepSeekSettings {
   return {
     apiKey: apiKey?.trim() ?? "",
@@ -133,42 +120,41 @@ function settingsFromParts(
 }
 
 function reserveSpend(
+  dir: string,
   args: BuildIntelligenceLlmArgs<unknown>,
-  ceilings: SpendCeilings,
+  ceilings: DirectSpendCeilings,
   reservation: number,
+  now: Date,
 ): void {
   const client = args.clientId;
-  const buildKey = `${args.clientId}\0${args.buildId ?? ""}`;
-  const nextMonth = (spend.byClientMonth.get(client) ?? 0) + reservation;
-  const nextWeek = (spend.byClientWeek.get(client) ?? 0) + reservation;
-  const nextGlobal = spend.globalMonth + reservation;
-  const nextDaily = spend.daily + reservation;
-  const nextBuild = (spend.byBuild.get(buildKey) ?? 0) + reservation;
-  if (nextMonth > ceilings.monthlyUsd + 1e-12) {
+  const scope = reserveDirectSpend({
+    dir,
+    clientId: client,
+    buildId: args.buildId ?? "",
+    usd: reservation,
+    ceilings,
+    now,
+  });
+  if (scope === "month") {
     throw new BudgetExhaustedError(
       `Budget exhausted for ${client}: reservation exceeds DEFAULT_CLIENT_MONTHLY_BUDGET; not dispatched`,
     );
   }
-  if (nextWeek > ceilings.weeklyUsd + 1e-12) {
+  if (scope === "week") {
     throw new BudgetExhaustedError(
       `Budget exhausted for ${client}: reservation exceeds DEFAULT_CLIENT_WEEKLY_CEILING; not dispatched`,
     );
   }
-  if (nextGlobal > ceilings.globalMonthlyUsd + 1e-12) {
+  if (scope === "global") {
     throw new BudgetExhaustedError(
       "Budget exhausted: reservation exceeds GLOBAL_MONTHLY_HARD_CEILING; not dispatched",
     );
   }
-  if (ceilings.dailyUsd !== undefined && nextDaily > ceilings.dailyUsd + 1e-12) {
+  if (scope === "day") {
     throw new BudgetExhaustedError(
       "Budget exhausted: reservation exceeds DAILY_SPEND_CAP; not dispatched",
     );
   }
-  spend.byClientMonth.set(client, nextMonth);
-  spend.byClientWeek.set(client, nextWeek);
-  spend.byBuild.set(buildKey, nextBuild);
-  spend.globalMonth = nextGlobal;
-  spend.daily = nextDaily;
 }
 
 function settingsFromConfig(): DeepSeekSettings {
@@ -189,9 +175,13 @@ function settingsFromConfig(): DeepSeekSettings {
 export function createDeepSeekBuildIntelligenceLlm(options?: {
   env?: NodeJS.ProcessEnv;
   transport?: Transport;
-  ceilings?: SpendCeilings;
+  ceilings?: DirectSpendCeilings;
+  ledgerDir?: string;
+  now?: () => Date;
 }): BuildIntelligenceLlm {
   const transport = options?.transport ?? ((url, init) => fetch(url, init));
+  const ledgerDir = options?.ledgerDir ?? defaultSpendLedgerDir();
+  const now = options?.now ?? (() => new Date());
   const settings = options?.env
     ? settingsFromParts(
         options.env.DEEPSEEK_API_KEY,
@@ -225,7 +215,7 @@ export function createDeepSeekBuildIntelligenceLlm(options?: {
       Buffer.byteLength(args.systemPrompt, "utf8") + Buffer.byteLength(userPrompt, "utf8");
     const reservation =
       (inputBound * pricing.inputPerMTok + maxOutputTokens * pricing.outputPerMTok) / 1_000_000;
-    reserveSpend(args, settings.ceilings, reservation);
+    reserveSpend(ledgerDir, args, settings.ceilings, reservation, now());
     let response: Response;
     try {
       response = await transport(`${settings.baseUrl}/chat/completions`, {

@@ -4,6 +4,9 @@
  * status: active
  */
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   BudgetExhaustedError,
@@ -168,5 +171,126 @@ describe("build-intelligence DeepSeek client", () => {
     await call();
     await expect(call()).rejects.toBeInstanceOf(BudgetExhaustedError);
     expect(transport).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats a zero daily cap as disabled and rolls weekly spend into the next week", async () => {
+    const ledgerDir = mkdtempSync(join(tmpdir(), "deepseek-spend-"));
+    try {
+      let now = new Date("2026-01-26T12:00:00.000Z");
+      const transport = vi
+        .fn()
+        .mockImplementation(() => Promise.resolve(jsonResponse(JSON.stringify({ ok: true }))));
+      const llm = createDeepSeekBuildIntelligenceLlm({
+        env: { DEEPSEEK_API_KEY: "test-key" },
+        transport,
+        ledgerDir,
+        now: () => now,
+        ceilings: { monthlyUsd: 10, weeklyUsd: 0.0031, globalMonthlyUsd: 2000, dailyUsd: 0 },
+      });
+      const call = () =>
+        llm.executePolicyJson("CONTENT_VALIDATION", {
+          clientId: "client-week",
+          buildId: "build-week",
+          module: "test",
+          purpose: "validate",
+          systemPrompt: "json",
+          userPrompt: "route",
+          validate: (parsed) => parsed as { ok: boolean },
+          schemaRepairAttempts: 0,
+        });
+      await call();
+      await expect(call()).rejects.toBeInstanceOf(BudgetExhaustedError);
+      now = new Date("2026-02-02T12:00:00.000Z");
+      await call();
+      expect(transport).toHaveBeenCalledTimes(2);
+    } finally {
+      rmSync(ledgerDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rolls monthly spend into the next month inside the same week", async () => {
+    const ledgerDir = mkdtempSync(join(tmpdir(), "deepseek-spend-"));
+    try {
+      let now = new Date("2026-01-31T12:00:00.000Z");
+      const transport = vi
+        .fn()
+        .mockImplementation(() => Promise.resolve(jsonResponse(JSON.stringify({ ok: true }))));
+      const llm = createDeepSeekBuildIntelligenceLlm({
+        env: { DEEPSEEK_API_KEY: "test-key" },
+        transport,
+        ledgerDir,
+        now: () => now,
+        ceilings: { monthlyUsd: 0.0031, weeklyUsd: 10, globalMonthlyUsd: 2000 },
+      });
+      const call = () =>
+        llm.executePolicyJson("CONTENT_VALIDATION", {
+          clientId: "client-month",
+          buildId: "build-month",
+          module: "test",
+          purpose: "validate",
+          systemPrompt: "json",
+          userPrompt: "route",
+          validate: (parsed) => parsed as { ok: boolean },
+          schemaRepairAttempts: 0,
+        });
+      await call();
+      await expect(call()).rejects.toBeInstanceOf(BudgetExhaustedError);
+      now = new Date("2026-02-01T12:00:00.000Z");
+      await call();
+      expect(transport).toHaveBeenCalledTimes(2);
+    } finally {
+      rmSync(ledgerDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the open period after a new client is constructed", async () => {
+    const ledgerDir = mkdtempSync(join(tmpdir(), "deepseek-spend-"));
+    try {
+      const now = () => new Date("2026-03-04T12:00:00.000Z");
+      const ceilings = { monthlyUsd: 0.0031, weeklyUsd: 10, globalMonthlyUsd: 2000 };
+      const firstTransport = vi
+        .fn()
+        .mockImplementation(() => Promise.resolve(jsonResponse(JSON.stringify({ ok: true }))));
+      const first = createDeepSeekBuildIntelligenceLlm({
+        env: { DEEPSEEK_API_KEY: "test-key" },
+        transport: firstTransport,
+        ledgerDir,
+        now,
+        ceilings,
+      });
+      await first.executePolicyJson("CONTENT_VALIDATION", {
+        clientId: "client-restart",
+        buildId: "build-restart",
+        module: "test",
+        purpose: "validate",
+        systemPrompt: "json",
+        userPrompt: "route",
+        validate: (parsed) => parsed as { ok: boolean },
+        schemaRepairAttempts: 0,
+      });
+      const secondTransport = vi.fn();
+      const second = createDeepSeekBuildIntelligenceLlm({
+        env: { DEEPSEEK_API_KEY: "test-key" },
+        transport: secondTransport,
+        ledgerDir,
+        now,
+        ceilings,
+      });
+      await expect(
+        second.executePolicyJson("CONTENT_VALIDATION", {
+          clientId: "client-restart",
+          buildId: "build-restart",
+          module: "test",
+          purpose: "validate",
+          systemPrompt: "json",
+          userPrompt: "route",
+          validate: (parsed) => parsed as { ok: boolean },
+          schemaRepairAttempts: 0,
+        }),
+      ).rejects.toBeInstanceOf(BudgetExhaustedError);
+      expect(secondTransport).not.toHaveBeenCalled();
+    } finally {
+      rmSync(ledgerDir, { recursive: true, force: true });
+    }
   });
 });
