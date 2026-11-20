@@ -24,6 +24,30 @@ import { connect, dropClient, liveServicesUnavailable, seedClient } from "./serv
 
 const skip = await liveServicesUnavailable();
 
+/** SQLSTATE for unique_violation (PostgreSQL Appendix A). */
+const UNIQUE_VIOLATION = "23505";
+
+/**
+ * The node-postgres error behind a failed query. drizzle-orm wraps driver
+ * errors in `DrizzleQueryError` ("Failed query: ...") and keeps the original
+ * on `cause`, so the message no longer carries Postgres's own wording. The
+ * driver error is the one that carries the SQLSTATE `code` and `constraint`.
+ */
+function postgresError(error: unknown): { code?: string; constraint?: string } {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current instanceof Error; depth += 1) {
+    const candidate = current as Error & { code?: unknown; constraint?: unknown };
+    if (typeof candidate.code === "string") {
+      return {
+        code: candidate.code,
+        constraint: typeof candidate.constraint === "string" ? candidate.constraint : undefined,
+      };
+    }
+    current = candidate.cause;
+  }
+  return {};
+}
+
 describe.skipIf(skip)("what the fakes promise, on real Postgres", () => {
   let ctx: ReturnType<typeof connect>;
   let clientId: string;
@@ -87,16 +111,24 @@ describe.skipIf(skip)("what the fakes promise, on real Postgres", () => {
   it("rejects the same fingerprint twice in one run even without the ON CONFLICT clause", async () => {
     // Without this, the clause above is politeness rather than a constraint —
     // any code path that forgot it would double-record in silence.
-    await expect(
-      ctx.db.execute(sql`
+    const rejection = await ctx.db
+      .execute(sql`
         INSERT INTO intelligence_signals
           (run_id, client_id, entity_type, entity_id, signal_type, severity, confidence,
            evidence, fingerprint)
         VALUES
           (${runId}::uuid, ${clientId}::uuid, 'page', '/x', 'keyword_drop', 'high', 0.85,
            '{}'::jsonb, 'live-conflict-fingerprint')
-      `),
-    ).rejects.toThrow(/duplicate key|unique/i);
+      `)
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    expect(rejection, "the duplicate insert must be rejected").toBeInstanceOf(Error);
+    expect(postgresError(rejection)).toEqual({
+      code: UNIQUE_VIOLATION,
+      constraint: "idx_intel_signals_run_fingerprint",
+    });
   });
 
   it("lets the SAME fingerprint through on a DIFFERENT run", async () => {
