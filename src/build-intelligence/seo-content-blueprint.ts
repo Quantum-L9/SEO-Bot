@@ -52,7 +52,11 @@ import {
   seoBlueprintBatchOutputTokens,
   seoBlueprintGlobalIntentOutputTokens,
 } from "../services/seo-blueprint-output-budget.js";
-import { type BuildIntelligenceLlm, getDeepSeekBuildIntelligenceLlm } from "./deepseek-llm.js";
+import {
+  type BuildIntelligenceLlm,
+  DeepSeekTransportError,
+  getDeepSeekBuildIntelligenceLlm,
+} from "./deepseek-llm.js";
 import { PRODUCER } from "./producer.js";
 import {
   type GlobalRouteIntentRoute,
@@ -512,7 +516,9 @@ export async function createSEOContentBlueprintWithEvidence(
       // A truncated reply is its own typed failure (it names the operation,
       // this batch's purpose and its output cap) — never relabelled as a
       // validation failure, and it spent no repair.
-      if (error instanceof LlmOutputTruncatedError) throw error;
+      if (error instanceof LlmOutputTruncatedError || error instanceof DeepSeekTransportError) {
+        throw error;
+      }
       // A batch that fails its one bounded repair fails the whole artifact —
       // but the message says WHY: a reply that failed validation is not the
       // same failure as a call that never produced a reply (timeout, every

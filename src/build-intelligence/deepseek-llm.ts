@@ -60,6 +60,18 @@ export class TaskValidationError extends Error {
   }
 }
 const OUTPUT_CEILING = 16_000;
+/**
+ * Upstream DeepSeek failure (timeout, network, or non-2xx). Not model output,
+ * so callers must not spend a repair on it. It is a ProviderRequestError, so
+ * callers that treat provider failures as terminal keep doing so.
+ */
+export class DeepSeekTransportError extends ProviderRequestError {
+  readonly code = "DEEPSEEK_TRANSPORT_ERROR";
+  constructor(message: string) {
+    super(message);
+    this.name = "DeepSeekTransportError";
+  }
+}
 const DEFAULT_OUTPUT_TOKENS: Record<string, number> = {
   SEO_CONTENT_BLUEPRINT: 5_000,
   STRUCTURED_CONTENT_GENERATION: 12_000,
@@ -245,12 +257,12 @@ export function createDeepSeekBuildIntelligenceLlm(options?: {
         signal: AbortSignal.timeout(LLM_PROVIDER_TIMEOUT_MS),
       });
     } catch (error) {
-      throw new ProviderRequestError(
+      throw new DeepSeekTransportError(
         `DeepSeek request failed for ${operation} (${error instanceof Error ? error.name : "error"})`,
       );
     }
     if (!response.ok) {
-      throw new ProviderRequestError(`DeepSeek HTTP ${response.status} for ${operation}`);
+      throw new DeepSeekTransportError(`DeepSeek HTTP ${response.status} for ${operation}`);
     }
     const completion = (await response.json()) as Completion;
     const choice = completion.choices?.[0];

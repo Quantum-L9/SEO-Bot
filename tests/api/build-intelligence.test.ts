@@ -4,6 +4,7 @@
  * status: active
  */
 
+import { readFileSync } from "node:fs";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -581,5 +582,41 @@ describe("build-intelligence — seo-content-blueprint admits only verified busi
       payload: blueprintBody(),
     });
     expect(res.statusCode).not.toBe(400);
+  });
+
+  it("accepts optional route keywords and forwards them to the producer", async () => {
+    const producer = await import("../../src/build-intelligence/seo-content-blueprint.js");
+    vi.mocked(producer.createSEOContentBlueprintWithEvidence).mockRejectedValueOnce(
+      new Error("boundary reached"),
+    );
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/seo-content-blueprint",
+      headers: AUTH,
+      payload: {
+        ...blueprintBody(),
+        routes: [{ route_id: "/", path: "/", purpose: "Home", keywords: ["roof repair"] }],
+      },
+    });
+    expect(res.statusCode).not.toBe(400);
+    expect(producer.createSEOContentBlueprintWithEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routes: [expect.objectContaining({ keywords: ["roof repair"] })],
+      }),
+      expect.anything(),
+    );
+  });
+});
+
+describe("build-intelligence API module load", () => {
+  it("does not statically import the llm router or throw when its manifest is missing", () => {
+    const source = readFileSync("src/api/build-intelligence.ts", "utf8");
+    expect(source).not.toMatch(/from\s+["']@quantum-l9\/llm-router/);
+    expect(source).not.toMatch(/from\s+["']\.\.\/services\/llm\.js["']/);
+    expect(source).not.toMatch(/from\s+["']\.\.\/services\/improve-llm-policy\.js["']/);
+    expect(source).not.toMatch(/scopedPkgPath\(\s*["']@quantum-l9["']\s*,\s*["']llm-router["']/);
+    const audit = readFileSync("src/build-intelligence/llm-audit.ts", "utf8");
+    expect(audit).not.toMatch(/from\s+["']@quantum-l9\/llm-router/);
+    expect(audit).not.toMatch(/from\s+["']\.\.\/services\/llm\.js["']/);
   });
 });

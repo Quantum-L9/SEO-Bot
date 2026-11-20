@@ -48,6 +48,7 @@ import {
   CompetitiveLandscapeInvalidError,
   createCompetitiveLandscape,
 } from "../build-intelligence/competitive-landscape.js";
+import { DeepSeekTransportError } from "../build-intelligence/deepseek-llm.js";
 import { projectLlmAudit } from "../build-intelligence/llm-audit.js";
 import { runPreflight } from "../build-intelligence/preflight.js";
 import {
@@ -606,6 +607,9 @@ function sendRunEvidence(
 function handleProducerError(reply: FastifyReply, error: unknown): FastifyReply {
   // Upstream evidence provider is unreachable or refused the request.
   if (error instanceof DataForSeoUnavailableError) {
+    return reply.status(502).send({ error: error.code, message: error.message });
+  }
+  if (error instanceof DeepSeekTransportError) {
     return reply.status(502).send({ error: error.code, message: error.message });
   }
   // Provider reached, individual task failed, or its payload is unusable.
