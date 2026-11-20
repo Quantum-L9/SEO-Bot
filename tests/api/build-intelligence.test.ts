@@ -535,6 +535,41 @@ describe("build-intelligence — seo-content-blueprint admits only verified busi
     expect(res.statusCode).toBe(400);
   });
 
+  it("admits route keywords and still rejects a provider field", async () => {
+    const producer = await import("../../src/build-intelligence/seo-content-blueprint.js");
+    vi.mocked(producer.createSEOContentBlueprintWithEvidence).mockRejectedValueOnce(
+      new Error("boundary reached"),
+    );
+    const admitted = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/seo-content-blueprint",
+      headers: AUTH,
+      payload: {
+        ...blueprintBody(),
+        routes: [{ route_id: "/", path: "/", purpose: "Home", keywords: ["crm transformation"] }],
+      },
+    });
+    expect(admitted.statusCode).not.toBe(400);
+    expect(producer.createSEOContentBlueprintWithEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routes: [
+          expect.objectContaining({
+            keywords: ["crm transformation"],
+          }),
+        ],
+      }),
+      expect.anything(),
+    );
+
+    const rejected = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/seo-content-blueprint",
+      headers: AUTH,
+      payload: { ...blueprintBody(), provider: "deepseek" },
+    });
+    expect(rejected.statusCode).toBe(400);
+  });
+
   it("admits a well-formed verified fact past the boundary", async () => {
     const producer = await import("../../src/build-intelligence/seo-content-blueprint.js");
     vi.mocked(producer.createSEOContentBlueprintWithEvidence).mockRejectedValueOnce(
@@ -579,8 +614,9 @@ describe("build-intelligence API module load", () => {
     expect(source).not.toMatch(/from\s+["']@quantum-l9\/llm-router/);
     expect(source).not.toMatch(/from\s+["']\.\.\/services\/llm\.js["']/);
     expect(source).not.toMatch(/from\s+["']\.\.\/services\/improve-llm-policy\.js["']/);
-    expect(source).not.toMatch(/from\s+["']\.\.\/build-intelligence\/llm-audit\.js["']/);
     expect(source).not.toMatch(/scopedPkgPath\(\s*["']@quantum-l9["']\s*,\s*["']llm-router["']/);
-    expect(source).toContain('tryScopedVersion("@quantum-l9", "llm-router")');
+    const audit = readFileSync("src/build-intelligence/llm-audit.ts", "utf8");
+    expect(audit).not.toMatch(/from\s+["']@quantum-l9\/llm-router/);
+    expect(audit).not.toMatch(/from\s+["']\.\.\/services\/llm\.js["']/);
   });
 });

@@ -53,6 +53,11 @@ const envSchema = z.object({
   // LLM — @quantum-l9/llm-router (replaces old tiered model)
   OPENROUTER_API_KEY: z.string().min(1),
   PERPLEXITY_API_KEY: z.string().min(1),
+  // Build-intelligence calls DeepSeek directly. Absent key fails that path
+  // before dispatch; model and base URL are validated here when present.
+  DEEPSEEK_API_KEY: z.preprocess(blankToUndefined, z.string().min(1).optional()),
+  DEEPSEEK_MODEL: z.string().min(1).default("deepseek-v4-pro"),
+  DEEPSEEK_BASE_URL: z.string().url().default("https://api.deepseek.com"),
 
   // Governed cross-agent memory (l9-graphiti-memory HTTP MCP). Default required.
   // Blank L9_MEMORY_TOKEN aliases GRAPHITI_MCP_TOKEN via applyMemoryAliases().

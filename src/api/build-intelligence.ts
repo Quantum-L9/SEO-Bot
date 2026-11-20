@@ -49,11 +49,13 @@ import {
   createCompetitiveLandscape,
 } from "../build-intelligence/competitive-landscape.js";
 import { DeepSeekTransportError } from "../build-intelligence/deepseek-llm.js";
+import { projectLlmAudit } from "../build-intelligence/llm-audit.js";
 import { runPreflight } from "../build-intelligence/preflight.js";
 import {
   getRunLlmAudit,
   getRunLlmAuditFor,
   recordCompetitiveLandscapeLeg,
+  recordedCallsForAudit,
   recordSeoContentBlueprintLeg,
   recordStructuredContentLeg,
 } from "../build-intelligence/run-evidence-store.js";
@@ -110,28 +112,6 @@ const versionAt = (path: string): string =>
   (JSON.parse(readFileSync(path, "utf8")) as { version: string }).version;
 const SERVICE_VERSION: string = versionAt(join(dirname(dirname(moduleDir)), "package.json"));
 const BOT_INTEROP_VERSION: string = versionAt(scopedPkgPath("@quantum-l9", "bot-interop"));
-function tryScopedVersion(scope: string, name: string): string | undefined {
-  let dir = moduleDir;
-  for (;;) {
-    const candidate = join(dir, "node_modules", scope, name, "package.json");
-    if (existsSync(candidate)) {
-      try {
-        const parsed = JSON.parse(readFileSync(candidate, "utf8")) as { version?: string };
-        const version = parsed.version;
-        return version && version.length > 0 ? version : undefined;
-      } catch {
-        return undefined;
-      }
-    }
-    const parent = dirname(dir);
-    if (parent === dir) return undefined;
-    dir = parent;
-  }
-}
-// Optional: build-intelligence does not require @quantum-l9/llm-router to be
-// installed. A missing manifest must not throw while this module loads, or the
-// preflight route cannot be registered.
-const LLM_ROUTER_VERSION: string | undefined = tryScopedVersion("@quantum-l9", "llm-router");
 
 import {
   DataForSeoTaskError,
@@ -198,7 +178,7 @@ const routeIdentitySchema = z
     route_id: z.string().min(1),
     path: z.string().min(1),
     purpose: z.string().min(1),
-    keywords: z.array(z.string().min(1)).optional(),
+    keywords: z.array(z.string().trim().min(1).max(200)).max(50).optional(),
   })
   .strict();
 
@@ -360,7 +340,7 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
       ...preflight,
       version: preflight.version === "unknown" ? SERVICE_VERSION : preflight.version,
       bot_interop_version: preflight.bot_interop_version ?? BOT_INTEROP_VERSION,
-      llm_router_version: preflight.llm_router_version ?? LLM_ROUTER_VERSION,
+      ...(preflight.llm_router_version ? { llm_router_version: preflight.llm_router_version } : {}),
       capabilities: {
         ...preflight.capabilities,
         // Schema advertisement, not a probed capability: the audit projection
@@ -533,15 +513,8 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
   //    record those calls on the request recorder, not on this router singleton.
   app.get("/api/build-intelligence/llm-audit", async (request, reply) => {
     const query = request.query as { client_id?: string };
-    // Loaded only for this route. Both modules evaluate @quantum-l9/llm-router,
-    // which build-intelligence producers and preflight do not need.
-    const [{ getLlmService }, { projectLlmAudit }] = await Promise.all([
-      import("../services/llm.js"),
-      import("../build-intelligence/llm-audit.js"),
-    ]);
-    const projection = projectLlmAudit(getLlmService(), {
-      clientId: query.client_id && query.client_id.trim() !== "" ? query.client_id : undefined,
-    });
+    const clientId = query.client_id?.trim() ? query.client_id : undefined;
+    const projection = projectLlmAudit(recordedCallsForAudit(clientId));
     persistAuditEvidence("llm-audit", projection);
     return reply.status(200).send(projection);
   });

@@ -8,12 +8,10 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  * LLM router audit for the REDESIGN_IMPROVE seam.
  *
- * Every SEO-Bot LLM call for the build-intelligence transaction routes through
- * @quantum-l9/llm-router (LlmService.execute → router.execute), so the router's
- * own call log is the audit authority. This module projects `getCallLog()`
- * RoutingDecision entries into per-operation records for the three governed
- * operations (SEO_CONTENT_BLUEPRINT, STRUCTURED_CONTENT_GENERATION,
- * CONTENT_VALIDATION).
+ * Build-intelligence LLM calls are recorded on the run recorder by the direct
+ * DeepSeek client. This module projects those recorded calls into per-operation
+ * records for the three governed operations (SEO_CONTENT_BLUEPRINT,
+ * STRUCTURED_CONTENT_GENERATION, CONTENT_VALIDATION).
  *
  * Classification is by the governed decision ids the LlmService recorded when
  * it dispatched each call — NOT by the decision's `taskType`. Those task types
@@ -23,17 +21,11 @@
  * be reported as governed build-intelligence calls, carrying task-default
  * search policy into the audit.
  *
- * `direct_provider_bypass_count` is MEASURED, not asserted: the LlmService
- * counts every executePolicyJson invocation it was asked to run, and the audit
- * compares that against the decisions actually logged by the router. A missing
- * logged decision means a call that bypassed the router. Both sides of that
- * comparison are scoped to the same client, so a per-tenant query never
- * measures one client's logged calls against another client's expected count.
+ * `direct_provider_bypass_count` is the number of bypass events the run recorder
+ * stored for the same client. Calls that never entered the recorder, including
+ * unrelated daemon traffic, are not part of this projection.
  * ═══════════════════════════════════════════════════════════════════════════════
  */
-
-import { type RoutingDecision, SearchPolicySource } from "@quantum-l9/llm-router";
-import type { LlmService } from "../services/llm.js";
 
 export const LLM_AUDIT_OPERATIONS = [
   "SEO_CONTENT_BLUEPRINT",
@@ -80,56 +72,47 @@ export function emptyAuditProjection(): LlmAuditProjection {
   };
 }
 
-function toCallRecord(operation: LlmAuditOperation, decision: RoutingDecision): LlmAuditCallRecord {
-  return {
-    operation,
-    task_id: decision.taskId,
-    client_id: decision.clientId,
-    timestamp: decision.timestamp,
-    search_required: decision.searchRequired,
-    search_policy_source:
-      decision.searchPolicySource === SearchPolicySource.EXPLICIT ? "EXPLICIT" : "TASK_DEFAULT",
-    outcome: decision.outcome,
-    failure_kind: decision.failureKind,
-    error_code: decision.errorCode,
-  };
+export interface RecordedAuditCall {
+  operation: string;
+  task_id: string;
+  client_id: string;
+  timestamp: string;
+  search_required: boolean;
+  search_policy_source: string;
+  outcome?: "SUCCESS" | "FAILED";
+}
+
+function isAuditOperation(operation: string): operation is LlmAuditOperation {
+  return (LLM_AUDIT_OPERATIONS as readonly string[]).includes(operation);
+}
+
+function searchPolicy(value: string): LlmAuditCallRecord["search_policy_source"] {
+  return value === "EXPLICIT" ? "EXPLICIT" : "TASK_DEFAULT";
 }
 
 /**
- * Project the router's call log into the audit for the three governed
- * operations. Optionally scoped to one client_id. `direct_provider_bypass_count`
- * is the number of executePolicyJson invocations the LlmService was asked to
- * run for these operations that have NO logged router decision.
+ * Project recorded DeepSeek calls into the audit. `calls` are the run recorder's
+ * operations, already scoped by the caller when a client was requested.
+ * `directProviderBypassCount` is that same client's measured bypass events.
  */
-export function projectLlmAudit(
-  llm: LlmService,
-  options: { clientId?: string } = {},
-): LlmAuditProjection {
+export function projectLlmAudit(input: {
+  calls: readonly RecordedAuditCall[];
+  directProviderBypassCount: number;
+}): LlmAuditProjection {
   const projection = emptyAuditProjection();
-  // Governed decision ids recorded at dispatch — the authority for "was this
-  // router decision one of ours?". Scoped to the same client as the counts
-  // below, so both sides of the bypass comparison describe one tenant.
-  const governed = llm.getGovernedDecisionIds(options.clientId);
-  const operationOf = new Map<string, LlmAuditOperation>();
-  for (const operation of LLM_AUDIT_OPERATIONS) {
-    for (const taskId of governed.get(operation) ?? []) operationOf.set(taskId, operation);
+  for (const call of input.calls) {
+    if (!isAuditOperation(call.operation)) continue;
+    projection.operations[call.operation].push({
+      operation: call.operation,
+      task_id: call.task_id,
+      client_id: call.client_id,
+      timestamp: call.timestamp,
+      search_required: call.search_required,
+      search_policy_source: searchPolicy(call.search_policy_source),
+      outcome: call.outcome,
+    });
   }
-
-  const decisions = llm.getRouter().getCallLog(Number.MAX_SAFE_INTEGER);
-  for (const decision of decisions) {
-    if (options.clientId && decision.clientId !== options.clientId) continue;
-    const operation = operationOf.get(decision.taskId);
-    if (!operation) continue;
-    projection.operations[operation].push(toCallRecord(operation, decision));
-  }
-
-  const expected = llm.getPolicyCallCounts(options.clientId);
-  let bypass = 0;
-  for (const operation of LLM_AUDIT_OPERATIONS) {
-    const logged = projection.operations[operation].length;
-    bypass += Math.max(0, (expected[operation] ?? 0) - logged);
-  }
-  projection.direct_provider_bypass_count = bypass;
+  projection.direct_provider_bypass_count = input.directProviderBypassCount;
   projection.produced_at = new Date().toISOString();
   return projection;
 }

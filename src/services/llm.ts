@@ -27,12 +27,15 @@ import {
   parseScore,
   type TruncatedAttempt,
 } from "./llm-parse.js";
+import { LLM_PROVIDER_TIMEOUT_MS } from "./llm-provider-timeout.js";
 import {
   type LlmRunRecorder,
   type OperationAttempt,
   publishCapabilityRejection,
 } from "./llm-run-recorder.js";
 import { hydrateSeoContext } from "./memory.js";
+
+export { LLM_PROVIDER_TIMEOUT_MS };
 
 /** llmUsage.clientId is uuid-typed; seam client ids are slugs. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -82,7 +85,6 @@ const ROUTER_ATTRIBUTION_WINDOW = 50;
  * a timeout. The timeout is an upper bound only — a healthy short call returns
  * as soon as the provider answers.
  */
-export const LLM_PROVIDER_TIMEOUT_MS = 240_000;
 
 /**
  * A capability combination the router refuses is raised from route resolution,

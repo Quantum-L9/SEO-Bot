@@ -364,6 +364,7 @@ export async function createSEOContentBlueprintWithEvidence(
   // ── PHASE A — global route intent plan (one compact call for ALL routes) ────
   const globalIntentPlan = await llm.strategizeJson<GlobalRouteIntentRoute[]>({
     clientId: request.client_id,
+    buildId: request.build_id,
     expectedOutputTokens: seoBlueprintGlobalIntentOutputTokens(request.routes.length),
     module: "build-intelligence",
     purpose: `seo-content-blueprint:global-intent:${request.build_id}`,
@@ -410,6 +411,7 @@ export async function createSEOContentBlueprintWithEvidence(
     try {
       batchRoutes = await llm.strategizeJson<SEOContentBlueprintRoute[]>({
         clientId: request.client_id,
+        buildId: request.build_id,
         expectedOutputTokens: batchOutputTokens,
         module: "build-intelligence",
         purpose: `seo-content-blueprint:batch-${batchIndex + 1}:${request.build_id}`,

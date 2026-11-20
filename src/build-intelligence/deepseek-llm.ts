@@ -8,27 +8,64 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { getConfig } from "../core/config.js";
 import type { LlmCallCounter } from "../services/llm.js";
 import {
   isTruncatedFinish,
   LlmOutputTruncatedError,
   parseJsonFromLlm,
 } from "../services/llm-parse.js";
+import { LLM_PROVIDER_TIMEOUT_MS } from "../services/llm-provider-timeout.js";
 import type { LlmRunRecorder, OperationAttempt } from "../services/llm-run-recorder.js";
+import {
+  clearSpendLedger,
+  type DirectSpendCeilings,
+  defaultSpendLedgerDir,
+  reserveDirectSpend,
+} from "./spend-ledger.js";
 
 const DEEPSEEK_PROVIDER = "deepseek";
-const DEFAULT_MODEL = "deepseek-flash";
+const DEFAULT_MODEL = "deepseek-v4-pro";
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
+
+/**
+ * Peak USD per 1M tokens. Matches the published DeepSeek peak table used by
+ * Website-Bot so a reservation is an upper bound, never an under-count.
+ */
+const DEEPSEEK_PEAK_PRICING: Readonly<
+  Record<string, { inputPerMTok: number; outputPerMTok: number }>
+> = {
+  "deepseek-flash": { inputPerMTok: 0.3, outputPerMTok: 1.2 },
+  "deepseek-v4-pro": { inputPerMTok: 1.32, outputPerMTok: 3.96 },
+};
+
+export class ProviderRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProviderRequestError";
+  }
+}
+
+export class BudgetExhaustedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BudgetExhaustedError";
+  }
+}
+
+export class TaskValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TaskValidationError";
+  }
+}
 const OUTPUT_CEILING = 16_000;
 /**
- * Same per-attempt bound as LLM_PROVIDER_TIMEOUT_MS in src/services/llm.ts.
- * That module evaluates @quantum-l9/llm-router on import, so this adapter
- * keeps the number locally instead of importing it.
+ * Upstream DeepSeek failure (timeout, network, or non-2xx). Not model output,
+ * so callers must not spend a repair on it. It is a ProviderRequestError, so
+ * callers that treat provider failures as terminal keep doing so.
  */
-const DEEPSEEK_ATTEMPT_TIMEOUT_MS = 240_000;
-
-/** Upstream DeepSeek failure. Not model output, so callers must not spend a repair on it. */
-export class DeepSeekTransportError extends Error {
+export class DeepSeekTransportError extends ProviderRequestError {
   readonly code = "DEEPSEEK_TRANSPORT_ERROR";
   constructor(message: string) {
     super(message);
@@ -52,6 +89,7 @@ export interface BuildIntelligenceLlmArgs<T> {
   callCounter?: LlmCallCounter;
   recorder?: LlmRunRecorder;
   expectedOutputTokens?: number;
+  buildId?: string;
 }
 
 export interface BuildIntelligenceLlm {
@@ -69,12 +107,112 @@ interface Completion {
   usage?: { completion_tokens?: number };
 }
 
+interface DeepSeekSettings {
+  apiKey: string;
+  model: string;
+  baseUrl: string;
+  ceilings: DirectSpendCeilings;
+}
+
+export function resetDeepSeekSpendForTests(): void {
+  clearSpendLedger();
+}
+
+function withoutTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) end -= 1;
+  return value.slice(0, end);
+}
+
+function settingsFromParts(
+  apiKey: string | undefined,
+  model: string | undefined,
+  baseUrl: string | undefined,
+  ceilings: DirectSpendCeilings,
+): DeepSeekSettings {
+  return {
+    apiKey: apiKey?.trim() ?? "",
+    model: model?.trim() || DEFAULT_MODEL,
+    baseUrl: withoutTrailingSlashes(baseUrl?.trim() || DEFAULT_BASE_URL),
+    ceilings,
+  };
+}
+
+function reserveSpend(
+  dir: string,
+  args: BuildIntelligenceLlmArgs<unknown>,
+  ceilings: DirectSpendCeilings,
+  reservation: number,
+  now: Date,
+): void {
+  const client = args.clientId;
+  const scope = reserveDirectSpend({
+    dir,
+    clientId: client,
+    buildId: args.buildId ?? "",
+    usd: reservation,
+    ceilings,
+    now,
+  });
+  if (scope === "month") {
+    throw new BudgetExhaustedError(
+      `Budget exhausted for ${client}: reservation exceeds DEFAULT_CLIENT_MONTHLY_BUDGET; not dispatched`,
+    );
+  }
+  if (scope === "week") {
+    throw new BudgetExhaustedError(
+      `Budget exhausted for ${client}: reservation exceeds DEFAULT_CLIENT_WEEKLY_CEILING; not dispatched`,
+    );
+  }
+  if (scope === "global") {
+    throw new BudgetExhaustedError(
+      "Budget exhausted: reservation exceeds GLOBAL_MONTHLY_HARD_CEILING; not dispatched",
+    );
+  }
+  if (scope === "day") {
+    throw new BudgetExhaustedError(
+      "Budget exhausted: reservation exceeds DAILY_SPEND_CAP; not dispatched",
+    );
+  }
+}
+
+function settingsFromConfig(): DeepSeekSettings {
+  const config = getConfig();
+  return settingsFromParts(
+    config.DEEPSEEK_API_KEY,
+    config.DEEPSEEK_MODEL,
+    config.DEEPSEEK_BASE_URL,
+    {
+      monthlyUsd: config.DEFAULT_CLIENT_MONTHLY_BUDGET,
+      weeklyUsd: config.DEFAULT_CLIENT_WEEKLY_CEILING,
+      globalMonthlyUsd: config.GLOBAL_MONTHLY_HARD_CEILING,
+      dailyUsd: config.DAILY_SPEND_CAP,
+    },
+  );
+}
+
 export function createDeepSeekBuildIntelligenceLlm(options?: {
   env?: NodeJS.ProcessEnv;
   transport?: Transport;
+  ceilings?: DirectSpendCeilings;
+  ledgerDir?: string;
+  now?: () => Date;
 }): BuildIntelligenceLlm {
-  const env = options?.env ?? process.env;
   const transport = options?.transport ?? ((url, init) => fetch(url, init));
+  const ledgerDir = options?.ledgerDir ?? defaultSpendLedgerDir();
+  const now = options?.now ?? (() => new Date());
+  const settings = options?.env
+    ? settingsFromParts(
+        options.env.DEEPSEEK_API_KEY,
+        options.env.DEEPSEEK_MODEL,
+        options.env.DEEPSEEK_BASE_URL,
+        options.ceilings ?? {
+          monthlyUsd: 200,
+          weeklyUsd: 100,
+          globalMonthlyUsd: 2000,
+        },
+      )
+    : settingsFromConfig();
 
   async function complete(
     operation: string,
@@ -83,21 +221,31 @@ export function createDeepSeekBuildIntelligenceLlm(options?: {
     maxOutputTokens: number,
     attempt: OperationAttempt,
   ): Promise<{ content: string; finishReason: string; outputTokens: number }> {
-    const apiKey = env.DEEPSEEK_API_KEY?.trim();
-    if (!apiKey) throw new Error("Missing required LLM configuration: DEEPSEEK_API_KEY");
-    const model = env.DEEPSEEK_MODEL?.trim() || DEFAULT_MODEL;
-    const baseUrl = (env.DEEPSEEK_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, "");
+    if (!settings.apiKey) {
+      throw new ProviderRequestError("Missing required LLM configuration: DEEPSEEK_API_KEY");
+    }
+    const pricing = DEEPSEEK_PEAK_PRICING[settings.model];
+    if (!pricing) {
+      throw new TaskValidationError(
+        `DEEPSEEK_MODEL ${settings.model} has no verified pricing; not dispatched`,
+      );
+    }
+    const inputBound =
+      Buffer.byteLength(args.systemPrompt, "utf8") + Buffer.byteLength(userPrompt, "utf8");
+    const reservation =
+      (inputBound * pricing.inputPerMTok + maxOutputTokens * pricing.outputPerMTok) / 1_000_000;
+    reserveSpend(ledgerDir, args, settings.ceilings, reservation, now());
     let response: Response;
     try {
-      response = await transport(`${baseUrl}/chat/completions`, {
+      response = await transport(`${settings.baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${settings.apiKey}`,
           "Content-Type": "application/json",
           Accept: "application/json",
         },
         body: JSON.stringify({
-          model,
+          model: settings.model,
           messages: [
             { role: "system", content: args.systemPrompt },
             { role: "user", content: userPrompt },
@@ -106,12 +254,12 @@ export function createDeepSeekBuildIntelligenceLlm(options?: {
           response_format: { type: "json_object" },
           stream: false,
         }),
-        signal: AbortSignal.timeout(DEEPSEEK_ATTEMPT_TIMEOUT_MS),
+        signal: AbortSignal.timeout(LLM_PROVIDER_TIMEOUT_MS),
       });
     } catch (error) {
-      if (error instanceof DeepSeekTransportError) throw error;
-      const reason = error instanceof Error ? error.message : String(error);
-      throw new DeepSeekTransportError(`DeepSeek transport failed for ${operation}: ${reason}`);
+      throw new DeepSeekTransportError(
+        `DeepSeek request failed for ${operation} (${error instanceof Error ? error.name : "error"})`,
+      );
     }
     if (!response.ok) {
       throw new DeepSeekTransportError(`DeepSeek HTTP ${response.status} for ${operation}`);
@@ -131,7 +279,7 @@ export function createDeepSeekBuildIntelligenceLlm(options?: {
         {
           taskId: randomUUID(),
           provider: DEEPSEEK_PROVIDER,
-          model,
+          model: settings.model,
           searchRequired: false,
           searchPolicySource: "EXPLICIT",
           outcome: "SUCCESS",

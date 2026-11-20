@@ -62,6 +62,12 @@ import {
   type QueryProvenance,
   type SeedQueryInput,
 } from "./query-portfolio.js";
+import {
+  clearFailedSerpRefusals,
+  clearFailedSerpMemory as clearStoredSerpMemory,
+  hasFailedSerpFingerprint,
+  rememberFailedSerpFingerprint,
+} from "./run-evidence-store.js";
 
 const logger = createModuleLogger("build-intelligence:competitive-landscape");
 
@@ -164,35 +170,17 @@ export class CompetitiveLandscapeInvalidError extends Error {
 const DEFAULT_DONOR_COUNT = 10;
 
 /**
- * Failed and empty SERP purchases, keyed by client id and build id. A later
- * call in the same build must not buy that query again. A SERP that returned
- * ranking items is not stored here, including a result that later selects one
- * domain.
- *
- * The map is an LRU capped at FAILED_SERP_BUILD_CACHE_LIMIT. Entries have to
- * survive a later call in the same build, so they are not deleted when one
- * call returns. The least recently used build is dropped once the cap is
- * exceeded, which bounds process memory and lets a reused build id purchase
- * again after it has aged out.
+ * Failed and unusable SERP purchases, keyed by client and build. A later call
+ * for the same identity must not buy that query again. A purchase that produced
+ * at least one usable organic observation is not stored here.
  */
-export const FAILED_SERP_BUILD_CACHE_LIMIT = 256;
-
-const failedSerpFingerprints = new Map<string, Set<string>>();
-
 export function resetFailedSerpFingerprints(): void {
-  failedSerpFingerprints.clear();
+  clearFailedSerpRefusals();
 }
 
-function serpCacheKey(clientId: string, buildId: string): string {
-  return `${clientId}\n${buildId}`;
-}
-
-function evictOldestFailedSerpBuilds(): void {
-  while (failedSerpFingerprints.size > FAILED_SERP_BUILD_CACHE_LIMIT) {
-    const oldest = failedSerpFingerprints.keys().next().value;
-    if (oldest === undefined) return;
-    failedSerpFingerprints.delete(oldest);
-  }
+/** Drop the in-process cache only. Persisted refusals remain visible. */
+export function clearFailedSerpMemory(): void {
+  clearStoredSerpMemory();
 }
 
 function serpPurchaseFingerprint(
@@ -211,12 +199,7 @@ function serpPurchaseFingerprint(
 }
 
 function rememberFailedSerp(clientId: string, buildId: string, fingerprint: string): void {
-  const key = serpCacheKey(clientId, buildId);
-  const seen = failedSerpFingerprints.get(key) ?? new Set<string>();
-  seen.add(fingerprint);
-  failedSerpFingerprints.delete(key);
-  failedSerpFingerprints.set(key, seen);
-  evictOldestFailedSerpBuilds();
+  rememberFailedSerpFingerprint(clientId, buildId, fingerprint);
 }
 
 function failedSerpAlreadyPurchased(
@@ -224,12 +207,7 @@ function failedSerpAlreadyPurchased(
   buildId: string,
   fingerprint: string,
 ): boolean {
-  const key = serpCacheKey(clientId, buildId);
-  const seen = failedSerpFingerprints.get(key);
-  if (!seen) return false;
-  failedSerpFingerprints.delete(key);
-  failedSerpFingerprints.set(key, seen);
-  return seen.has(fingerprint);
+  return hasFailedSerpFingerprint(clientId, buildId, fingerprint);
 }
 
 /** Per-domain qualification decision plus the evidence that produced it. */
@@ -536,7 +514,6 @@ async function fetchPendingQueries(
       throw error;
     }
     fetched.add(query.query_id);
-    if (serp.items.length === 0) rememberFailedSerp(ctx.clientId, ctx.buildId, fingerprint);
 
     // Deduplicate identical ranking URLs within one query: the same semantic
     // observation must never contribute visibility twice.
@@ -562,6 +539,7 @@ async function fetchPendingQueries(
         source: "dataforseo",
       });
     }
+    if (ordinal === 0) rememberFailedSerp(ctx.clientId, ctx.buildId, fingerprint);
   }
 }
 
