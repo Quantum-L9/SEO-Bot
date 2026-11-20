@@ -28,6 +28,17 @@ function producerFiles(): string[] {
     .map((name) => join(PRODUCER_DIR, name));
 }
 
+function citesDeepSeekEndpoint(source: string): boolean {
+  const urls = source.match(/https?:\/\/[^\s"'`<>]+/g) ?? [];
+  return urls.some((candidate) => {
+    try {
+      return new URL(candidate).hostname === "api.deepseek.com";
+    } catch {
+      return false;
+    }
+  });
+}
+
 /** Direct-provider markers that would bypass the router. */
 const PROVIDER_BYPASS_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
   { label: "openai sdk", pattern: /from\s+["']openai["']/ },
@@ -70,8 +81,9 @@ describe("build-intelligence — no direct provider bypass", () => {
   });
 
   it("names the DeepSeek endpoint only inside the build-intelligence client", () => {
-    const endpoint = "https://api.deepseek.com";
-    const hits = producerFiles().filter((file) => readFileSync(file, "utf8").includes(endpoint));
+    const hits = producerFiles().filter((file) =>
+      citesDeepSeekEndpoint(readFileSync(file, "utf8")),
+    );
     expect(hits.map((file) => file.split("/").pop())).toEqual(["deepseek-llm.ts"]);
   });
 });
