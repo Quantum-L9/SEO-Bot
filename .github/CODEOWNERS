@@ -1,5 +1,5 @@
 # Managed by Quantum-L9/.github — do not edit here.
-# Edit templates/CODEOWNERS.repo in the .github repo; changes are re-seeded by PR.
+# Edit policies/CODEOWNERS in the .github repo; changes are re-seeded by PR.
 # CODEOWNERS is not inheritable, so this file is physically copied per repo.
 #
 # Path-scoped only. Do not seed `* @Quantum-L9/platform` — that makes every
@@ -7,7 +7,8 @@
 # cannot resolve. Team slugs verified against the live org
 # (gh api orgs/Quantum-L9/teams): only `platform` exists.
 #
-# Skip this dest when a root CODEOWNERS already exists.
+# Seeded as .github/CODEOWNERS into every repository the seeders reach,
+# replacing an older copy; GitHub reads .github/CODEOWNERS before a root file.
 
 /.github/                 @Quantum-L9/platform @cryptoxdog
 /.github/workflows/       @Quantum-L9/platform @cryptoxdog

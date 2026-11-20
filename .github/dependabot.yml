@@ -1,8 +1,14 @@
-# Managed by Quantum-L9/.github. dependabot.yml is NOT inheritable — it is seeded
-# per repo and must live at .github/dependabot.yml on the default branch.
+# Rendered by Quantum-L9/.github ops/render-dependabot.js; managed — local edits
+# are restored; opt out with .l9/no-sync. ADR: docs/adr/0019-dependabot-managed-rendered.md
 #
-# Default seed is github-actions only (SHA-pin freshness). pip / npm ecosystems
-# are not seeded unless a consumer adds them after a lockfile exists.
+# Ecosystems follow this repository's root: github-actions always; uv when
+# uv.lock exists, else pip when a root requirements*.txt or a PEP 621
+# pyproject.toml exists; npm when package.json exists; pre-commit when
+# .pre-commit-config.yaml exists.
+# Tools Core selects (Quantum-L9/l9-ci-core core-owned-tools.json) and the
+# Core, SDK and .github action pins are ignored: they are not bumped here.
+# Safe-only: no semver-major bump is proposed in any ecosystem; a fix that
+# exists only in a new major arrives as a Dependabot alert, not a PR.
 # ADVISORY POSTURE: this opens PRs only. No auto-merge, no major groups.
 version: 2
 updates:
@@ -14,7 +20,33 @@ updates:
     open-pull-requests-limit: 2
     commit-message:
       prefix: "chore(deps)"
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: "Quantum-L9/.github*"
+      - dependency-name: "Quantum-L9/l9-ci-core*"
+      - dependency-name: "Quantum-L9/l9-ci-sdk*"
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       actions-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "chore(deps)"
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: "@biomejs/biome"
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      npm-minor-patch:
         patterns: ["*"]
         update-types: ["minor", "patch"]
