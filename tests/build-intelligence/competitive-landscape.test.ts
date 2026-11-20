@@ -11,6 +11,7 @@ import {
   CompetitiveDonorQualificationError,
   CompetitiveEvidenceIncompleteError,
   type CompetitiveLandscapeRequest,
+  clearFailedSerpMemory,
   createCompetitiveLandscape,
   type DataForSeoOrganicPort,
   resetFailedSerpFingerprints,
@@ -682,6 +683,54 @@ describe("CompetitiveLandscape — SERP evidence integrity", () => {
     const second = new FakePort({ "roof repair": result });
     await run(second);
     expect(second.keywords).toEqual(["roof repair"]);
+  });
+
+  it("does not repurchase a nonempty SERP that produced no usable observation", async () => {
+    const request: CompetitiveLandscapeRequest = {
+      ...baseRequest,
+      client_id: "client-unusable",
+      build_id: "build-unusable",
+      seed_queries: [{ query: "roof repair", intent: "commercial" }],
+      desired_donor_count: 1,
+    };
+    const unusable = serp("roof repair", [{ rank: 0, url: "https://only.example/roof" }]);
+    const first = new FakePort({ "roof repair": unusable });
+    await expect(createCompetitiveLandscape(request, { dataForSeo: first })).rejects.toBeInstanceOf(
+      CompetitiveEvidenceIncompleteError,
+    );
+    expect(first.keywords).toContain("roof repair");
+    const second = new FakePort({ "roof repair": unusable });
+    await expect(
+      createCompetitiveLandscape(request, { dataForSeo: second }),
+    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    expect(second.keywords).toEqual([]);
+  });
+
+  it("scopes a failed SERP refusal by client and still applies it after the memory cache is dropped", async () => {
+    const shared: CompetitiveLandscapeRequest = {
+      ...baseRequest,
+      build_id: "build-shared",
+      seed_queries: [{ query: "roof repair", intent: "transactional" }],
+      desired_donor_count: 10,
+    };
+    const first = new ThrowingPort(new DataForSeoTaskError("quota"));
+    await expect(
+      createCompetitiveLandscape({ ...shared, client_id: "client-a" }, { dataForSeo: first }),
+    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    expect(first.keywords).toContain("roof repair");
+
+    const otherClient = new ThrowingPort(new DataForSeoTaskError("quota"));
+    await expect(
+      createCompetitiveLandscape({ ...shared, client_id: "client-b" }, { dataForSeo: otherClient }),
+    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    expect(otherClient.keywords).toContain("roof repair");
+
+    clearFailedSerpMemory();
+    const retried = new ThrowingPort(new DataForSeoTaskError("quota"));
+    await expect(
+      createCompetitiveLandscape({ ...shared, client_id: "client-a" }, { dataForSeo: retried }),
+    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    expect(retried.keywords).toEqual([]);
   });
 
   it("rejects a request whose seed queries are all blank", async () => {

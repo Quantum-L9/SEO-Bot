@@ -54,6 +54,7 @@ import {
   getRunLlmAudit,
   getRunLlmAuditFor,
   recordCompetitiveLandscapeLeg,
+  recordedCallsForAudit,
   recordSeoContentBlueprintLeg,
   recordStructuredContentLeg,
 } from "../build-intelligence/run-evidence-store.js";
@@ -82,9 +83,9 @@ import {
   StructuredContentShapeError,
 } from "../build-intelligence/structured-content.js";
 import { createModuleLogger } from "../core/logger.js";
-import { LlmOutputBudgetExceededError } from "../services/improve-llm-policy.js";
 import { LlmOutputTruncatedError } from "../services/llm-parse.js";
 import { LlmRunRecorder } from "../services/llm-run-recorder.js";
+import { LlmOutputBudgetExceededError } from "../services/seo-blueprint-output-budget.js";
 
 // Static version reads for the preflight readiness metadata. Loaded once at
 // module scope; the preflight itself makes no LLM and no DataForSEO call.
@@ -110,14 +111,12 @@ const versionAt = (path: string): string =>
   (JSON.parse(readFileSync(path, "utf8")) as { version: string }).version;
 const SERVICE_VERSION: string = versionAt(join(dirname(dirname(moduleDir)), "package.json"));
 const BOT_INTEROP_VERSION: string = versionAt(scopedPkgPath("@quantum-l9", "bot-interop"));
-const LLM_ROUTER_VERSION: string = versionAt(scopedPkgPath("@quantum-l9", "llm-router"));
 
 import {
   DataForSeoTaskError,
   DataForSeoUnavailableError,
   SerpEvidenceInvalidError,
 } from "../services/dataforseo.js";
-import { getLlmService } from "../services/llm.js";
 
 const logger = createModuleLogger("api:build-intelligence");
 
@@ -178,6 +177,7 @@ const routeIdentitySchema = z
     route_id: z.string().min(1),
     path: z.string().min(1),
     purpose: z.string().min(1),
+    keywords: z.array(z.string().trim().min(1).max(200)).max(50).optional(),
   })
   .strict();
 
@@ -339,7 +339,7 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
       ...preflight,
       version: preflight.version === "unknown" ? SERVICE_VERSION : preflight.version,
       bot_interop_version: preflight.bot_interop_version ?? BOT_INTEROP_VERSION,
-      llm_router_version: preflight.llm_router_version ?? LLM_ROUTER_VERSION,
+      ...(preflight.llm_router_version ? { llm_router_version: preflight.llm_router_version } : {}),
       capabilities: {
         ...preflight.capabilities,
         // Schema advertisement, not a probed capability: the audit projection
@@ -512,9 +512,8 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
   //    record those calls on the request recorder, not on this router singleton.
   app.get("/api/build-intelligence/llm-audit", async (request, reply) => {
     const query = request.query as { client_id?: string };
-    const projection = projectLlmAudit(getLlmService(), {
-      clientId: query.client_id && query.client_id.trim() !== "" ? query.client_id : undefined,
-    });
+    const clientId = query.client_id?.trim() ? query.client_id : undefined;
+    const projection = projectLlmAudit(recordedCallsForAudit(clientId));
     persistAuditEvidence("llm-audit", projection);
     return reply.status(200).send(projection);
   });

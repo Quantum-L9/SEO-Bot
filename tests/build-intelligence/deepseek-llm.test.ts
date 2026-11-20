@@ -5,7 +5,12 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { createDeepSeekBuildIntelligenceLlm } from "../../src/build-intelligence/deepseek-llm.js";
+import {
+  BudgetExhaustedError,
+  createDeepSeekBuildIntelligenceLlm,
+  ProviderRequestError,
+  resetDeepSeekSpendForTests,
+} from "../../src/build-intelligence/deepseek-llm.js";
 import { LlmRunRecorder } from "../../src/services/llm-run-recorder.js";
 
 function jsonResponse(content: string, finishReason = "stop"): Response {
@@ -95,5 +100,73 @@ describe("build-intelligence DeepSeek client", () => {
         outcome: "SUCCESS",
       }),
     ]);
+  });
+
+  it("does not repair a transport failure or an HTTP error", async () => {
+    const aborted = vi.fn().mockRejectedValue(new DOMException("timed out", "TimeoutError"));
+    const llm = createDeepSeekBuildIntelligenceLlm({
+      env: { DEEPSEEK_API_KEY: "test-key" },
+      transport: aborted,
+    });
+    await expect(
+      llm.executePolicyJson("CONTENT_VALIDATION", {
+        clientId: "client-timeout",
+        buildId: "build-timeout",
+        module: "test",
+        purpose: "validate",
+        systemPrompt: "json",
+        userPrompt: "route",
+        validate: (parsed) => parsed,
+        schemaRepairAttempts: 1,
+      }),
+    ).rejects.toBeInstanceOf(ProviderRequestError);
+    expect(aborted).toHaveBeenCalledTimes(1);
+    expect(aborted.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+
+    const http = vi.fn().mockResolvedValue(new Response("no", { status: 503 }));
+    const failing = createDeepSeekBuildIntelligenceLlm({
+      env: { DEEPSEEK_API_KEY: "test-key" },
+      transport: http,
+    });
+    await expect(
+      failing.executePolicyJson("CONTENT_VALIDATION", {
+        clientId: "client-http",
+        buildId: "build-http",
+        module: "test",
+        purpose: "validate",
+        systemPrompt: "json",
+        userPrompt: "route",
+        validate: (parsed) => parsed,
+        schemaRepairAttempts: 1,
+      }),
+    ).rejects.toBeInstanceOf(ProviderRequestError);
+    expect(http).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not dispatch once the configured spend ceiling is exhausted", async () => {
+    resetDeepSeekSpendForTests();
+    const transport = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(jsonResponse(JSON.stringify({ ok: true }))));
+    const llm = createDeepSeekBuildIntelligenceLlm({
+      env: { DEEPSEEK_API_KEY: "test-key" },
+      transport,
+      ceilings: { monthlyUsd: 0.0062, weeklyUsd: 100, globalMonthlyUsd: 2000 },
+    });
+    const call = () =>
+      llm.executePolicyJson("CONTENT_VALIDATION", {
+        clientId: "client-budget",
+        buildId: "build-budget",
+        module: "test",
+        purpose: "validate",
+        systemPrompt: "json",
+        userPrompt: "route",
+        validate: (parsed) => parsed as { ok: boolean },
+        schemaRepairAttempts: 0,
+      });
+    await call();
+    await call();
+    await expect(call()).rejects.toBeInstanceOf(BudgetExhaustedError);
+    expect(transport).toHaveBeenCalledTimes(2);
   });
 });

@@ -534,6 +534,41 @@ describe("build-intelligence — seo-content-blueprint admits only verified busi
     expect(res.statusCode).toBe(400);
   });
 
+  it("admits route keywords and still rejects a provider field", async () => {
+    const producer = await import("../../src/build-intelligence/seo-content-blueprint.js");
+    vi.mocked(producer.createSEOContentBlueprintWithEvidence).mockRejectedValueOnce(
+      new Error("boundary reached"),
+    );
+    const admitted = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/seo-content-blueprint",
+      headers: AUTH,
+      payload: {
+        ...blueprintBody(),
+        routes: [{ route_id: "/", path: "/", purpose: "Home", keywords: ["crm transformation"] }],
+      },
+    });
+    expect(admitted.statusCode).not.toBe(400);
+    expect(producer.createSEOContentBlueprintWithEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routes: [
+          expect.objectContaining({
+            keywords: ["crm transformation"],
+          }),
+        ],
+      }),
+      expect.anything(),
+    );
+
+    const rejected = await app.inject({
+      method: "POST",
+      url: "/api/build-intelligence/seo-content-blueprint",
+      headers: AUTH,
+      payload: { ...blueprintBody(), provider: "deepseek" },
+    });
+    expect(rejected.statusCode).toBe(400);
+  });
+
   it("admits a well-formed verified fact past the boundary", async () => {
     const producer = await import("../../src/build-intelligence/seo-content-blueprint.js");
     vi.mocked(producer.createSEOContentBlueprintWithEvidence).mockRejectedValueOnce(

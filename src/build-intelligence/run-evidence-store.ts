@@ -22,7 +22,10 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
+import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import type { DirectProviderBypassEvidence, LlmRunRecorder } from "../services/llm-run-recorder.js";
+import type { RecordedAuditCall } from "./llm-audit.js";
 import { PRODUCER } from "./producer.js";
 import {
   assertRunLlmAudit,
@@ -185,6 +188,7 @@ export function recordCompetitiveLandscapeLeg(input: {
   target.legs.competitive_landscape = true;
   target.ranking_llm_calls = input.ranking_llm_calls;
   mergeRecorded(target, input.recorder);
+  sealRefusalsIfComplete(target);
   return target.run_id;
 }
 
@@ -207,6 +211,7 @@ export function recordSeoContentBlueprintLeg(input: {
   target.legs.seo_content_blueprint = true;
   target.blueprint = input.evidence;
   mergeRecorded(target, input.recorder);
+  sealRefusalsIfComplete(target);
   return target.run_id;
 }
 
@@ -229,6 +234,7 @@ export function recordStructuredContentLeg(input: {
   target.legs.structured_content = true;
   target.content = input.evidence;
   mergeRecorded(target, input.recorder);
+  sealRefusalsIfComplete(target);
   return target.run_id;
 }
 
@@ -311,4 +317,159 @@ function assembleRunLlmAudit(target: RunRecord): RunLlmAuditV1 {
 /** Test-only: drop every retained run. */
 export function _resetRunEvidenceStore(): void {
   runs.clear();
+  clearFailedSerpRefusals();
+}
+
+const FAILED_SERP_CAPACITY = 256;
+const failedSerpCache = new Map<string, Set<string>>();
+
+function cacheKey(clientId: string, buildId: string): string {
+  return `${clientId}\0${buildId}`;
+}
+
+function rememberCache(clientId: string, buildId: string, fingerprint: string): void {
+  const key = cacheKey(clientId, buildId);
+  const seen = failedSerpCache.get(key) ?? new Set<string>();
+  seen.add(fingerprint);
+  failedSerpCache.delete(key);
+  failedSerpCache.set(key, seen);
+  while (failedSerpCache.size > FAILED_SERP_CAPACITY) {
+    const oldest = failedSerpCache.keys().next().value;
+    if (oldest === undefined) break;
+    failedSerpCache.delete(oldest);
+  }
+}
+
+function refusalDir(): string {
+  return path.join(process.cwd(), ".l9", "build-intelligence", "serp-refusals");
+}
+
+function refusalFile(clientId: string, buildId: string): string {
+  const digest = runIdFor(clientId, buildId).slice("seo-run:".length);
+  return path.join(refusalDir(), `${digest}.json`);
+}
+
+function readRefusalFile(file: string): Set<string> {
+  try {
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as { fingerprints?: unknown };
+    if (!Array.isArray(parsed.fingerprints)) return new Set();
+    return new Set(
+      parsed.fingerprints.filter((entry): entry is string => typeof entry === "string"),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function boundRefusalFiles(): void {
+  let names: string[];
+  try {
+    names = readdirSync(refusalDir()).filter((name) => name.endsWith(".json"));
+  } catch {
+    return;
+  }
+  if (names.length <= FAILED_SERP_CAPACITY) return;
+  const ranked = names
+    .map((name) => {
+      const file = path.join(refusalDir(), name);
+      return { file, mtime: statSync(file).mtimeMs };
+    })
+    .sort((left, right) => left.mtime - right.mtime);
+  for (const entry of ranked.slice(0, names.length - FAILED_SERP_CAPACITY)) {
+    unlinkSync(entry.file);
+  }
+}
+
+/** Persist a failed SERP fingerprint for this run so a later process still refuses it. */
+export function rememberFailedSerpFingerprint(
+  clientId: string,
+  buildId: string,
+  fingerprint: string,
+): void {
+  rememberCache(clientId, buildId, fingerprint);
+  const file = refusalFile(clientId, buildId);
+  mkdirSync(refusalDir(), { recursive: true });
+  const fingerprints = readRefusalFile(file);
+  fingerprints.add(fingerprint);
+  writeFileSync(file, `${JSON.stringify({ fingerprints: [...fingerprints] })}\n`, "utf8");
+  boundRefusalFiles();
+}
+
+export function hasFailedSerpFingerprint(
+  clientId: string,
+  buildId: string,
+  fingerprint: string,
+): boolean {
+  const key = cacheKey(clientId, buildId);
+  if (failedSerpCache.get(key)?.has(fingerprint)) return true;
+  if (!readRefusalFile(refusalFile(clientId, buildId)).has(fingerprint)) return false;
+  rememberCache(clientId, buildId, fingerprint);
+  return true;
+}
+
+export function clearFailedSerpFingerprint(clientId: string, buildId: string): void {
+  failedSerpCache.delete(cacheKey(clientId, buildId));
+  try {
+    unlinkSync(refusalFile(clientId, buildId));
+  } catch {
+    // Already absent.
+  }
+}
+
+/** Test-only: drop the in-process cache. Disk refusals stay in force. */
+export function clearFailedSerpMemory(): void {
+  failedSerpCache.clear();
+}
+
+export function clearFailedSerpRefusals(): void {
+  failedSerpCache.clear();
+  let names: string[];
+  try {
+    names = readdirSync(refusalDir());
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    try {
+      unlinkSync(path.join(refusalDir(), name));
+    } catch {
+      // A raced delete is still an empty directory.
+    }
+  }
+}
+
+function sealRefusalsIfComplete(target: RunRecord): void {
+  if (
+    target.legs.competitive_landscape &&
+    target.legs.seo_content_blueprint &&
+    target.legs.structured_content
+  ) {
+    clearFailedSerpFingerprint(target.client_id, target.build_id);
+  }
+}
+
+/** Recorded DeepSeek calls for the audit projection. Scoped to one client when asked. */
+export function recordedCallsForAudit(clientId?: string): {
+  calls: RecordedAuditCall[];
+  directProviderBypassCount: number;
+} {
+  const calls: RecordedAuditCall[] = [];
+  let directProviderBypassCount = 0;
+  for (const run of runs.values()) {
+    if (clientId && run.client_id !== clientId) continue;
+    directProviderBypassCount += run.recorded.direct_provider_bypasses.length;
+    for (const operation of run.recorded.operations) {
+      calls.push({
+        operation: operation.operation,
+        task_id: operation.task_id,
+        client_id: run.client_id,
+        timestamp: run.updated_at,
+        search_required: operation.searchRequired,
+        search_policy_source: operation.searchPolicySource,
+        outcome: operation.outcome,
+      });
+    }
+  }
+  return { calls, directProviderBypassCount };
 }

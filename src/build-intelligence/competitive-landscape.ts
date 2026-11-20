@@ -62,6 +62,12 @@ import {
   type QueryProvenance,
   type SeedQueryInput,
 } from "./query-portfolio.js";
+import {
+  clearFailedSerpRefusals,
+  clearFailedSerpMemory as clearStoredSerpMemory,
+  hasFailedSerpFingerprint,
+  rememberFailedSerpFingerprint,
+} from "./run-evidence-store.js";
 
 const logger = createModuleLogger("build-intelligence:competitive-landscape");
 
@@ -164,14 +170,17 @@ export class CompetitiveLandscapeInvalidError extends Error {
 const DEFAULT_DONOR_COUNT = 10;
 
 /**
- * Failed and empty SERP purchases, keyed by build id. A later call in the same
- * build must not buy that query again. A SERP that returned ranking items is
- * not stored here, including a result that later selects one domain.
+ * Failed and unusable SERP purchases, keyed by client and build. A later call
+ * for the same identity must not buy that query again. A purchase that produced
+ * at least one usable organic observation is not stored here.
  */
-const failedSerpFingerprints = new Map<string, Set<string>>();
-
 export function resetFailedSerpFingerprints(): void {
-  failedSerpFingerprints.clear();
+  clearFailedSerpRefusals();
+}
+
+/** Drop the in-process cache only. Persisted refusals remain visible. */
+export function clearFailedSerpMemory(): void {
+  clearStoredSerpMemory();
 }
 
 function serpPurchaseFingerprint(
@@ -189,14 +198,16 @@ function serpPurchaseFingerprint(
   ].join("\n");
 }
 
-function rememberFailedSerp(buildId: string, fingerprint: string): void {
-  const seen = failedSerpFingerprints.get(buildId) ?? new Set<string>();
-  seen.add(fingerprint);
-  failedSerpFingerprints.set(buildId, seen);
+function rememberFailedSerp(clientId: string, buildId: string, fingerprint: string): void {
+  rememberFailedSerpFingerprint(clientId, buildId, fingerprint);
 }
 
-function failedSerpAlreadyPurchased(buildId: string, fingerprint: string): boolean {
-  return failedSerpFingerprints.get(buildId)?.has(fingerprint) ?? false;
+function failedSerpAlreadyPurchased(
+  clientId: string,
+  buildId: string,
+  fingerprint: string,
+): boolean {
+  return hasFailedSerpFingerprint(clientId, buildId, fingerprint);
 }
 
 /** Per-domain qualification decision plus the evidence that produced it. */
@@ -309,6 +320,7 @@ export async function createCompetitiveLandscape(
   for (;;) {
     await fetchPendingQueries(portfolio, fetched, observations, unavailableQueries, {
       dataForSeo,
+      clientId: request.client_id,
       buildId: request.build_id,
       locationName,
       languageName: request.market.language,
@@ -449,6 +461,7 @@ async function fetchPendingQueries(
   unavailableQueries: UnavailableQueryRecord[],
   ctx: {
     dataForSeo: DataForSeoOrganicPort;
+    clientId: string;
     buildId: string;
     locationName: string;
     languageName: string;
@@ -463,7 +476,7 @@ async function fetchPendingQueries(
       ctx.languageName,
       ctx.device,
     );
-    if (failedSerpAlreadyPurchased(ctx.buildId, fingerprint)) {
+    if (failedSerpAlreadyPurchased(ctx.clientId, ctx.buildId, fingerprint)) {
       fetched.add(query.query_id);
       continue;
     }
@@ -485,7 +498,7 @@ async function fetchPendingQueries(
           },
           "SERP task failed for a portfolio query; recording it unavailable and continuing",
         );
-        rememberFailedSerp(ctx.buildId, fingerprint);
+        rememberFailedSerp(ctx.clientId, ctx.buildId, fingerprint);
         unavailableQueries.push({ query_id: query.query_id, query: query.query });
         fetched.add(query.query_id);
         continue;
@@ -501,7 +514,6 @@ async function fetchPendingQueries(
       throw error;
     }
     fetched.add(query.query_id);
-    if (serp.items.length === 0) rememberFailedSerp(ctx.buildId, fingerprint);
 
     // Deduplicate identical ranking URLs within one query: the same semantic
     // observation must never contribute visibility twice.
@@ -527,6 +539,7 @@ async function fetchPendingQueries(
         source: "dataforseo",
       });
     }
+    if (ordinal === 0) rememberFailedSerp(ctx.clientId, ctx.buildId, fingerprint);
   }
 }
 

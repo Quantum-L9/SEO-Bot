@@ -757,6 +757,7 @@ async function generateRoute(
 
   return llm.executePolicyJson("STRUCTURED_CONTENT_GENERATION", {
     clientId: request.client_id,
+    buildId: request.build_id,
     module: "build-intelligence",
     purpose: `structured-content:${contractRoute.route_id}`,
     systemPrompt,
