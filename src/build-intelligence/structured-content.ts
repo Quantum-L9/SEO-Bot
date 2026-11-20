@@ -634,11 +634,12 @@ function assertPackageLineage(
 }
 
 /**
- * Router-plane failures that reach a generation call: the provider refused or
- * timed out, the circuit is open, a budget is exhausted, or the descriptor was
- * refused. None of them is evidence about the model's OUTPUT, so they must not
- * be folded into the route's schema-failure ledger. Detected by error name so
- * this module keeps importing nothing from the Router (L2-S6-001).
+ * Router-plane failures, and a direct DeepSeek transport failure, that reach a
+ * generation call: the provider refused or timed out, the circuit is open, a
+ * budget is exhausted, or the descriptor was refused. None of them is evidence
+ * about the model's OUTPUT, so they must not be folded into the route's
+ * schema-failure ledger. Detected by error name so this module keeps importing
+ * nothing from the Router (L2-S6-001).
  */
 const LLM_TRANSPORT_FAILURE_NAMES = new Set([
   "ProviderRequestError",
@@ -649,6 +650,7 @@ const LLM_TRANSPORT_FAILURE_NAMES = new Set([
   "UnsupportedCapabilityCombinationError",
   "TaskValidationError",
   "UnsafeImageUrlError",
+  "DeepSeekTransportError",
 ]);
 function isLlmTransportFailure(error: unknown): boolean {
   return error instanceof Error && LLM_TRANSPORT_FAILURE_NAMES.has(error.name);

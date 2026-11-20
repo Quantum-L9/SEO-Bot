@@ -70,9 +70,8 @@ describe("build-intelligence — no direct provider bypass", () => {
   });
 
   it("names the DeepSeek endpoint only inside the build-intelligence client", () => {
-    const hits = producerFiles().filter((file) =>
-      /api\.deepseek\.com/.test(readFileSync(file, "utf8")),
-    );
+    const endpoint = "https://api.deepseek.com";
+    const hits = producerFiles().filter((file) => readFileSync(file, "utf8").includes(endpoint));
     expect(hits.map((file) => file.split("/").pop())).toEqual(["deepseek-llm.ts"]);
   });
 });

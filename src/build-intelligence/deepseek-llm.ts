@@ -20,6 +20,21 @@ const DEEPSEEK_PROVIDER = "deepseek";
 const DEFAULT_MODEL = "deepseek-flash";
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
 const OUTPUT_CEILING = 16_000;
+/**
+ * Same per-attempt bound as LLM_PROVIDER_TIMEOUT_MS in src/services/llm.ts.
+ * That module evaluates @quantum-l9/llm-router on import, so this adapter
+ * keeps the number locally instead of importing it.
+ */
+const DEEPSEEK_ATTEMPT_TIMEOUT_MS = 240_000;
+
+/** Upstream DeepSeek failure. Not model output, so callers must not spend a repair on it. */
+export class DeepSeekTransportError extends Error {
+  readonly code = "DEEPSEEK_TRANSPORT_ERROR";
+  constructor(message: string) {
+    super(message);
+    this.name = "DeepSeekTransportError";
+  }
+}
 const DEFAULT_OUTPUT_TOKENS: Record<string, number> = {
   SEO_CONTENT_BLUEPRINT: 5_000,
   STRUCTURED_CONTENT_GENERATION: 12_000,
@@ -72,26 +87,34 @@ export function createDeepSeekBuildIntelligenceLlm(options?: {
     if (!apiKey) throw new Error("Missing required LLM configuration: DEEPSEEK_API_KEY");
     const model = env.DEEPSEEK_MODEL?.trim() || DEFAULT_MODEL;
     const baseUrl = (env.DEEPSEEK_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, "");
-    const response = await transport(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: args.systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        max_tokens: maxOutputTokens,
-        response_format: { type: "json_object" },
-        stream: false,
-      }),
-    });
+    let response: Response;
+    try {
+      response = await transport(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: args.systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: maxOutputTokens,
+          response_format: { type: "json_object" },
+          stream: false,
+        }),
+        signal: AbortSignal.timeout(DEEPSEEK_ATTEMPT_TIMEOUT_MS),
+      });
+    } catch (error) {
+      if (error instanceof DeepSeekTransportError) throw error;
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new DeepSeekTransportError(`DeepSeek transport failed for ${operation}: ${reason}`);
+    }
     if (!response.ok) {
-      throw new Error(`DeepSeek HTTP ${response.status} for ${operation}`);
+      throw new DeepSeekTransportError(`DeepSeek HTTP ${response.status} for ${operation}`);
     }
     const completion = (await response.json()) as Completion;
     const choice = completion.choices?.[0];

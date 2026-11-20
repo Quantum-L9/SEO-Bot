@@ -4,8 +4,12 @@
  * status: active
  */
 
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { createDeepSeekBuildIntelligenceLlm } from "../../src/build-intelligence/deepseek-llm.js";
+import {
+  createDeepSeekBuildIntelligenceLlm,
+  DeepSeekTransportError,
+} from "../../src/build-intelligence/deepseek-llm.js";
 import { LlmRunRecorder } from "../../src/services/llm-run-recorder.js";
 
 function jsonResponse(content: string, finishReason = "stop"): Response {
@@ -95,5 +99,61 @@ describe("build-intelligence DeepSeek client", () => {
         outcome: "SUCCESS",
       }),
     ]);
+  });
+
+  it("does not repair a non-2xx or a rejected transport", async () => {
+    const http = vi.fn().mockResolvedValue(new Response("nope", { status: 503 }));
+    const llm = createDeepSeekBuildIntelligenceLlm({
+      env: { DEEPSEEK_API_KEY: "test-key" },
+      transport: http,
+    });
+    const args = {
+      clientId: "client",
+      module: "test",
+      purpose: "validate",
+      systemPrompt: "json",
+      userPrompt: "route",
+      validate: (parsed: unknown) => parsed,
+      schemaRepairAttempts: 1 as const,
+    };
+    await expect(llm.executePolicyJson("CONTENT_VALIDATION", args)).rejects.toBeInstanceOf(
+      DeepSeekTransportError,
+    );
+    expect(http).toHaveBeenCalledTimes(1);
+
+    const rejected = vi.fn().mockRejectedValue(new Error("ECONNRESET"));
+    const retrying = createDeepSeekBuildIntelligenceLlm({
+      env: { DEEPSEEK_API_KEY: "test-key" },
+      transport: rejected,
+    });
+    await expect(retrying.executePolicyJson("CONTENT_VALIDATION", args)).rejects.toBeInstanceOf(
+      DeepSeekTransportError,
+    );
+    expect(rejected).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds each attempt with an abort signal", async () => {
+    const transport = vi.fn().mockResolvedValue(jsonResponse(JSON.stringify({ ok: true })));
+    const llm = createDeepSeekBuildIntelligenceLlm({
+      env: { DEEPSEEK_API_KEY: "test-key" },
+      transport,
+    });
+    await llm.executePolicyJson("CONTENT_VALIDATION", {
+      clientId: "client",
+      module: "test",
+      purpose: "validate",
+      systemPrompt: "json",
+      userPrompt: "route",
+      validate: (parsed) => parsed as { ok: boolean },
+      schemaRepairAttempts: 0,
+    });
+    const init = transport.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("uses the error name structured-content treats as terminal", () => {
+    const source = readFileSync("src/build-intelligence/structured-content.ts", "utf8");
+    expect(source).toContain('"DeepSeekTransportError"');
+    expect(new DeepSeekTransportError("down").name).toBe("DeepSeekTransportError");
   });
 });

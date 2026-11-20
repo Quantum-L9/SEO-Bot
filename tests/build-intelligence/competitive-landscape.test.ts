@@ -13,6 +13,7 @@ import {
   type CompetitiveLandscapeRequest,
   createCompetitiveLandscape,
   type DataForSeoOrganicPort,
+  FAILED_SERP_BUILD_CACHE_LIMIT,
   resetFailedSerpFingerprints,
 } from "../../src/build-intelligence/competitive-landscape.js";
 import { MAX_PORTFOLIO_QUERIES } from "../../src/build-intelligence/query-portfolio.js";
@@ -683,6 +684,48 @@ describe("CompetitiveLandscape — SERP evidence integrity", () => {
     await run(second);
     expect(second.keywords).toEqual(["roof repair"]);
   });
+
+  it("does not suppress a failed query for a different client that shares the build id", async () => {
+    const request: CompetitiveLandscapeRequest = {
+      ...baseRequest,
+      client_id: "client-a",
+      build_id: "shared-build",
+      seed_queries: [{ query: "roof repair", intent: "transactional" }],
+      desired_donor_count: 10,
+    };
+    const first = new ThrowingPort(new DataForSeoTaskError("quota"));
+    await expect(createCompetitiveLandscape(request, { dataForSeo: first })).rejects.toBeInstanceOf(
+      CompetitiveEvidenceIncompleteError,
+    );
+    expect(first.keywords).toContain("roof repair");
+    const second = new ThrowingPort(new DataForSeoTaskError("quota"));
+    await expect(
+      createCompetitiveLandscape({ ...request, client_id: "client-b" }, { dataForSeo: second }),
+    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    expect(second.keywords).toContain("roof repair");
+  });
+
+  it("purchases a failed query again after its build ages out of the cache", async () => {
+    const request: CompetitiveLandscapeRequest = {
+      ...baseRequest,
+      seed_queries: [{ query: "roof repair", intent: "transactional" }],
+      desired_donor_count: 10,
+    };
+    for (let index = 0; index <= FAILED_SERP_BUILD_CACHE_LIMIT; index += 1) {
+      const port = new ThrowingPort(new DataForSeoTaskError("quota"));
+      await expect(
+        createCompetitiveLandscape(
+          { ...request, build_id: `evict-${index}` },
+          { dataForSeo: port },
+        ),
+      ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    }
+    const agedOut = new ThrowingPort(new DataForSeoTaskError("quota"));
+    await expect(
+      createCompetitiveLandscape({ ...request, build_id: "evict-0" }, { dataForSeo: agedOut }),
+    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    expect(agedOut.keywords).toContain("roof repair");
+  }, 120_000);
 
   it("rejects a request whose seed queries are all blank", async () => {
     await expect(
