@@ -4,14 +4,17 @@
  * status: active
  */
 
+import { existsSync } from "node:fs";
 import { assertIntelligenceArtifactIntegrity } from "@quantum-l9/bot-interop";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CompetitiveDonorQualificationError,
   CompetitiveEvidenceIncompleteError,
   type CompetitiveLandscapeRequest,
   createCompetitiveLandscape,
   type DataForSeoOrganicPort,
+  FAILED_SERP_BUILD_CACHE_LIMIT,
+  resetFailedSerpFingerprints,
 } from "../../src/build-intelligence/competitive-landscape.js";
 import { MAX_PORTFOLIO_QUERIES } from "../../src/build-intelligence/query-portfolio.js";
 import {
@@ -120,6 +123,10 @@ function fixtureMap(): Record<string, OrganicSerpResult> {
     ]),
   };
 }
+
+beforeEach(() => {
+  resetFailedSerpFingerprints();
+});
 
 describe("CompetitiveLandscape — deterministic ranking truth", () => {
   it("produces the same semantic digest for the same SERP fixture (determinism)", async () => {
@@ -618,6 +625,107 @@ describe("CompetitiveLandscape — SERP evidence integrity", () => {
       ),
     ).rejects.toBeInstanceOf(CompetitiveDonorQualificationError);
   });
+
+  it("records that no captured 419-observation SERP payload is in the repo", () => {
+    expect(existsSync("tests/fixtures/serp-419-observations.json")).toBe(false);
+  });
+
+  it("does not purchase an identical failed or empty query again in the same build", async () => {
+    const request: CompetitiveLandscapeRequest = {
+      ...baseRequest,
+      build_id: "build-no-rebuy",
+      seed_queries: [{ query: "roof repair", intent: "transactional" }],
+      desired_donor_count: 10,
+    };
+    const first = new ThrowingPort(new DataForSeoTaskError("quota"));
+    await expect(createCompetitiveLandscape(request, { dataForSeo: first })).rejects.toBeInstanceOf(
+      CompetitiveEvidenceIncompleteError,
+    );
+    expect(first.keywords).toContain("roof repair");
+    const second = new ThrowingPort(new DataForSeoTaskError("quota"));
+    await expect(
+      createCompetitiveLandscape(request, { dataForSeo: second }),
+    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    expect(second.keywords).toEqual([]);
+
+    const emptyBuild: CompetitiveLandscapeRequest = { ...request, build_id: "build-empty-rebuy" };
+    const emptyFirst = new FakePort({});
+    await expect(
+      createCompetitiveLandscape(emptyBuild, { dataForSeo: emptyFirst }),
+    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    expect(emptyFirst.keywords.length).toBeGreaterThan(0);
+    const emptySecond = new FakePort({});
+    await expect(
+      createCompetitiveLandscape(emptyBuild, { dataForSeo: emptySecond }),
+    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    expect(emptySecond.keywords).toEqual([]);
+  });
+
+  it("purchases a one-domain SERP again because a successful result is not a failed query", async () => {
+    const request: CompetitiveLandscapeRequest = {
+      ...baseRequest,
+      build_id: "build-one-domain",
+      seed_queries: [{ query: "roof repair", intent: "commercial" }],
+      desired_donor_count: 1,
+    };
+    const result = serp("roof repair", [{ rank: 1, url: "https://only.example/roof" }]);
+    const run = async (port: FakePort) => {
+      try {
+        await createCompetitiveLandscape(request, { dataForSeo: port });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!message.includes("competitiveLandscape")) throw error;
+      }
+    };
+    const first = new FakePort({ "roof repair": result });
+    await run(first);
+    expect(first.keywords).toEqual(["roof repair"]);
+    const second = new FakePort({ "roof repair": result });
+    await run(second);
+    expect(second.keywords).toEqual(["roof repair"]);
+  });
+
+  it("does not suppress a failed query for a different client that shares the build id", async () => {
+    const request: CompetitiveLandscapeRequest = {
+      ...baseRequest,
+      client_id: "client-a",
+      build_id: "shared-build",
+      seed_queries: [{ query: "roof repair", intent: "transactional" }],
+      desired_donor_count: 10,
+    };
+    const first = new ThrowingPort(new DataForSeoTaskError("quota"));
+    await expect(createCompetitiveLandscape(request, { dataForSeo: first })).rejects.toBeInstanceOf(
+      CompetitiveEvidenceIncompleteError,
+    );
+    expect(first.keywords).toContain("roof repair");
+    const second = new ThrowingPort(new DataForSeoTaskError("quota"));
+    await expect(
+      createCompetitiveLandscape({ ...request, client_id: "client-b" }, { dataForSeo: second }),
+    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    expect(second.keywords).toContain("roof repair");
+  });
+
+  it("purchases a failed query again after its build ages out of the cache", async () => {
+    const request: CompetitiveLandscapeRequest = {
+      ...baseRequest,
+      seed_queries: [{ query: "roof repair", intent: "transactional" }],
+      desired_donor_count: 10,
+    };
+    for (let index = 0; index <= FAILED_SERP_BUILD_CACHE_LIMIT; index += 1) {
+      const port = new ThrowingPort(new DataForSeoTaskError("quota"));
+      await expect(
+        createCompetitiveLandscape(
+          { ...request, build_id: `evict-${index}` },
+          { dataForSeo: port },
+        ),
+      ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    }
+    const agedOut = new ThrowingPort(new DataForSeoTaskError("quota"));
+    await expect(
+      createCompetitiveLandscape({ ...request, build_id: "evict-0" }, { dataForSeo: agedOut }),
+    ).rejects.toBeInstanceOf(CompetitiveEvidenceIncompleteError);
+    expect(agedOut.keywords).toContain("roof repair");
+  }, 120_000);
 
   it("rejects a request whose seed queries are all blank", async () => {
     await expect(

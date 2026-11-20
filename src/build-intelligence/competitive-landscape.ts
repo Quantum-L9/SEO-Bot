@@ -163,6 +163,75 @@ export class CompetitiveLandscapeInvalidError extends Error {
 
 const DEFAULT_DONOR_COUNT = 10;
 
+/**
+ * Failed and empty SERP purchases, keyed by client id and build id. A later
+ * call in the same build must not buy that query again. A SERP that returned
+ * ranking items is not stored here, including a result that later selects one
+ * domain.
+ *
+ * The map is an LRU capped at FAILED_SERP_BUILD_CACHE_LIMIT. Entries have to
+ * survive a later call in the same build, so they are not deleted when one
+ * call returns. The least recently used build is dropped once the cap is
+ * exceeded, which bounds process memory and lets a reused build id purchase
+ * again after it has aged out.
+ */
+export const FAILED_SERP_BUILD_CACHE_LIMIT = 256;
+
+const failedSerpFingerprints = new Map<string, Set<string>>();
+
+export function resetFailedSerpFingerprints(): void {
+  failedSerpFingerprints.clear();
+}
+
+function serpCacheKey(clientId: string, buildId: string): string {
+  return `${clientId}\n${buildId}`;
+}
+
+function evictOldestFailedSerpBuilds(): void {
+  while (failedSerpFingerprints.size > FAILED_SERP_BUILD_CACHE_LIMIT) {
+    const oldest = failedSerpFingerprints.keys().next().value;
+    if (oldest === undefined) return;
+    failedSerpFingerprints.delete(oldest);
+  }
+}
+
+function serpPurchaseFingerprint(
+  query: string,
+  locationName: string,
+  languageName: string,
+  device: string,
+): string {
+  const normalizedQuery = query.trim().toLowerCase().replace(/\s+/g, " ");
+  return [
+    normalizedQuery,
+    locationName.trim().toLowerCase(),
+    languageName.trim().toLowerCase(),
+    device,
+  ].join("\n");
+}
+
+function rememberFailedSerp(clientId: string, buildId: string, fingerprint: string): void {
+  const key = serpCacheKey(clientId, buildId);
+  const seen = failedSerpFingerprints.get(key) ?? new Set<string>();
+  seen.add(fingerprint);
+  failedSerpFingerprints.delete(key);
+  failedSerpFingerprints.set(key, seen);
+  evictOldestFailedSerpBuilds();
+}
+
+function failedSerpAlreadyPurchased(
+  clientId: string,
+  buildId: string,
+  fingerprint: string,
+): boolean {
+  const key = serpCacheKey(clientId, buildId);
+  const seen = failedSerpFingerprints.get(key);
+  if (!seen) return false;
+  failedSerpFingerprints.delete(key);
+  failedSerpFingerprints.set(key, seen);
+  return seen.has(fingerprint);
+}
+
 /** Per-domain qualification decision plus the evidence that produced it. */
 export interface DomainQualificationRecord {
   domain: string;
@@ -273,6 +342,8 @@ export async function createCompetitiveLandscape(
   for (;;) {
     await fetchPendingQueries(portfolio, fetched, observations, unavailableQueries, {
       dataForSeo,
+      clientId: request.client_id,
+      buildId: request.build_id,
       locationName,
       languageName: request.market.language,
       device,
@@ -412,6 +483,8 @@ async function fetchPendingQueries(
   unavailableQueries: UnavailableQueryRecord[],
   ctx: {
     dataForSeo: DataForSeoOrganicPort;
+    clientId: string;
+    buildId: string;
     locationName: string;
     languageName: string;
     device: "desktop" | "mobile";
@@ -419,6 +492,16 @@ async function fetchPendingQueries(
 ): Promise<void> {
   for (const query of portfolio.queries) {
     if (fetched.has(query.query_id)) continue;
+    const fingerprint = serpPurchaseFingerprint(
+      query.query,
+      ctx.locationName,
+      ctx.languageName,
+      ctx.device,
+    );
+    if (failedSerpAlreadyPurchased(ctx.clientId, ctx.buildId, fingerprint)) {
+      fetched.add(query.query_id);
+      continue;
+    }
     let serp: OrganicSerpResult;
     try {
       serp = await ctx.dataForSeo.getOrganicSerp({
@@ -437,6 +520,7 @@ async function fetchPendingQueries(
           },
           "SERP task failed for a portfolio query; recording it unavailable and continuing",
         );
+        rememberFailedSerp(ctx.clientId, ctx.buildId, fingerprint);
         unavailableQueries.push({ query_id: query.query_id, query: query.query });
         fetched.add(query.query_id);
         continue;
@@ -452,6 +536,7 @@ async function fetchPendingQueries(
       throw error;
     }
     fetched.add(query.query_id);
+    if (serp.items.length === 0) rememberFailedSerp(ctx.clientId, ctx.buildId, fingerprint);
 
     // Deduplicate identical ranking URLs within one query: the same semantic
     // observation must never contribute visibility twice.

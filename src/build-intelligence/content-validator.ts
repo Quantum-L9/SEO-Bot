@@ -26,8 +26,8 @@ import type {
   SEOContentBlueprintRoute,
   StructuredContentRoute,
 } from "@quantum-l9/bot-interop";
-import { getLlmService, type LlmService } from "../services/llm.js";
 import { checkRouteGrounding } from "./claim-grounding.js";
+import { type BuildIntelligenceLlm, getDeepSeekBuildIntelligenceLlm } from "./deepseek-llm.js";
 import { contentValidationVerdictSchema } from "./schema-guards.js";
 
 export interface RouteValidationVerdict {
@@ -121,10 +121,10 @@ export async function validateRouteSemantics(
   args: {
     clientId: string;
     buildId: string;
-    llm?: LlmService;
+    llm?: BuildIntelligenceLlm;
   },
 ): Promise<import("./schema-guards.js").ContentValidationVerdict> {
-  const llm = args.llm ?? getLlmService();
+  const llm = args.llm ?? getDeepSeekBuildIntelligenceLlm();
   // The PageContentContract is the coverage authority (WBV2-012: the
   // deterministic compiler already clamped ungroundable proof topics).
   // The raw SEO blueprint route is deliberately NOT included in the judge
@@ -193,7 +193,7 @@ export async function validateRoute(
     clientId: string;
     buildId: string;
     blueprintRoute?: SEOContentBlueprintRoute;
-    llm?: LlmService;
+    llm?: BuildIntelligenceLlm;
   },
 ): Promise<RouteValidationVerdict> {
   const deterministic = deterministicVerdict(route, contractRoute);

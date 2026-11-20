@@ -185,8 +185,8 @@ async function main(): Promise<number> {
       // Counted during the run, not inferred from the sealed validation block.
       repair_attempts: contentEvidence.repair_attempts,
       repaired_route_count: contentEvidence.repaired_route_ids.length,
-      router_only_llm: true,
-      direct_provider_calls: 0,
+      router_only_llm: false,
+      direct_provider_calls: 1,
     };
     console.log(
       `[seam-proof] STEP 3 ok — ${pkg.payload.routes.length} routes, ` +
@@ -231,8 +231,8 @@ async function main(): Promise<number> {
       route_count: blueprint.payload.routes.length,
       // Invalid slots cannot survive: the zod enum rejects them before sealing.
       invalid_slot_count: 0,
-      router_only_llm: true,
-      direct_provider_calls: 0,
+      router_only_llm: false,
+      direct_provider_calls: 1,
     },
     structured_content: structuredContent,
     interop: {

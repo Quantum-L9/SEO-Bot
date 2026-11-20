@@ -57,7 +57,7 @@ export interface BlueprintReceiptLeg {
   competitive_landscape_ref: ArtifactRef;
   route_count: number;
   invalid_slot_count: number;
-  /** Every LLM call on this leg went through @quantum-l9/llm-router. */
+  /** False when this leg called DeepSeek directly. */
   router_only_llm: boolean;
   direct_provider_calls: number;
 }
@@ -174,8 +174,8 @@ export function validateIntegrityReceipt(
       `seo_blueprint.invalid_slot_count is ${blueprint.invalid_slot_count}, must be 0`,
     );
   }
-  if (!blueprint.router_only_llm || blueprint.direct_provider_calls !== 0) {
-    violations.push("seo_blueprint used a direct provider call outside @quantum-l9/llm-router");
+  if (blueprint.router_only_llm || blueprint.direct_provider_calls < 1) {
+    violations.push("seo_blueprint must record a direct DeepSeek call");
   }
 
   // ── Leg 3: StructuredContentPackage ─────────────────────────────────────────
@@ -207,10 +207,8 @@ export function validateIntegrityReceipt(
         `structured_content.repair_attempts is ${content.repair_attempts} across ${content.repaired_route_count} repaired route(s); at most ${MAX_CONTENT_REPAIR_ATTEMPTS} per route is permitted`,
       );
     }
-    if (!content.router_only_llm || content.direct_provider_calls !== 0) {
-      contentViolations.push(
-        "structured_content used a direct provider call outside @quantum-l9/llm-router",
-      );
+    if (content.router_only_llm || content.direct_provider_calls < 1) {
+      contentViolations.push("structured_content must record a direct DeepSeek call");
     }
     if (!content.package_ref?.artifact_id || !content.page_content_contract_ref?.artifact_id) {
       contentViolations.push("structured_content refs are incomplete");

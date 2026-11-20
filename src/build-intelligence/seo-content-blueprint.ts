@@ -46,13 +46,17 @@ import {
 import { z } from "zod";
 import { createModuleLogger } from "../core/logger.js";
 import { DataForSeoClient } from "../services/dataforseo.js";
+import { LlmOutputTruncatedError } from "../services/llm-parse.js";
+import type { LlmRunRecorder } from "../services/llm-run-recorder.js";
 import {
   seoBlueprintBatchOutputTokens,
   seoBlueprintGlobalIntentOutputTokens,
-} from "../services/improve-llm-policy.js";
-import { getLlmService, type LlmService } from "../services/llm.js";
-import { LlmOutputTruncatedError } from "../services/llm-parse.js";
-import type { LlmRunRecorder } from "../services/llm-run-recorder.js";
+} from "../services/seo-blueprint-output-budget.js";
+import {
+  type BuildIntelligenceLlm,
+  DeepSeekTransportError,
+  getDeepSeekBuildIntelligenceLlm,
+} from "./deepseek-llm.js";
 import { PRODUCER } from "./producer.js";
 import {
   type GlobalRouteIntentRoute,
@@ -192,7 +196,7 @@ export interface SEOContentBlueprintRequest {
   competitive_landscape?: CompetitiveLandscapeArtifact;
   /** Exclusive with competitive_landscape. Routes and verified facts are sufficient. */
   first_party_authority?: FirstPartyAuthorityRecord;
-  routes: Array<{ route_id: string; path: string; purpose: string }>;
+  routes: Array<{ route_id: string; path: string; purpose: string; keywords?: string[] }>;
   business_facts: VerifiedBusinessFact[];
   seo_config?: {
     brand_voice?: string;
@@ -291,14 +295,22 @@ export interface SEOContentBlueprintResult {
  */
 export async function createSEOContentBlueprint(
   request: SEOContentBlueprintRequest,
-  deps: { llm?: LlmService; dataForSeo?: PageContentPort; recorder?: LlmRunRecorder } = {},
+  deps: {
+    llm?: BuildIntelligenceLlm;
+    dataForSeo?: PageContentPort;
+    recorder?: LlmRunRecorder;
+  } = {},
 ): Promise<SEOContentBlueprintArtifact> {
   return (await createSEOContentBlueprintWithEvidence(request, deps)).artifact;
 }
 
 export async function createSEOContentBlueprintWithEvidence(
   request: SEOContentBlueprintRequest,
-  deps: { llm?: LlmService; dataForSeo?: PageContentPort; recorder?: LlmRunRecorder } = {},
+  deps: {
+    llm?: BuildIntelligenceLlm;
+    dataForSeo?: PageContentPort;
+    recorder?: LlmRunRecorder;
+  } = {},
 ): Promise<SEOContentBlueprintResult> {
   assertRouteSet(request.routes);
   const hasLandscape = request.competitive_landscape !== undefined;
@@ -320,7 +332,7 @@ export async function createSEOContentBlueprintWithEvidence(
     assertLandscapeUsable(request.competitive_landscape);
   }
 
-  const llm = deps.llm ?? getLlmService();
+  const llm = deps.llm ?? getDeepSeekBuildIntelligenceLlm();
   const landscape = request.competitive_landscape?.payload;
   // A first-party request has no donor URLs, so it must not construct a
   // DataForSEO client or fetch page-content metrics.
@@ -346,6 +358,7 @@ export async function createSEOContentBlueprintWithEvidence(
     route_id: route.route_id,
     path: route.path,
     purpose: route.purpose,
+    ...(route.keywords && route.keywords.length > 0 ? { keywords: route.keywords } : {}),
   }));
 
   // ── PHASE A — global route intent plan (one compact call for ALL routes) ────
@@ -501,7 +514,9 @@ export async function createSEOContentBlueprintWithEvidence(
       // A truncated reply is its own typed failure (it names the operation,
       // this batch's purpose and its output cap) — never relabelled as a
       // validation failure, and it spent no repair.
-      if (error instanceof LlmOutputTruncatedError) throw error;
+      if (error instanceof LlmOutputTruncatedError || error instanceof DeepSeekTransportError) {
+        throw error;
+      }
       // A batch that fails its one bounded repair fails the whole artifact —
       // but the message says WHY: a reply that failed validation is not the
       // same failure as a call that never produced a reply (timeout, every
