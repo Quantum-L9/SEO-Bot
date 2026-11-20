@@ -111,6 +111,44 @@ function relevant(entry: SpendEntry, now: Date): boolean {
   );
 }
 
+interface PeriodTotals {
+  monthly: number;
+  weekly: number;
+  global: number;
+  daily: number;
+}
+
+function addToPeriod(
+  totals: PeriodTotals,
+  entry: SpendEntry,
+  clientId: string,
+  month: string,
+  week: string,
+  day: string,
+): void {
+  const at = new Date(entry.at);
+  if (monthKey(at) === month) {
+    totals.global += entry.usd;
+    if (entry.clientId === clientId) totals.monthly += entry.usd;
+  }
+  if (entry.clientId !== clientId) return;
+  if (isoWeekKey(at) === week) totals.weekly += entry.usd;
+  if (dayKey(at) === day) totals.daily += entry.usd;
+}
+
+function refusedScope(
+  totals: PeriodTotals,
+  next: number,
+  ceilings: DirectSpendCeilings,
+): SpendScope | undefined {
+  if (totals.monthly + next > ceilings.monthlyUsd + 1e-12) return "month";
+  if (totals.weekly + next > ceilings.weeklyUsd + 1e-12) return "week";
+  if (totals.global + next > ceilings.globalMonthlyUsd + 1e-12) return "global";
+  const dailyCap = activeDailyCap(ceilings.dailyUsd);
+  if (dailyCap !== undefined && totals.daily + next > dailyCap + 1e-12) return "day";
+  return undefined;
+}
+
 /**
  * Admit and persist one reservation. Returns the ceiling that refused it, or
  * undefined after the entry is durable. Refusal writes nothing.
@@ -128,25 +166,12 @@ export function reserveDirectSpend(input: {
   const month = monthKey(input.now);
   const week = isoWeekKey(input.now);
   const day = dayKey(input.now);
-  let monthly = 0;
-  let weekly = 0;
-  let global = 0;
-  let daily = 0;
+  const totals: PeriodTotals = { monthly: 0, weekly: 0, global: 0, daily: 0 };
   for (const entry of entries) {
-    const at = new Date(entry.at);
-    if (monthKey(at) === month) {
-      global += entry.usd;
-      if (entry.clientId === input.clientId) monthly += entry.usd;
-    }
-    if (entry.clientId === input.clientId && isoWeekKey(at) === week) weekly += entry.usd;
-    if (entry.clientId === input.clientId && dayKey(at) === day) daily += entry.usd;
+    addToPeriod(totals, entry, input.clientId, month, week, day);
   }
-  const next = input.usd;
-  if (monthly + next > input.ceilings.monthlyUsd + 1e-12) return "month";
-  if (weekly + next > input.ceilings.weeklyUsd + 1e-12) return "week";
-  if (global + next > input.ceilings.globalMonthlyUsd + 1e-12) return "global";
-  const dailyCap = activeDailyCap(input.ceilings.dailyUsd);
-  if (dailyCap !== undefined && daily + next > dailyCap + 1e-12) return "day";
+  const scope = refusedScope(totals, input.usd, input.ceilings);
+  if (scope) return scope;
   entries.push({
     clientId: input.clientId,
     buildId: input.buildId,
