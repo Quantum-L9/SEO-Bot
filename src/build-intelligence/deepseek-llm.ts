@@ -25,7 +25,7 @@ import {
 } from "./spend-ledger.js";
 
 const DEEPSEEK_PROVIDER = "deepseek";
-const DEFAULT_MODEL = "deepseek-flash";
+const DEFAULT_MODEL = "deepseek-v4-pro";
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
 
 /**
@@ -36,6 +36,7 @@ const DEEPSEEK_PEAK_PRICING: Readonly<
   Record<string, { inputPerMTok: number; outputPerMTok: number }>
 > = {
   "deepseek-flash": { inputPerMTok: 0.3, outputPerMTok: 1.2 },
+  "deepseek-v4-pro": { inputPerMTok: 1.32, outputPerMTok: 3.96 },
 };
 
 export class ProviderRequestError extends Error {

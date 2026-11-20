@@ -52,7 +52,7 @@ describe("build-intelligence DeepSeek client", () => {
     expect(String(init?.headers && (init.headers as Record<string, string>).Authorization)).toBe(
       "Bearer test-key",
     );
-    expect(String(init?.body)).toContain("deepseek-flash");
+    expect(String(init?.body)).toContain("deepseek-v4-pro");
   });
 
   it("does not repair a truncated reply", async () => {
@@ -99,7 +99,7 @@ describe("build-intelligence DeepSeek client", () => {
       expect.objectContaining({
         operation: "CONTENT_VALIDATION",
         provider: "deepseek",
-        model: "deepseek-flash",
+        model: "deepseek-v4-pro",
         outcome: "SUCCESS",
       }),
     ]);
@@ -152,7 +152,7 @@ describe("build-intelligence DeepSeek client", () => {
       .fn()
       .mockImplementation(() => Promise.resolve(jsonResponse(JSON.stringify({ ok: true }))));
     const llm = createDeepSeekBuildIntelligenceLlm({
-      env: { DEEPSEEK_API_KEY: "test-key" },
+      env: { DEEPSEEK_API_KEY: "test-key", DEEPSEEK_MODEL: "deepseek-flash" },
       transport,
       ceilings: { monthlyUsd: 0.0062, weeklyUsd: 100, globalMonthlyUsd: 2000 },
     });
@@ -181,7 +181,7 @@ describe("build-intelligence DeepSeek client", () => {
         .fn()
         .mockImplementation(() => Promise.resolve(jsonResponse(JSON.stringify({ ok: true }))));
       const llm = createDeepSeekBuildIntelligenceLlm({
-        env: { DEEPSEEK_API_KEY: "test-key" },
+        env: { DEEPSEEK_API_KEY: "test-key", DEEPSEEK_MODEL: "deepseek-flash" },
         transport,
         ledgerDir,
         now: () => now,
@@ -216,7 +216,7 @@ describe("build-intelligence DeepSeek client", () => {
         .fn()
         .mockImplementation(() => Promise.resolve(jsonResponse(JSON.stringify({ ok: true }))));
       const llm = createDeepSeekBuildIntelligenceLlm({
-        env: { DEEPSEEK_API_KEY: "test-key" },
+        env: { DEEPSEEK_API_KEY: "test-key", DEEPSEEK_MODEL: "deepseek-flash" },
         transport,
         ledgerDir,
         now: () => now,
@@ -252,7 +252,7 @@ describe("build-intelligence DeepSeek client", () => {
         .fn()
         .mockImplementation(() => Promise.resolve(jsonResponse(JSON.stringify({ ok: true }))));
       const first = createDeepSeekBuildIntelligenceLlm({
-        env: { DEEPSEEK_API_KEY: "test-key" },
+        env: { DEEPSEEK_API_KEY: "test-key", DEEPSEEK_MODEL: "deepseek-flash" },
         transport: firstTransport,
         ledgerDir,
         now,
@@ -270,7 +270,7 @@ describe("build-intelligence DeepSeek client", () => {
       });
       const secondTransport = vi.fn();
       const second = createDeepSeekBuildIntelligenceLlm({
-        env: { DEEPSEEK_API_KEY: "test-key" },
+        env: { DEEPSEEK_API_KEY: "test-key", DEEPSEEK_MODEL: "deepseek-flash" },
         transport: secondTransport,
         ledgerDir,
         now,
