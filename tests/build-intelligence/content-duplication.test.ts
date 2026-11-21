@@ -27,12 +27,12 @@ import {
   findContentFindings,
   shingleSimilarity,
 } from "../../src/build-intelligence/content-duplication.js";
-import type { ContentValidationVerdict } from "../../src/build-intelligence/schema-guards.js";
 import {
   ContentRequirementUnsatisfiedError,
   createStructuredContentPackageWithEvidence,
 } from "../../src/build-intelligence/structured-content.js";
 import type { LlmService } from "../../src/services/llm.js";
+import { expectNoRepeatedBodyCopy, routePromptModel } from "./fixtures/route-prompt-model.js";
 
 vi.mock("../../src/core/logger.js", () => ({
   createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
@@ -204,61 +204,20 @@ function route(routeId: string, defects: readonly Defect[]): StructuredContentRo
   };
 }
 
-const pass: ContentValidationVerdict = {
-  seo_blueprint_passed: true,
-  contract_passed: true,
-  unsupported_claims: [],
-  failed_requirements: [],
-};
-
-interface Call {
-  routeId: string;
-  repair: boolean;
-  evidence: string[];
-  earlier: Array<{ route_id: string; text: string }>;
-}
-
 /**
  * Writes each route with `defects(routeId)` on its first attempt. On the repair
  * it drops a defect only when the repair evidence names it, unless `stubborn`.
  */
 function fakeModel(defects: (routeId: string) => Defect[], stubborn = false) {
-  const calls: Call[] = [];
-  const llm = {
-    async executePolicyJson(
-      operation: string,
-      args: {
-        purpose: string;
-        userPrompt: string;
-        validate: (value: unknown) => unknown;
-        callCounter?: { value: number };
-      },
-    ) {
-      if (args.callCounter) args.callCounter.value += 1;
-      if (operation === "CONTENT_VALIDATION") return args.validate(pass);
-      const routeId = args.purpose.split(":")[1] as string;
-      const prompt = JSON.parse(args.userPrompt.split("\n\n---\n")[0] ?? "{}") as {
-        repair_instructions?: { failed_requirements: string[] };
-        already_used_on_earlier_routes?: Array<{ route_id: string; text: string }>;
-      };
-      const evidence = prompt.repair_instructions?.failed_requirements ?? [];
-      calls.push({
-        routeId,
-        repair: Boolean(prompt.repair_instructions),
-        evidence,
-        earlier: prompt.already_used_on_earlier_routes ?? [],
-      });
-      const told = (code: string) => !stubborn && evidence.some((line) => line.startsWith(code));
-      const remaining = defects(routeId).filter((defect) => {
-        if (defect === "heading-as-quote") return !told("HEADING_RESTATED");
-        if (defect === "build-mechanics") return !told("BUILD_MECHANICS_IN_COPY");
-        return !told("DUPLICATE_CONTENT");
-      });
-      return args.validate(
-        route(routeId, prompt.repair_instructions ? remaining : defects(routeId)),
-      );
-    },
-  } as unknown as LlmService;
+  const { llm, calls } = routePromptModel(({ routeId, repair, evidence }) => {
+    const told = (code: string) => !stubborn && evidence.some((line) => line.startsWith(code));
+    const remaining = defects(routeId).filter((defect) => {
+      if (defect === "heading-as-quote") return !told("HEADING_RESTATED");
+      if (defect === "build-mechanics") return !told("BUILD_MECHANICS_IN_COPY");
+      return !told("DUPLICATE_CONTENT");
+    });
+    return route(routeId, repair ? remaining : defects(routeId));
+  });
   return { llm, calls };
 }
 
@@ -406,17 +365,9 @@ describe("structured content — cross-route dedupe across the QAP 5 routes", ()
 
     // Later routes are shown what earlier routes already said.
     const firstHowItWorks = calls.find((call) => call.routeId === "how-it-works" && !call.repair);
-    expect(firstHowItWorks?.earlier.some((unit) => unit.text === PROCESS_STEP)).toBe(true);
+    expect(firstHowItWorks?.doNotReuse).toContain(PROCESS_STEP);
 
     // No body unit of 8+ words is repeated anywhere in the sealed package.
-    const units = artifact.payload.routes
-      .flatMap((sealed) => contentUnits(sealed))
-      .filter((unit) => !["heading", "subheading", "eyebrow"].includes(unit.kind));
-    for (const [index, unit] of units.entries()) {
-      for (const other of units.slice(index + 1)) {
-        const similarity = shingleSimilarity(unit.text, other.text);
-        expect(similarity === null || similarity < DUPLICATE_SIMILARITY).toBe(true);
-      }
-    }
+    expectNoRepeatedBodyCopy(artifact.payload.routes);
   });
 });

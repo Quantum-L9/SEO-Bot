@@ -344,3 +344,54 @@ describe("build-intelligence — typed provider failures (no generic 500)", () =
     });
   });
 });
+
+describe("build-intelligence — a failed run is traceable from its response body", () => {
+  it("carries run_id in the typed failure body, and provider-attempts resolves by that id and by client/build", async () => {
+    const transport = vi
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(deepSeekReply('{"routes":[{"route_id"', "length", TRUNCATED_USAGE)),
+      );
+    scenario.run = async ({ recorder }) => {
+      await blueprintCall(llmWith(transport), recorder, `seo-content-blueprint:batch-1:${BUILD}`);
+      throw new Error("unreachable");
+    };
+    const res = await postBlueprint();
+    expect(res.statusCode).toBe(502);
+    const body = res.json();
+    const runId = runIdFor(CLIENT, BUILD);
+    // The run id is in the BODY, not only the header: a caller that keeps only
+    // bodies (Website-Bot's build evidence) can still find the attempts.
+    expect(body.run_id).toBe(runId);
+    expect(body.provider_attempts).toBe(
+      `/api/build-intelligence/run-evidence/${encodeURIComponent(runId)}/provider-attempts`,
+    );
+
+    const byId = await app.inject({ method: "GET", url: body.provider_attempts, headers: AUTH });
+    expect(byId.statusCode).toBe(200);
+    expect(byId.json()).toMatchObject({
+      run_id: runId,
+      attempt_count: 1,
+      leg_failures: [{ leg: "seo_content_blueprint", code: "LLM_OUTPUT_TRUNCATED" }],
+    });
+
+    // A caller holding only the build id (the canary8 404) can resolve it too.
+    const byBuild = await app.inject({
+      method: "GET",
+      url: `/api/build-intelligence/run-evidence/provider-attempts?client_id=${CLIENT}&build_id=${BUILD}`,
+      headers: AUTH,
+    });
+    expect(byBuild.statusCode).toBe(200);
+    expect(byBuild.json()).toEqual(byId.json());
+  });
+
+  it("answers an unknown run with 404, never a fabricated document", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/build-intelligence/run-evidence/provider-attempts?client_id=nobody&build_id=none",
+      headers: AUTH,
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe("RUN_EVIDENCE_NOT_FOUND");
+  });
+});

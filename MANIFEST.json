@@ -3531,6 +3531,15 @@
       "source_of_generation": null
     },
     {
+      "path": "tests/build-intelligence/fixtures/route-prompt-model.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
       "path": "tests/build-intelligence/integrity-receipt.test.ts",
       "owner": "quality",
       "purpose": "Automated behavioral and assurance tests",
@@ -3685,6 +3694,15 @@
     },
     {
       "path": "tests/build-intelligence/structured-content-output-contract.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/structured-content-repair-regression.test.ts",
       "owner": "quality",
       "purpose": "Automated behavioral and assurance tests",
       "classification": "test",
@@ -4386,5 +4404,5 @@
       "source_of_generation": null
     }
   ],
-  "inventory_digest": "dfeaadc34350f09ec9a40b121427102ac5aa1999c48bdef2f55588ab53141cc4"
+  "inventory_digest": "aa1fbc80815e9174e3ad501d0f947247635a2b9f21749449191cc3df39f96b70"
 }

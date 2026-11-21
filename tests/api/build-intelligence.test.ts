@@ -264,7 +264,8 @@ describe("build-intelligence — producer failure never becomes a fake success",
     const body = res.json();
     expect(body.error).toBe("LLM_OUTPUT_TRUNCATED");
     // No model output is echoed: the body is the code plus the measured message.
-    expect(Object.keys(body).sort()).toEqual(["error", "message"]);
+    // Identifiers of the run (not model output) are the only additions.
+    expect(Object.keys(body).sort()).toEqual(["error", "message", "provider_attempts", "run_id"]);
     expect(body.message).toContain("14500-token output cap");
   });
 
@@ -280,7 +281,8 @@ describe("build-intelligence — producer failure never becomes a fake success",
     expect(res.statusCode).toBe(422);
     const body = res.json();
     expect(body.error).toBe("LLM_OUTPUT_BUDGET_EXCEEDED");
-    expect(Object.keys(body).sort()).toEqual(["error", "message"]);
+    // Identifiers of the run (not model output) are the only additions.
+    expect(Object.keys(body).sort()).toEqual(["error", "message", "provider_attempts", "run_id"]);
   });
 
   it("maps an incomplete donor cohort to 422 with no artifact body", async () => {

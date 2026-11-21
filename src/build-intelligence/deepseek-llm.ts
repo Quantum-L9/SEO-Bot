@@ -252,6 +252,19 @@ interface Completion {
   };
 }
 
+/**
+ * A reply DeepSeek did not finish naturally. Only `stop` means the model ended
+ * its own output. `length` is the cap, and `insufficient_system_resource`,
+ * `aborted` and `content_filter` (api-docs.deepseek.com, create-chat-completion,
+ * finish_reason enum) are interruptions that leave a partial reply. A missing
+ * reason proves nothing about completeness. None of these is ever parsed: a cut
+ * JSON body would otherwise surface as "LLM did not return valid JSON" (QAP
+ * canary8) instead of the typed truncation it is.
+ */
+export function isIncompleteFinish(finishReason: string | null | undefined): boolean {
+  return finishReason !== "stop";
+}
+
 function reportedCount(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
 }
@@ -535,7 +548,10 @@ export function createDeepSeekBuildIntelligenceLlm(options?: {
       ],
       response: { provider: DEEPSEEK_PROVIDER },
     });
-    if (isTruncatedFinish(finishReason, outputTokens, maxOutputTokens)) {
+    if (
+      isTruncatedFinish(finishReason, outputTokens, maxOutputTokens) ||
+      isIncompleteFinish(choice?.finish_reason)
+    ) {
       record(args, { ...measured, outcome: "OUTPUT_TRUNCATED" });
       throw new DeepSeekOutputTruncatedError({
         site,

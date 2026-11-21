@@ -52,6 +52,8 @@ import {
   BUILD_MECHANICS_TERMS,
   type ContentUnit,
   contentUnits,
+  contentWords,
+  DUPLICATE_MIN_WORDS,
   findContentFindings,
 } from "./content-duplication.js";
 import { type RouteValidationVerdict, validateRoute } from "./content-validator.js";
@@ -813,6 +815,7 @@ async function generateRoute(
         mechanicsTermsToAvoid(contractRoute),
       ),
       ...earlierRouteCopy(priorUnits),
+      ...routeSpecificFraming(contractRoute, earlierContractRoutes(request, contractRoute)),
       ...repairBlock,
     },
     null,
@@ -838,9 +841,12 @@ async function generateRoute(
   });
 }
 
-/** How many earlier-route units the prompt shows, and how much of each. */
-const EARLIER_COPY_LIMIT = 80;
-const EARLIER_COPY_CHARS = 160;
+/**
+ * Character budget for the exact earlier-route sentences shown to the model.
+ * Sentences are shown whole (a truncated sentence cannot be avoided exactly);
+ * when the budget runs out the oldest are omitted and counted.
+ */
+const EARLIER_COPY_BUDGET_CHARS = 24_000;
 
 const quoteList = (values: readonly string[]): string =>
   values.map((value) => JSON.stringify(value)).join(", ");
@@ -1051,25 +1057,113 @@ export function repairEvidence(
 }
 
 /**
- * Copy already used on earlier routes of this package, shown so the model can
- * write route-specific framing instead of repeating it (cross-page duplicates
- * fail the rendered site-quality check). Most recent units first.
+ * The exact sentences already accepted on earlier routes of this package,
+ * newest first, as a do-not-reuse list. Only units of DUPLICATE_MIN_WORDS or
+ * more words are listed: shorter units are never compared, so they cannot be
+ * cross-page duplicates. (QAP canary8: /crm-transformation's first draft
+ * reused "/"'s four process steps and two FAQ answers.)
  */
 function earlierRouteCopy(units: readonly ContentUnit[]): {
-  already_used_on_earlier_routes?: Array<{ route_id: string; text: string }>;
+  do_not_reuse_from_earlier_routes?: {
+    instruction: string;
+    sentences: Array<{ route_id: string; location: string; text: string }>;
+    omitted_older_count?: number;
+  };
 } {
-  if (units.length === 0) return {};
+  const comparable = units.filter((unit) => contentWords(unit.text).length >= DUPLICATE_MIN_WORDS);
+  if (comparable.length === 0) return {};
+  const sentences: Array<{ route_id: string; location: string; text: string }> = [];
+  let used = 0;
+  for (const unit of [...comparable].reverse()) {
+    if (used + unit.text.length > EARLIER_COPY_BUDGET_CHARS) break;
+    used += unit.text.length;
+    sentences.push({ route_id: unit.route_id, location: unit.location, text: unit.text });
+  }
+  const omitted = comparable.length - sentences.length;
   return {
-    already_used_on_earlier_routes: units
-      .slice(-EARLIER_COPY_LIMIT)
-      .reverse()
-      .map((unit) => ({
-        route_id: unit.route_id,
-        text:
-          unit.text.length > EARLIER_COPY_CHARS
-            ? `${unit.text.slice(0, EARLIER_COPY_CHARS - 3)}...`
-            : unit.text,
-      })),
+    do_not_reuse_from_earlier_routes: {
+      instruction:
+        "These exact sentences are already published on earlier routes of this site. Do not " +
+        "reuse any of them, verbatim or closely reworded: the site-quality check rejects any " +
+        "paragraph, list item or FAQ answer of 8+ words that shares 60% or more of its " +
+        "3-word sequences with one of these. Write sentences that belong to this route.",
+      sentences,
+      ...(omitted > 0 ? { omitted_older_count: omitted } : {}),
+    },
+  };
+}
+
+/** Contract routes generated before `current` (generation follows contract order). */
+function earlierContractRoutes(
+  request: StructuredContentRequest,
+  current: PageContentContractRoute,
+): PageContentContractRoute[] {
+  const routes = request.page_content_contract.payload.routes;
+  const index = routes.findIndex((route) => route.route_id === current.route_id);
+  return index > 0 ? routes.slice(0, index) : [];
+}
+
+const normalizeQuestion = (question: string): string =>
+  question.trim().toLowerCase().replace(/\s+/g, " ");
+
+/**
+ * Components and FAQ questions this route shares with earlier routes. The
+ * spec reuses them on purpose (a process, a common question); the copy must
+ * not. Each one is named so the model frames it around this route's subject.
+ */
+function routeSpecificFraming(
+  contractRoute: PageContentContractRoute,
+  earlier: readonly PageContentContractRoute[],
+): {
+  route_specific_framing?: {
+    instruction: string;
+    this_route_subject: string;
+    shared_components: Array<{
+      section_id: string;
+      component_class: string;
+      also_on_routes: string[];
+    }>;
+    repeated_faq_questions: Array<{ question: string; also_on_routes: string[] }>;
+  };
+} {
+  const shared_components = contractRoute.sections
+    .map((section) => ({
+      section_id: section.section_id,
+      component_class: section.component_class,
+      also_on_routes: earlier
+        .filter((route) =>
+          route.sections.some((other) => other.component_class === section.component_class),
+        )
+        .map((route) => route.route_id),
+    }))
+    .filter((entry) => entry.also_on_routes.length > 0);
+  const repeated_faq_questions = contractRoute.sections
+    .flatMap((section) => section.content_requirements.questions)
+    .map((question) => ({
+      question,
+      also_on_routes: earlier
+        .filter((route) =>
+          route.sections.some((section) =>
+            section.content_requirements.questions.some(
+              (other) => normalizeQuestion(other) === normalizeQuestion(question),
+            ),
+          ),
+        )
+        .map((route) => route.route_id),
+    }))
+    .filter((entry) => entry.also_on_routes.length > 0);
+  if (shared_components.length === 0 && repeated_faq_questions.length === 0) return {};
+  return {
+    route_specific_framing: {
+      instruction:
+        "These components and FAQ questions also appear on earlier routes. Keep the structure, " +
+        "never the words: tie every step, item and answer to this route's subject " +
+        "(this_route_subject), so each reads as written for this page. A repeated FAQ question " +
+        "gets a new answer for this route's context, never the earlier route's answer.",
+      this_route_subject: `${contractRoute.purpose} (${contractRoute.search_context.primary_query})`,
+      shared_components,
+      repeated_faq_questions,
+    },
   };
 }
 

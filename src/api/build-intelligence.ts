@@ -575,31 +575,18 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
 
   // 7. Provider attempts — one receipt per provider attempt of the run,
   //    failed legs included, with spend equal to the sum of the receipts.
+  //    Addressable by run id (every typed failure body carries it) or by the
+  //    run's own (client_id, build_id), so a caller that only kept the build
+  //    id can still find the attempts of a failed run.
   app.get("/api/build-intelligence/run-evidence/:run_id/provider-attempts", (request, reply) => {
     const { run_id: runId } = request.params as { run_id: string };
-    let document: ReturnType<typeof getRunProviderAttempts>;
-    try {
-      document = getRunProviderAttempts(runId);
-    } catch (error) {
-      if (error instanceof ProviderAttemptsInvalidError) {
-        logger.error(
-          { runId, violations: error.violations },
-          "Provider attempts failed validation",
-        );
-        return reply
-          .status(422)
-          .send({ error: error.code, message: error.message, violations: error.violations });
-      }
-      throw error;
-    }
-    if (!document) {
-      return reply.status(404).send({
-        error: "RUN_EVIDENCE_NOT_FOUND",
-        message: `no ${PROVIDER_ATTEMPTS_SCHEMA} evidence for ${runId}`,
-      });
-    }
-    reply.header(RUN_ID_HEADER, document.run_id);
-    return reply.status(200).send(document);
+    return sendProviderAttempts(reply, runId);
+  });
+
+  app.get("/api/build-intelligence/run-evidence/provider-attempts", (request, reply) => {
+    const parsed = runEvidenceQuery.safeParse(request.query);
+    if (!parsed.success) return badRequest(reply, "invalid request query", parsed.error.issues);
+    return sendProviderAttempts(reply, runIdFor(parsed.data.client_id, parsed.data.build_id));
   });
 
   app.get("/api/build-intelligence/run-evidence", async (request, reply) => {
@@ -674,6 +661,35 @@ function sendRunEvidence(
   return reply.status(200).send(audit);
 }
 
+/** Where a run's provider attempts can be read. */
+function providerAttemptsPath(runId: string): string {
+  return `/api/build-intelligence/run-evidence/${encodeURIComponent(runId)}/provider-attempts`;
+}
+
+/** A run's provider attempts, or the exact reason they cannot be returned. */
+function sendProviderAttempts(reply: FastifyReply, runId: string): FastifyReply {
+  let document: ReturnType<typeof getRunProviderAttempts>;
+  try {
+    document = getRunProviderAttempts(runId);
+  } catch (error) {
+    if (error instanceof ProviderAttemptsInvalidError) {
+      logger.error({ runId, violations: error.violations }, "Provider attempts failed validation");
+      return reply
+        .status(422)
+        .send({ error: error.code, message: error.message, violations: error.violations });
+    }
+    throw error;
+  }
+  if (!document) {
+    return reply.status(404).send({
+      error: "RUN_EVIDENCE_NOT_FOUND",
+      message: `no ${PROVIDER_ATTEMPTS_SCHEMA} evidence for ${runId}`,
+    });
+  }
+  reply.header(RUN_ID_HEADER, document.run_id);
+  return reply.status(200).send(document);
+}
+
 /**
  * Record a failed leg's provider attempts and the typed failure that ended it,
  * then answer with that failure. The attempts the leg spent are evidence
@@ -690,8 +706,12 @@ function failLeg(
   },
 ): FastifyReply {
   const failure = classifyProducerError(error, leg.recorder);
+  // The run id travels in the body too: a caller that keeps only bodies (not
+  // headers) must still be able to fetch this failed run's provider attempts.
+  const runId = runIdFor(leg.client_id, leg.build_id);
+  reply.header(RUN_ID_HEADER, runId);
   try {
-    const runId = recordProviderAttempts({
+    recordProviderAttempts({
       client_id: leg.client_id,
       build_id: leg.build_id,
       recorder: leg.recorder,
@@ -702,7 +722,6 @@ function failLeg(
         batch: (failure.body.batch as string | null | undefined) ?? null,
       },
     });
-    reply.header(RUN_ID_HEADER, runId);
   } catch (recordError) {
     // Recording evidence never replaces the producer's own failure.
     logger.error(
@@ -710,7 +729,11 @@ function failLeg(
       "Failed to record provider attempts for a failed leg",
     );
   }
-  return reply.status(failure.status).send(failure.body);
+  return reply.status(failure.status).send({
+    ...failure.body,
+    run_id: runId,
+    provider_attempts: providerAttemptsPath(runId),
+  });
 }
 
 /** Where a provider failure happened, as response fields. */
