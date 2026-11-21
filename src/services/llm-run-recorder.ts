@@ -173,6 +173,47 @@ export interface AttributionFailureEvidence {
   reason: string;
 }
 
+/**
+ * What one provider attempt ended as. Every attempt gets exactly one receipt,
+ * including attempts that were refused before dispatch.
+ */
+export type ProviderAttemptOutcome =
+  | "OK"
+  | "SCHEMA_INVALID"
+  | "OUTPUT_TRUNCATED"
+  | "TRANSPORT_ERROR"
+  | "SPEND_CAP_REFUSED"
+  | "PROVIDER_NOT_CONFIGURED";
+
+/**
+ * One provider attempt, success or failure, as measured at the provider
+ * boundary. Token and cost fields are `null` when the provider did not report
+ * them, never a guessed zero. The one exception is an attempt that was never
+ * dispatched: its cost is a known 0.
+ */
+export interface ProviderAttemptReceipt {
+  attempt_id: string;
+  operation: string;
+  purpose: string;
+  /** `global-intent`, `batch-N`, or null when the purpose names no batch. */
+  batch: string | null;
+  attempt: OperationAttempt;
+  provider: string;
+  model: string;
+  /** Name of the typed per-operation provider policy this request used. */
+  policy: string;
+  max_tokens: number;
+  dispatched: boolean;
+  finish_reason: string | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  reasoning_tokens: number | null;
+  cost_usd: number | null;
+  /** How `cost_usd` was computed, so the number can be checked. */
+  pricing_basis: string;
+  outcome: ProviderAttemptOutcome;
+}
+
 export interface RunRecorderLeg {
   competitive_landscape: boolean;
   seo_content_blueprint: boolean;
@@ -191,6 +232,7 @@ export class LlmRunRecorder {
   private readonly capabilityRejections: CapabilityRejectionEvidence[] = [];
   private readonly directProviderBypasses: DirectProviderBypassEvidence[] = [];
   private readonly attributionFailures: AttributionFailureEvidence[] = [];
+  private readonly providerAttempts: ProviderAttemptReceipt[] = [];
   private open = true;
 
   constructor(readonly runId: string) {
@@ -267,6 +309,22 @@ export class LlmRunRecorder {
       descriptor_requires_search: input.descriptorRequiresSearch,
       outcome: decision.outcome === "FAILED" ? "FAILED" : "SUCCESS",
     });
+  }
+
+  /** Record one provider attempt receipt, success or failure. */
+  recordProviderAttempt(receipt: ProviderAttemptReceipt): void {
+    this.providerAttempts.push({ ...receipt });
+  }
+
+  /** Every provider attempt this recorder saw, in dispatch order. */
+  providerAttemptReceipts(): ProviderAttemptReceipt[] {
+    return this.providerAttempts.map((entry) => ({ ...entry }));
+  }
+
+  /** The most recent provider attempt, or null when none was made. */
+  lastProviderAttempt(): ProviderAttemptReceipt | null {
+    const last = this.providerAttempts.at(-1);
+    return last ? { ...last } : null;
   }
 
   recordCapabilityRejection(evidence: CapabilityRejectionEvidence): void {

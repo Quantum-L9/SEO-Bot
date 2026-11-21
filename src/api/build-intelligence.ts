@@ -48,14 +48,28 @@ import {
   CompetitiveLandscapeInvalidError,
   createCompetitiveLandscape,
 } from "../build-intelligence/competitive-landscape.js";
-import { DeepSeekTransportError } from "../build-intelligence/deepseek-llm.js";
+import {
+  BudgetExhaustedError,
+  DeepSeekOutputTruncatedError,
+  DeepSeekTransportError,
+  type ProviderFailureSite,
+  ProviderRequestError,
+  TaskValidationError,
+} from "../build-intelligence/deepseek-llm.js";
 import { projectLlmAudit } from "../build-intelligence/llm-audit.js";
 import { runPreflight } from "../build-intelligence/preflight.js";
 import {
+  PROVIDER_ATTEMPTS_SCHEMA,
+  ProviderAttemptsInvalidError,
+  type ProviderLegFailure,
+} from "../build-intelligence/provider-attempts.js";
+import {
   getRunLlmAudit,
   getRunLlmAuditFor,
+  getRunProviderAttempts,
   recordCompetitiveLandscapeLeg,
   recordedCallsForAudit,
+  recordProviderAttempts,
   recordSeoContentBlueprintLeg,
   recordStructuredContentLeg,
 } from "../build-intelligence/run-evidence-store.js";
@@ -69,6 +83,7 @@ import {
   CompetitiveLandscapeRefMismatchError,
   createSEOContentBlueprintWithEvidence,
   RouteSetMismatchError,
+  SeoContentBlueprintBatchInvalidError,
   SeoContentBlueprintInvalidError,
 } from "../build-intelligence/seo-content-blueprint.js";
 import {
@@ -367,6 +382,11 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
       await persistBestEffort(artifact);
       // Ranking evidence is the producer's own measured count, recorded for the
       // run before the response is written.
+      recordProviderAttempts({
+        client_id: parsed.data.client_id,
+        build_id: parsed.data.build_id,
+        recorder,
+      });
       const runId = recordCompetitiveLandscapeLeg({
         client_id: parsed.data.client_id,
         build_id: parsed.data.build_id,
@@ -392,7 +412,12 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
       );
       return reply.status(201).send(artifact);
     } catch (error) {
-      return handleProducerError(reply, error);
+      return failLeg(reply, error, {
+        leg: "competitive_landscape",
+        client_id: parsed.data.client_id,
+        build_id: parsed.data.build_id,
+        recorder,
+      });
     } finally {
       recorder.close();
     }
@@ -437,6 +462,11 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
       );
       assertIntelligenceArtifactIntegrity(artifact);
       await persistBestEffort(artifact);
+      recordProviderAttempts({
+        client_id: parsed.data.client_id,
+        build_id: parsed.data.build_id,
+        recorder,
+      });
       const runId = recordSeoContentBlueprintLeg({
         client_id: parsed.data.client_id,
         build_id: parsed.data.build_id,
@@ -447,7 +477,12 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
       reply.header(RUN_ID_HEADER, runId);
       return reply.status(201).send(artifact);
     } catch (error) {
-      return handleProducerError(reply, error);
+      return failLeg(reply, error, {
+        leg: "seo_content_blueprint",
+        client_id: parsed.data.client_id,
+        build_id: parsed.data.build_id,
+        recorder,
+      });
     } finally {
       recorder.close();
     }
@@ -493,6 +528,11 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
       );
       assertIntelligenceArtifactIntegrity(artifact);
       await persistBestEffort(artifact);
+      recordProviderAttempts({
+        client_id: parsed.data.client_id,
+        build_id: parsed.data.build_id,
+        recorder,
+      });
       const runId = recordStructuredContentLeg({
         client_id: parsed.data.client_id,
         build_id: parsed.data.build_id,
@@ -503,7 +543,12 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
       reply.header(RUN_ID_HEADER, runId);
       return reply.status(201).send(artifact);
     } catch (error) {
-      return handleProducerError(reply, error);
+      return failLeg(reply, error, {
+        leg: "structured_content",
+        client_id: parsed.data.client_id,
+        build_id: parsed.data.build_id,
+        recorder,
+      });
     } finally {
       recorder.close();
     }
@@ -527,6 +572,38 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
     const { run_id: runId } = request.params as { run_id: string };
     return sendRunEvidence(reply, () => getRunLlmAudit(runId), runId);
   });
+
+  // 7. Provider attempts — one receipt per provider attempt of the run,
+  //    failed legs included, with spend equal to the sum of the receipts.
+  app.get(
+    "/api/build-intelligence/run-evidence/:run_id/provider-attempts",
+    async (request, reply) => {
+      const { run_id: runId } = request.params as { run_id: string };
+      let document: ReturnType<typeof getRunProviderAttempts>;
+      try {
+        document = getRunProviderAttempts(runId);
+      } catch (error) {
+        if (error instanceof ProviderAttemptsInvalidError) {
+          logger.error(
+            { runId, violations: error.violations },
+            "Provider attempts failed validation",
+          );
+          return reply
+            .status(422)
+            .send({ error: error.code, message: error.message, violations: error.violations });
+        }
+        throw error;
+      }
+      if (!document) {
+        return reply.status(404).send({
+          error: "RUN_EVIDENCE_NOT_FOUND",
+          message: `no ${PROVIDER_ATTEMPTS_SCHEMA} evidence for ${runId}`,
+        });
+      }
+      reply.header(RUN_ID_HEADER, document.run_id);
+      return reply.status(200).send(document);
+    },
+  );
 
   app.get("/api/build-intelligence/run-evidence", async (request, reply) => {
     const parsed = runEvidenceQuery.safeParse(request.query);
@@ -601,47 +678,177 @@ function sendRunEvidence(
 }
 
 /**
- * Map typed producer failures to stable HTTP responses. A producer failure is
- * NEVER answered with a fabricated success — every branch here is a 4xx/5xx.
+ * Record a failed leg's provider attempts and the typed failure that ended it,
+ * then answer with that failure. The attempts the leg spent are evidence
+ * whether or not the leg succeeded.
  */
-function handleProducerError(reply: FastifyReply, error: unknown): FastifyReply {
-  // Upstream evidence provider is unreachable or refused the request.
-  if (error instanceof DataForSeoUnavailableError) {
-    return reply.status(502).send({ error: error.code, message: error.message });
+function failLeg(
+  reply: FastifyReply,
+  error: unknown,
+  leg: {
+    leg: ProviderLegFailure["leg"];
+    client_id: string;
+    build_id: string;
+    recorder: LlmRunRecorder;
+  },
+): FastifyReply {
+  const failure = classifyProducerError(error, leg.recorder);
+  try {
+    const runId = recordProviderAttempts({
+      client_id: leg.client_id,
+      build_id: leg.build_id,
+      recorder: leg.recorder,
+      failure: {
+        leg: leg.leg,
+        code: String(failure.body.error),
+        operation: (failure.body.operation as string | undefined) ?? null,
+        batch: (failure.body.batch as string | null | undefined) ?? null,
+      },
+    });
+    reply.header(RUN_ID_HEADER, runId);
+  } catch (recordError) {
+    // Recording evidence never replaces the producer's own failure.
+    logger.error(
+      { error: recordError instanceof Error ? recordError.message : String(recordError) },
+      "Failed to record provider attempts for a failed leg",
+    );
+  }
+  return reply.status(failure.status).send(failure.body);
+}
+
+/** Where a provider failure happened, as response fields. */
+function siteFields(site: ProviderFailureSite | null | undefined): Record<string, unknown> {
+  if (!site) return {};
+  return {
+    operation: site.operation,
+    batch: site.batch,
+    attempt: site.attempt,
+  };
+}
+
+interface ProducerFailure {
+  status: number;
+  body: Record<string, unknown>;
+}
+
+function failure(status: number, body: Record<string, unknown>): ProducerFailure {
+  return { status, body };
+}
+
+/**
+ * Classify a producer failure into a stable HTTP status and a typed body. A
+ * producer failure is NEVER answered with a fabricated success: every branch
+ * here is a 4xx/5xx. Provider failures carry the failing operation and batch.
+ */
+function classifyProducerError(error: unknown, recorder: LlmRunRecorder): ProducerFailure {
+  const last = recorder.lastProviderAttempt();
+  const lastSite: ProviderFailureSite | null = last
+    ? { operation: last.operation, purpose: last.purpose, batch: last.batch, attempt: last.attempt }
+    : null;
+  // Provider stopped at its output cap. Never repaired. The body carries
+  // measurements only, never model output.
+  if (error instanceof DeepSeekOutputTruncatedError) {
+    return {
+      status: 502,
+      body: {
+        error: error.code,
+        message: error.message,
+        ...siteFields(error.site),
+        policy: error.policy,
+        finish_reason: error.finishReason,
+        max_tokens: error.maxOutputTokens,
+        completion_tokens: error.outputTokens,
+        prompt_tokens: error.promptTokens,
+        reasoning_tokens: error.reasoningTokens,
+      },
+    };
   }
   if (error instanceof DeepSeekTransportError) {
-    return reply.status(502).send({ error: error.code, message: error.message });
+    return {
+      status: 502,
+      body: { error: error.code, message: error.message, ...siteFields(error.site) },
+    };
+  }
+  if (error instanceof BudgetExhaustedError) {
+    return {
+      status: 402,
+      body: { error: error.code, message: error.message, ...siteFields(error.site) },
+    };
+  }
+  if (error instanceof ProviderRequestError || error instanceof TaskValidationError) {
+    return {
+      status: 503,
+      body: { error: error.code, message: error.message, ...siteFields(error.site) },
+    };
+  }
+  if (error instanceof SeoContentBlueprintBatchInvalidError) {
+    return {
+      status: 422,
+      body: { error: error.code, message: error.message, ...siteFields(lastSite) },
+    };
+  }
+  const legacy = typedProducerFailure(error);
+  if (legacy) return legacy;
+  const message = error instanceof Error ? error.message : String(error);
+  // The last provider reply was rejected by its validator and the producer
+  // failed on it: a schema failure, after the bounded repair when the last
+  // attempt was the repair. Read from the attempt receipt, not guessed from
+  // the message.
+  if (last && last.outcome === "SCHEMA_INVALID") {
+    return {
+      status: 422,
+      body: {
+        error: last.attempt === "repair" ? "LLM_SCHEMA_INVALID_AFTER_REPAIR" : "LLM_SCHEMA_INVALID",
+        message,
+        ...siteFields(lastSite),
+      },
+    };
+  }
+  logger.error({ error: message }, "Build-intelligence producer failed");
+  return {
+    status: 500,
+    body: { error: "build_intelligence_failed", message, ...siteFields(lastSite) },
+  };
+}
+
+/**
+ * Map typed non-provider producer failures to stable HTTP statuses and bodies,
+ * or null for an error this function does not recognise.
+ */
+function typedProducerFailure(error: unknown): ProducerFailure | null {
+  // Upstream evidence provider is unreachable or refused the request.
+  if (error instanceof DataForSeoUnavailableError) {
+    return failure(502, { error: error.code, message: error.message });
+  }
+  if (error instanceof DeepSeekTransportError) {
+    return failure(502, { error: error.code, message: error.message });
   }
   // Provider reached, individual task failed, or its payload is unusable.
   if (error instanceof DataForSeoTaskError || error instanceof SerpEvidenceInvalidError) {
-    return reply.status(502).send({ error: error.code, message: error.message });
+    return failure(502, { error: error.code, message: error.message });
   }
   // The upstream model stopped at its output cap: the reply is unusable, so
   // this is a bad upstream response, not a server fault. The message carries
   // measurements only (operation, purpose, cap, finish reason) — never output.
   if (error instanceof LlmOutputTruncatedError) {
-    return reply.status(502).send({ error: error.code, message: error.message });
+    return failure(502, { error: error.code, message: error.message });
   }
   // The request needs more output than the governed ceiling allows. Raised
   // before any LLM call; the request as sized cannot be served.
   if (error instanceof LlmOutputBudgetExceededError) {
-    return reply.status(422).send({ error: error.code, message: error.message });
+    return failure(422, { error: error.code, message: error.message });
   }
   if (error instanceof CompetitiveEvidenceIncompleteError) {
-    return reply
-      .status(422)
-      .send({ error: error.code, message: error.message, detail: error.detail });
+    return failure(422, { error: error.code, message: error.message, detail: error.detail });
   }
   if (error instanceof CompetitiveDonorQualificationError) {
-    return reply
-      .status(422)
-      .send({ error: error.code, message: error.message, detail: error.detail });
+    return failure(422, { error: error.code, message: error.message, detail: error.detail });
   }
   if (
     error instanceof CompetitiveLandscapeInvalidError ||
     error instanceof CompetitiveLandscapeInputInvalidError
   ) {
-    return reply.status(422).send({ error: error.code, message: error.message });
+    return failure(422, { error: error.code, message: error.message });
   }
   if (
     error instanceof RouteSetMismatchError ||
@@ -651,10 +858,10 @@ function handleProducerError(reply: FastifyReply, error: unknown): FastifyReply 
     error instanceof StructuredContentRouteMismatchError ||
     error instanceof ArtifactLineageMismatchError
   ) {
-    return reply.status(422).send({ error: error.code, message: error.message });
+    return failure(422, { error: error.code, message: error.message });
   }
   if (error instanceof ContentRequirementUnsatisfiedError) {
-    return reply.status(422).send({
+    return failure(422, {
       error: error.code,
       message: error.message,
       failed_requirements: error.failedRequirements,
@@ -662,16 +869,15 @@ function handleProducerError(reply: FastifyReply, error: unknown): FastifyReply 
     });
   }
   if (error instanceof StructuredContentShapeError) {
-    return reply.status(422).send({ error: error.code, message: error.message });
+    return failure(422, { error: error.code, message: error.message });
   }
   if (error instanceof ArtifactDigestConflictError) {
-    return reply.status(409).send({ error: error.code, message: error.message });
+    return failure(409, { error: error.code, message: error.message });
   }
   // Lineage assertion failures from bot-interop surface as INTEL_ARTIFACT_*.
   const message = error instanceof Error ? error.message : String(error);
   if (message.startsWith("INTEL_ARTIFACT_")) {
-    return reply.status(422).send({ error: "INTEL_ARTIFACT_INTEGRITY", message });
+    return failure(422, { error: "INTEL_ARTIFACT_INTEGRITY", message });
   }
-  logger.error({ error: message }, "Build-intelligence producer failed");
-  return reply.status(500).send({ error: "build_intelligence_failed", message });
+  return null;
 }
