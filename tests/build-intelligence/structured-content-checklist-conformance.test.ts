@@ -333,6 +333,7 @@ const CHECKLIST_INSTRUCTION_FOR: Record<RequirementFailureKind, string> = {
   duplicate_content: "Never repeat a paragraph",
   heading_restated: "never restate a heading as body copy",
   build_mechanics_in_copy: '"webhook"',
+  presentation_limit: "Short rendered fields have word limits",
 };
 
 describe("validator ⇄ checklist conformance (property)", () => {

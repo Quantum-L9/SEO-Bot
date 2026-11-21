@@ -923,6 +923,7 @@ export function renderRequirementChecklist(
       ? `A number in any claim about years, projects, clients, team size, response time, warranty term, price, rating or founding year must be one of: ${quoteList(checklist.verified_numbers)}.`
       : "Do not state any number of years, projects, clients, staff, response time, warranty term, price, rating or founding year: no verified fact supplies one.",
     "Never repeat a paragraph, list item or FAQ answer, and never restate a heading as body copy.",
+    `Short rendered fields have word limits: every internal_links[].anchor_text at most ${checklist.presentation_limits.anchor_text} words (it is a nav label); every sections[].eyebrow at most ${checklist.presentation_limits.eyebrow} words (it renders uppercase); every sections[].cta.label at most ${checklist.presentation_limits.cta_label} words (it is a button).`,
   ];
   if (checklist.internal_link_targets.length > 0) {
     route_instructions.push(
@@ -1038,6 +1039,13 @@ export function repairEvidence(
       case "build_mechanics_in_copy":
         instruction = `Remove every occurrence of ${JSON.stringify(subject)} and rewrite each affected sentence so it stays complete and grammatical.`;
         break;
+      case "presentation_limit": {
+        const field = subject;
+        const sectionMatch = /^sections\.([^.]+)\./.exec(field);
+        if (sectionMatch?.[1]) sectionIds = [sectionMatch[1]];
+        instruction = `Shorten ${field} from ${classified.word_count} words to at most ${classified.limit} words. Rewrite it as a complete short phrase with the same meaning; do not cut it off mid-phrase.`;
+        break;
+      }
       case "duplicate_content":
       case "heading_restated":
         // The finding already names the exact location, the repeated text and
