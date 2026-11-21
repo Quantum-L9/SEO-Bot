@@ -310,10 +310,11 @@ export function checkRouteGrounding(
   // 7. Presentation limits: short fields the renderer shows as nav labels,
   //    uppercase eyebrows and buttons. A violation is reported with the exact
   //    field and word count — never truncated.
-  failures.push(...checkPresentationLimits(route, checklist.presentation_limits));
-
   // 8. Required topics and entities are actually represented.
-  failures.push(...checkRequiredCoverage(route.route_id, checklist, haystack));
+  failures.push(
+    ...checkPresentationLimits(route, checklist.presentation_limits),
+    ...checkRequiredCoverage(route.route_id, checklist, haystack),
+  );
 
   return { unsupportedClaims, failures };
 }
