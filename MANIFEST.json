@@ -3522,6 +3522,15 @@
       "source_of_generation": null
     },
     {
+      "path": "tests/build-intelligence/fixtures/fake-deepseek.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
       "path": "tests/build-intelligence/integrity-receipt.test.ts",
       "owner": "quality",
       "purpose": "Automated behavioral and assurance tests",
@@ -4359,5 +4368,5 @@
       "source_of_generation": null
     }
   ],
-  "inventory_digest": "bca646ddefcff3318f0c48c009edc79126823b0144cb75a95afd99efe94a8939"
+  "inventory_digest": "fd4ff81db00bc1a9485ea8de06e9a257bdfa9a4d2b6b1730ddf6cf6228d09c08"
 }
