@@ -196,6 +196,12 @@ describe("quote attribution — the checklist rule", () => {
     ["Mission statement", 'is a self-reference ("statement")'],
     ["The team philosophy", 'is a self-reference ("philosophy")'],
     ["Jane Doe, VP Sales", "is not in the contract's evidence"],
+    // Codex review on #155: a shortened self-name, and a fragment of a fact
+    // that names no source, are not sources.
+    ["Quantum AI", "names the business itself"],
+    ["Partners Weekly", "names the business itself"],
+    ["remote", "is not in the contract's evidence"],
+    ["Remote-first consulting", "is not in the contract's evidence"],
   ])("attribution %j fails: %s", (attribution, problem) => {
     expect(quoteAttributionProblem(attribution, rules)).toBe(problem);
   });

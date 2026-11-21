@@ -461,10 +461,18 @@ export interface RouteRequirementChecklist {
  * …" attributed to "Quantum AI Partners methodology statement".
  */
 export interface QuoteAttributionRules {
-  /** Normalized text of the route's verified facts: an attribution must appear in it. */
-  evidence_corpus: string;
-  /** The business's own names, from its verified name facts (normalized). */
-  self_names: string[];
+  /**
+   * Word sequences of the verified facts that can name a quote's source (press,
+   * awards, testimonials, clients, …). An attribution must be one of them, or a
+   * whole-word run inside one. Other facts (delivery model, service area, …)
+   * never name a source, so "remote" does not match "remote-first consulting".
+   */
+  sources: string[][];
+  /**
+   * Distinctive words of the business's own names. An attribution containing
+   * any of them names the business, shortened or not ("Quantum AI").
+   */
+  self_name_words: string[];
   /** Words that make an attribution a self-reference, whoever it names. */
   self_reference_terms: readonly string[];
 }
@@ -487,25 +495,51 @@ export const QUOTE_SELF_REFERENCE_TERMS: readonly string[] = [
 const BUSINESS_NAME_FACT_KEY =
   /(^|_)(company|business|brand|legal|trading|organization|organisation)?_?name$/;
 
+/** Verified facts whose value can name a quote's source. */
+const SOURCE_FACT_KEY =
+  /press|media|publication|featured|mention|award|testimonial|review|quote|author|source|citation|endorse|client|customer|partner|certification|accreditation/;
+
+/** Name words too generic to identify the business on their own. */
+const GENERIC_NAME_WORDS = new Set(["and", "the", "for", "inc", "llc", "ltd", "corp", "group"]);
+
+function wordsOf(value: string): string[] {
+  return normalize(value)
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+}
+
+function factValues(fact: VerifiedBusinessFact): string[] {
+  return (Array.isArray(fact.value) ? fact.value : [fact.value]).map(String);
+}
+
 function quoteAttributionRules(facts: VerifiedBusinessFact[]): QuoteAttributionRules {
+  const keyOf = (fact: VerifiedBusinessFact) => fact.key.trim().toLowerCase();
   return {
-    evidence_corpus: normalize(buildFactCorpus(facts)),
-    self_names: facts
-      .filter((fact) => BUSINESS_NAME_FACT_KEY.test(fact.key.trim().toLowerCase()))
-      .flatMap((fact) => (Array.isArray(fact.value) ? fact.value : [fact.value]))
-      .map((value) => normalize(String(value)))
-      .filter(Boolean),
+    sources: facts
+      .filter((fact) => SOURCE_FACT_KEY.test(keyOf(fact)))
+      .flatMap(factValues)
+      .map(wordsOf)
+      .filter((words) => words.length > 0),
+    self_name_words: [
+      ...new Set(
+        facts
+          .filter((fact) => BUSINESS_NAME_FACT_KEY.test(keyOf(fact)))
+          .flatMap(factValues)
+          .flatMap(wordsOf)
+          .filter((word) => word.length >= 3 && !GENERIC_NAME_WORDS.has(word)),
+      ),
+    ],
     self_reference_terms: QUOTE_SELF_REFERENCE_TERMS,
   };
 }
 
-/** Strip a leading dash ("— Jane Doe") and trailing dots or spaces, without regex backtracking. */
-function trimAttribution(value: string): string {
-  let start = 0;
-  let end = value.length;
-  while (start < end && /[-–—\s]/.test(value.charAt(start))) start += 1;
-  while (end > start && /[.\s]/.test(value.charAt(end - 1))) end -= 1;
-  return value.slice(start, end);
+/** Whether `needle` occurs as a contiguous whole-word run in `haystack`. */
+function containsWordRun(haystack: readonly string[], needle: readonly string[]): boolean {
+  if (needle.length === 0 || needle.length > haystack.length) return false;
+  for (let start = 0; start + needle.length <= haystack.length; start += 1) {
+    if (needle.every((word, offset) => haystack[start + offset] === word)) return true;
+  }
+  return false;
 }
 
 /** Why an attribution is not acceptable, or null when it is. */
@@ -513,17 +547,18 @@ export function quoteAttributionProblem(
   attribution: string | undefined,
   rules: QuoteAttributionRules,
 ): string | null {
-  const name = trimAttribution(normalize(attribution ?? ""));
-  if (!name) return "no attribution";
-  if (rules.self_names.some((self) => name.includes(self))) return "names the business itself";
-  const words = new Set(name.split(/[^\p{L}\p{N}]+/u).filter(Boolean));
-  const term = rules.self_reference_terms.find((candidate) => words.has(candidate));
+  const words = wordsOf(attribution ?? "");
+  if (words.length === 0) return "no attribution";
+  if (words.some((word) => rules.self_name_words.includes(word))) {
+    return "names the business itself";
+  }
+  const term = rules.self_reference_terms.find((candidate) => words.includes(candidate));
   if (term) return `is a self-reference ("${term}")`;
   // The source is the name before any role or affiliation ("Jane Doe, VP at X").
-  const source = name.split(",")[0]?.trim() ?? name;
-  if (!rules.evidence_corpus.includes(name) && !rules.evidence_corpus.includes(source)) {
-    return "is not in the contract's evidence";
-  }
+  const source = wordsOf((attribution ?? "").split(",")[0] ?? "");
+  const named = (candidate: string[]) =>
+    rules.sources.some((fact) => containsWordRun(fact, candidate));
+  if (!named(words) && !named(source)) return "is not in the contract's evidence";
   return null;
 }
 
