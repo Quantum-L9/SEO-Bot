@@ -285,12 +285,19 @@ export function checkRouteGrounding(
     }
   }
 
-  // 6. Empty or trivially short prose blocks.
+  // 6. Empty or trivially short prose. An FAQ section renders the route-level
+  //    faqs (the output contract puts Q&A ONLY there and lets the section carry
+  //    `blocks: []`), so its substance counts the faqs it renders. The 10-word
+  //    floor itself is unchanged.
+  const faqSections = faqSectionIds(contractRoute);
+  const routeFaqProse = route.faqs.flatMap((faq) => [faq.question, faq.answer]);
   for (const section of route.sections) {
-    const words = section.blocks
-      .flatMap((block) =>
+    const words = [
+      ...section.blocks.flatMap((block) =>
         block.kind === "paragraph" || block.kind === "quote" ? [block.text] : block.items,
-      )
+      ),
+      ...(faqSections.has(section.section_id) ? routeFaqProse : []),
+    ]
       .join(" ")
       .trim();
     if (words.split(/\s+/).filter(Boolean).length < 10) {
@@ -304,6 +311,40 @@ export function checkRouteGrounding(
   failures.push(...checkRequiredCoverage(route.route_id, contractRoute, haystack));
 
   return { unsupportedClaims, failures };
+}
+
+/**
+ * A contract section that renders the route-level FAQ: its component is the
+ * FAQ component, or it carries the `faq` content slot. Website-Bot renders the
+ * route `faqs` accordion inside that section.
+ */
+export function isFaqContractSection(
+  section: PageContentContractRoute["sections"][number],
+): boolean {
+  return section.component_class.trim().toLowerCase() === "faq" || section.slots.includes("faq");
+}
+
+/** Section ids of the route's FAQ sections. */
+export function faqSectionIds(contractRoute: PageContentContractRoute): Set<string> {
+  return new Set(
+    contractRoute.sections.filter(isFaqContractSection).map((section) => section.section_id),
+  );
+}
+
+/**
+ * Required entities, per contract section, exactly as the coverage check
+ * matches them: literal, case-insensitive, whitespace-collapsed. The prompt
+ * lists these verbatim so the writer cannot paraphrase an entity away.
+ */
+export function requiredEntitiesBySection(
+  contractRoute: PageContentContractRoute,
+): Array<{ section_id: string; entities: string[] }> {
+  return contractRoute.sections
+    .map((section) => ({
+      section_id: section.section_id,
+      entities: section.content_requirements.entities.filter((entity) => entity.trim()),
+    }))
+    .filter((entry) => entry.entities.length > 0);
 }
 
 /**

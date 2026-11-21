@@ -25,13 +25,13 @@ import {
   WEBSITE_INTELLIGENCE_SCHEMAS,
 } from "@quantum-l9/bot-interop";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createDeepSeekBuildIntelligenceLlm } from "../../src/build-intelligence/deepseek-llm.js";
 import {
   applyDeterministicRemediation,
   ContentRequirementUnsatisfiedError,
   createStructuredContentPackageWithEvidence,
   isIdentifierLikeFactValue,
 } from "../../src/build-intelligence/structured-content.js";
+import { fakeDeepSeekLlm, isGenerationRequest, PASSING_VERDICT } from "./fixtures/fake-deepseek.js";
 
 vi.mock("../../src/core/logger.js", () => ({
   createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
@@ -276,44 +276,18 @@ describe("missed topic + thin section — LLM repair or typed failure (fake Deep
     initial: () => StructuredContentRoute = deficientRoute,
   ) {
     const calls = { generation: 0, repair: 0, validation: 0 };
-    const transport = vi.fn(async (_url: string, init: RequestInit) => {
-      const body = JSON.parse(String(init.body)) as {
-        messages: Array<{ role: string; content: string }>;
-      };
-      const system = body.messages.find((m) => m.role === "system")?.content ?? "";
-      const user = body.messages.find((m) => m.role === "user")?.content ?? "";
-      let reply: unknown;
-      if (system.includes("sole owner of final website prose")) {
-        calls.generation += 1;
-        if (user.includes("repair_instructions")) {
-          calls.repair += 1;
-          reply = repair();
-        } else {
-          reply = initial();
-        }
-      } else {
+    const { llm } = fakeDeepSeekLlm((request) => {
+      if (!isGenerationRequest(request)) {
         calls.validation += 1;
-        reply = {
-          seo_blueprint_passed: true,
-          contract_passed: true,
-          unsupported_claims: [],
-          failed_requirements: [],
-        };
+        return PASSING_VERDICT;
       }
-      const content = JSON.stringify(reply);
-      return new Response(
-        JSON.stringify({
-          choices: [{ finish_reason: "stop", message: { content } }],
-          usage: { completion_tokens: Math.ceil(content.length / 4) },
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    });
-    const llm = createDeepSeekBuildIntelligenceLlm({
-      env: { DEEPSEEK_API_KEY: "test-key" },
-      transport,
-      ledgerDir,
-    });
+      calls.generation += 1;
+      if (request.user.includes("repair_instructions")) {
+        calls.repair += 1;
+        return repair();
+      }
+      return initial();
+    }, ledgerDir);
     return { llm, calls };
   }
 

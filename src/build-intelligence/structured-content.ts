@@ -42,7 +42,9 @@ import {
   CREDENTIAL_CLAIM_TOKENS,
   checkRouteGrounding,
   collectRouteText,
+  faqSectionIds,
   MAGNITUDE_PHRASES,
+  requiredEntitiesBySection,
   unsatisfiedProofRequirements,
 } from "./claim-grounding.js";
 import { type ContentUnit, contentUnits, findContentFindings } from "./content-duplication.js";
@@ -748,8 +750,14 @@ async function generateRoute(
     "immediate value, industry-leading, best-in-class, trusted by) unless a " +
     "verified fact asserts them — write concrete, specific prose about " +
     "methodology, process, and approach instead. Cover the " +
-    "required topics/entities, answer the required questions, and satisfy the proof " +
-    "requirements. When a proof requirement cannot be backed by an allowed fact " +
+    "required topics, answer the required questions, and satisfy the proof " +
+    "requirements. REQUIRED ENTITIES ARE LITERAL: every phrase listed in " +
+    "required_entities_by_section must appear exactly as written (case-insensitive) " +
+    "in that section's prose — never a synonym, paraphrase or variant (for example, " +
+    "a required 'Relationship graph' is not satisfied by 'relationship intelligence'). " +
+    "An FAQ section listed in faq_sections renders the route-level faqs: its intro " +
+    "blocks plus those faqs together must say at least 10 words, so give the route " +
+    "real faqs when the section's blocks are []. When a proof requirement cannot be backed by an allowed fact " +
     "(quantifiable achievements, third-party validation, or credentials the contract " +
     "does not support), satisfy it with an honest methodological or commitment " +
     "statement — never fabricate the proof itself. " +
@@ -779,6 +787,7 @@ async function generateRoute(
           schema_failures: repair.schema_failures ?? [],
           failed_requirements: repair.failed_requirements ?? [],
           remove_or_support_unsupported_claims: repair.unsupported_claims ?? [],
+          entity_placements: entityPlacements(repair.failed_requirements ?? [], contractRoute),
         },
       }
     : {};
@@ -790,6 +799,11 @@ async function generateRoute(
         (link) => link.target_route_id,
       ),
       required_section_ids: contractRoute.sections.map((section) => section.section_id),
+      required_entities_by_section: requiredEntitiesBySection(contractRoute).map((entry) => ({
+        ...entry,
+        rule: "write each phrase exactly as listed (case-insensitive) in this section's prose; no synonyms or variants",
+      })),
+      faq_sections: [...faqSectionIds(contractRoute)],
       ...earlierRouteCopy(priorUnits),
       ...repairBlock,
     },
@@ -819,6 +833,40 @@ async function generateRoute(
 /** How many earlier-route units the prompt shows, and how much of each. */
 const EARLIER_COPY_LIMIT = 80;
 const EARLIER_COPY_CHARS = 160;
+
+/**
+ * For each `required entity "X" is not represented` failure, the exact phrase
+ * and the contract section(s) that require it, so the repair places the
+ * literal phrase rather than another paraphrase. The coverage check matches
+ * entities literally (case-insensitive), so a synonym can never satisfy it.
+ */
+export function entityPlacements(
+  failedRequirements: readonly string[],
+  contractRoute: PageContentContractRoute,
+): Array<{ entity: string; section_ids: string[]; instruction: string }> {
+  const bySection = requiredEntitiesBySection(contractRoute);
+  const placements: Array<{ entity: string; section_ids: string[]; instruction: string }> = [];
+  const seen = new Set<string>();
+  for (const failure of failedRequirements) {
+    const entity = /required entity "([^"]+)" is not represented/.exec(failure)?.[1];
+    if (!entity || seen.has(entity.toLowerCase())) continue;
+    seen.add(entity.toLowerCase());
+    const sectionIds = bySection
+      .filter((entry) =>
+        entry.entities.some((required) => required.toLowerCase() === entity.toLowerCase()),
+      )
+      .map((entry) => entry.section_id);
+    const quotedIds = sectionIds.map((id) => JSON.stringify(id)).join(" or ");
+    const where =
+      sectionIds.length > 0 ? `in the prose of section ${quotedIds}` : "in the route's prose";
+    placements.push({
+      entity,
+      section_ids: sectionIds,
+      instruction: `Write the exact phrase "${entity}" (case-insensitive) ${where}, in a sentence that uses it naturally. A synonym or variant does not count.`,
+    });
+  }
+  return placements;
+}
 
 /**
  * Copy already used on earlier routes of this package, shown so the model can
