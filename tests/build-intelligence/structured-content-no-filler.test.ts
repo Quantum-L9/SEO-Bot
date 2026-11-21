@@ -271,7 +271,10 @@ describe("missed topic + thin section — LLM repair or typed failure (fake Deep
     rmSync(ledgerDir, { recursive: true, force: true });
   });
 
-  function transportFor(repair: () => StructuredContentRoute) {
+  function transportFor(
+    repair: () => StructuredContentRoute,
+    initial: () => StructuredContentRoute = deficientRoute,
+  ) {
     const calls = { generation: 0, repair: 0, validation: 0 };
     const transport = vi.fn(async (_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body)) as {
@@ -286,7 +289,7 @@ describe("missed topic + thin section — LLM repair or typed failure (fake Deep
           calls.repair += 1;
           reply = repair();
         } else {
-          reply = deficientRoute();
+          reply = initial();
         }
       } else {
         calls.validation += 1;
@@ -327,6 +330,37 @@ describe("missed topic + thin section — LLM repair or typed failure (fake Deep
     expect(text).toContain("relationship graph");
     expect(text).not.toContain("Regarding ");
     expect(text).not.toContain(SLUG);
+  });
+
+  it("a model-authored snake_case fact value is never rendered, even on a route that passes first time", async () => {
+    const withSlug = (): StructuredContentRoute => {
+      const route = repairedRoute();
+      route.sections[0]?.blocks.push({
+        kind: "paragraph",
+        text: `Quantum AI Partners provides ${SLUG} services for growth teams across the US.`,
+      });
+      route.faqs = [
+        {
+          question: "What does the engagement cover?",
+          answer: `Our ${SLUG} practice covers CRM migration, data model design and RevOps reporting.`,
+        },
+      ];
+      return route;
+    };
+    const { llm, calls } = transportFor(withSlug, withSlug);
+    const { artifact, evidence } = await createStructuredContentPackageWithEvidence(
+      { client_id: "quantum-ai-partners", build_id: "build-1", page_content_contract: contract() },
+      { llm },
+    );
+    // Passed on the first generation: the guard runs on the passing path, not
+    // only on remediation.
+    expect(calls.generation).toBe(1);
+    expect(calls.repair).toBe(0);
+    expect(evidence.repair_attempts).toBe(0);
+    const text = routeText(artifact.payload.routes);
+    expect(text).not.toContain(SLUG);
+    expect(text).toContain("Quantum AI Partners provides services for growth teams across the US.");
+    expect(text).toContain("Our practice covers CRM migration");
   });
 
   it("a repair that leaves the topic and thin section unmet fails typed instead of shipping filler", async () => {

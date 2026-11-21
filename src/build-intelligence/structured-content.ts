@@ -332,6 +332,13 @@ async function produceRoute(args: {
     buildId: request.build_id,
     llm: validationLlm,
   };
+  // Every route's final text — model-authored or remediated — passes the
+  // identifier guard before it is judged: a model can copy a raw fact slug
+  // (`ai_revops_crm_transformation`) into prose as easily as a template could.
+  const validateFinalText = (route: StructuredContentRoute): Promise<RouteValidationVerdict> => {
+    scrubIdentifierFactValues(route, contractRoute.business_facts);
+    return validateRoute(route, contractRoute, validationArgs);
+  };
   let schemaFailureCount = 0;
 
   // 1. Generate prose for this route only — ONE actual call (no internal
@@ -371,7 +378,7 @@ async function produceRoute(args: {
           unsupported_claims: [],
           failed_requirements: [],
         }
-      : await validateRoute(generated, contractRoute, validationArgs);
+      : await validateFinalText(generated);
 
   if (generated !== null && routePassed(generated, contractRoute, verdict, true)) {
     return {
@@ -429,7 +436,7 @@ async function produceRoute(args: {
       verdict.unsupported_claims,
     );
   }
-  verdict = await validateRoute(repaired, contractRoute, validationArgs);
+  verdict = await validateFinalText(repaired);
 
   // 4. Second failure is terminal for the LLM repair path — but the
   //    deterministic remediation gets one last authority pass: scrub
@@ -437,7 +444,7 @@ async function produceRoute(args: {
   //    coverage, then re-validate once. No LLM, no second repair.
   if (!routePassed(repaired, contractRoute, verdict)) {
     const remediated = applyDeterministicRemediation(repaired, verdict, contractRoute);
-    verdict = await validateRoute(remediated, contractRoute, validationArgs);
+    verdict = await validateFinalText(remediated);
     if (!routePassed(remediated, contractRoute, verdict)) {
       logger.warn(
         {
