@@ -76,6 +76,17 @@ function leafType(schema: z.ZodTypeAny, path: string): string | undefined {
   );
 }
 
+function renderLeaf(
+  leaf: string,
+  hint: string | OutputShapeHints | undefined,
+  path: string,
+): string {
+  if (hint !== undefined && typeof hint !== "string") {
+    throw new OutputContractDriftError(`nested hints given for leaf field ${path}`);
+  }
+  return withHint(leaf, hint);
+}
+
 function renderNode(
   schema: z.ZodTypeAny,
   hint: string | OutputShapeHints | undefined,
@@ -86,31 +97,38 @@ function renderNode(
     return typeof inner === "string" ? `${inner} (optional)` : inner;
   }
   const leaf = leafType(schema, path);
-  if (leaf !== undefined) {
-    if (hint !== undefined && typeof hint !== "string") {
-      throw new OutputContractDriftError(`nested hints given for leaf field ${path}`);
-    }
-    return withHint(leaf, hint);
-  }
+  if (leaf !== undefined) return renderLeaf(leaf, hint, path);
   if (schema instanceof z.ZodArray) {
     if (typeof hint === "string") return withHint("array", hint);
     return [renderNode(schema.element as z.ZodTypeAny, hint, `${path}[]`)];
   }
-  const object = schema as z.ZodObject<z.ZodRawShape>;
+  return renderObject(schema as z.ZodObject<z.ZodRawShape>, hint, path);
+}
+
+function childPath(path: string, key: string): string {
+  return path ? `${path}.${key}` : key;
+}
+
+function renderObject(
+  object: z.ZodObject<z.ZodRawShape>,
+  hint: string | OutputShapeHints | undefined,
+  path: string,
+): Record<string, unknown> {
   if (typeof hint === "string") {
     throw new OutputContractDriftError(`string hint given for object field ${path || "$"}`);
   }
   const shape = object.shape;
   for (const key of Object.keys(hint ?? {})) {
     if (!(key in shape)) {
+      const field = childPath(path, key);
       throw new OutputContractDriftError(
-        `hint names field "${path ? `${path}.` : ""}${key}" that the schema does not have`,
+        `hint names field "${field}" that the schema does not have`,
       );
     }
   }
   const rendered: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(shape)) {
-    rendered[key] = renderNode(child as z.ZodTypeAny, hint?.[key], path ? `${path}.${key}` : key);
+    rendered[key] = renderNode(child as z.ZodTypeAny, hint?.[key], childPath(path, key));
   }
   return rendered;
 }
