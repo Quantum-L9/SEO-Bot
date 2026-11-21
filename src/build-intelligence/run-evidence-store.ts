@@ -436,8 +436,30 @@ function rememberCache(clientId: string, buildId: string, fingerprint: string): 
   }
 }
 
+/**
+ * Root of this store's on-disk state. In production it is always
+ * `<cwd>/.l9/build-intelligence`. Tests point it at a private directory per
+ * test file (see `tests/setup/isolated-run-evidence-dir.ts`): Vitest runs test
+ * files in parallel workers that share one cwd, so a shared root let one
+ * file's `_resetRunEvidenceStore()` delete another file's persisted refusals
+ * in mid-test.
+ */
+let stateRootOverride: string | undefined;
+
+function stateRoot(): string {
+  return stateRootOverride ?? path.join(process.cwd(), ".l9", "build-intelligence");
+}
+
+/**
+ * Test-only seam: root this module's on-disk state at `dir` (`undefined`
+ * restores the production root). Never called by production code.
+ */
+export function _setRunEvidenceStateRootForTests(dir: string | undefined): void {
+  stateRootOverride = dir;
+}
+
 function refusalDir(): string {
-  return path.join(process.cwd(), ".l9", "build-intelligence", "serp-refusals");
+  return path.join(stateRoot(), "serp-refusals");
 }
 
 function refusalFile(clientId: string, buildId: string): string {
