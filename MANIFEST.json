@@ -3666,6 +3666,15 @@
       "source_of_generation": null
     },
     {
+      "path": "tests/build-intelligence/structured-content-checklist-conformance.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
       "path": "tests/build-intelligence/structured-content-no-filler.test.ts",
       "owner": "quality",
       "purpose": "Automated behavioral and assurance tests",
@@ -4368,5 +4377,5 @@
       "source_of_generation": null
     }
   ],
-  "inventory_digest": "fd4ff81db00bc1a9485ea8de06e9a257bdfa9a4d2b6b1730ddf6cf6228d09c08"
+  "inventory_digest": "934b32741c66cfaaf5ff0d005dcee07be05db43a0235b047ceedf37ac18040c6"
 }
