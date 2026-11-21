@@ -43,13 +43,14 @@ export function fakeDeepSeekLlm(
   answer: (request: FakeChatRequest) => unknown,
   ledgerDir: string,
 ): { llm: BuildIntelligenceLlm; transport: Mock } {
-  const transport = vi.fn(async (_url: string, init: RequestInit) => {
-    const body = JSON.parse(String(init.body)) as {
+  const transport = vi.fn((_url: string, init: RequestInit): Promise<Response> => {
+    if (typeof init.body !== "string") throw new TypeError("expected a JSON string request body");
+    const body = JSON.parse(init.body) as {
       messages: Array<{ role: string; content: string }>;
     };
     const system = body.messages.find((m) => m.role === "system")?.content ?? "";
     const user = body.messages.find((m) => m.role === "user")?.content ?? "";
-    return completionResponse(answer({ system, user }));
+    return Promise.resolve(completionResponse(answer({ system, user })));
   });
   const llm = createDeepSeekBuildIntelligenceLlm({
     env: { DEEPSEEK_API_KEY: "test-key" },

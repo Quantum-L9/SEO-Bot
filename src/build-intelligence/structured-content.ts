@@ -856,10 +856,9 @@ export function entityPlacements(
         entry.entities.some((required) => required.toLowerCase() === entity.toLowerCase()),
       )
       .map((entry) => entry.section_id);
+    const quotedIds = sectionIds.map((id) => JSON.stringify(id)).join(" or ");
     const where =
-      sectionIds.length > 0
-        ? `in the prose of section ${sectionIds.map((id) => `"${id}"`).join(" or ")}`
-        : "in the route's prose";
+      sectionIds.length > 0 ? `in the prose of section ${quotedIds}` : "in the route's prose";
     placements.push({
       entity,
       section_ids: sectionIds,
