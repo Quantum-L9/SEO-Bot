@@ -43,7 +43,6 @@ import {
   type VerifiedBusinessFact,
   WEBSITE_INTELLIGENCE_SCHEMAS,
 } from "@quantum-l9/bot-interop";
-import { z } from "zod";
 import { createModuleLogger } from "../core/logger.js";
 import { DataForSeoClient } from "../services/dataforseo.js";
 import { LlmOutputTruncatedError } from "../services/llm-parse.js";
@@ -58,11 +57,12 @@ import {
   getDeepSeekBuildIntelligenceLlm,
 } from "./deepseek-llm.js";
 import { PRODUCER } from "./producer.js";
+import { type GlobalRouteIntentRoute, seoContentBlueprintRoutesSchema } from "./schema-guards.js";
 import {
-  type GlobalRouteIntentRoute,
-  globalRouteIntentRouteSchema,
-  seoContentBlueprintRoutesSchema,
-} from "./schema-guards.js";
+  batchOutputContract,
+  globalIntentOutputContract,
+  globalRouteIntentPlanSchema,
+} from "./seo-blueprint-output-contract.js";
 
 const logger = createModuleLogger("build-intelligence:seo-content-blueprint");
 
@@ -78,11 +78,18 @@ export const SEO_BLUEPRINT_BATCH_SIZE = 4;
 // every other runtime guard for model output.
 
 /**
+ * Stable machine code of `SeoContentBlueprintBatchInvalidError`, exported so
+ * the API layer can map it without matching on a string literal.
+ */
+export const SEO_CONTENT_BLUEPRINT_BATCH_INVALID_CODE =
+  "SEO_CONTENT_BLUEPRINT_BATCH_INVALID" as const;
+
+/**
  * A batch failed its single bounded repair. The whole artifact fails — a
  * partial route set (24/29) is never sealed as success.
  */
 export class SeoContentBlueprintBatchInvalidError extends Error {
-  readonly code = "SEO_CONTENT_BLUEPRINT_BATCH_INVALID";
+  readonly code = SEO_CONTENT_BLUEPRINT_BATCH_INVALID_CODE;
   constructor(message: string) {
     super(message);
     this.name = "SeoContentBlueprintBatchInvalidError";
@@ -147,12 +154,16 @@ export function chunkRoutes<T>(routes: T[], size: number = SEO_BLUEPRINT_BATCH_S
   return chunks;
 }
 
-/** Phase A validation: exact route count, exact IDs, no duplicate normalized queries. */
+/**
+ * Phase A validation: the `{ "routes": [...] }` envelope the prompt renders
+ * from the same schema, then exact route count, exact IDs, no duplicate
+ * normalized queries.
+ */
 function parseGlobalRouteIntentPlan(
   value: unknown,
   requested: Array<{ route_id: string; path: string; purpose: string }>,
 ): GlobalRouteIntentRoute[] {
-  const parsed = z.array(globalRouteIntentRouteSchema).parse(value);
+  const parsed = globalRouteIntentPlanSchema.parse(value).routes;
   const requestedIds = new Set(requested.map((route) => route.route_id));
   if (parsed.length !== requested.length) {
     throw new Error(
@@ -376,17 +387,7 @@ export async function createSEOContentBlueprintWithEvidence(
         routes: allRouteIndex,
         verified_business_facts: request.business_facts,
         seo_config: request.seo_config ?? {},
-        output_contract: {
-          shape: [
-            {
-              route_id: "string (exact route_id from routes above)",
-              primary_query: "string (the single primary target query)",
-              primary_intent: "string (top-level search intent)",
-              journey_stage: "informational | commercial | transactional",
-            },
-          ],
-          note: "Return exactly one entry per route_id above, in the requested order. No other fields. Every primary_query must be unique after normalization.",
-        },
+        output_contract: globalIntentOutputContract(),
       },
       null,
       2,
@@ -429,69 +430,8 @@ export async function createSEOContentBlueprintWithEvidence(
             verified_business_facts: request.business_facts,
             seo_config: request.seo_config ?? {},
             output_contract: {
-              container: {
-                routes:
-                  "array — the ONLY top-level key of the response; exactly one route object per route_id in the current_batch, in current_batch order",
-              },
+              ...batchOutputContract(),
               one_entry_per_route_id: batch.map((route) => route.route_id),
-              route_shape: {
-                route_id: "string — reassert the route_id from the current_batch entry exactly",
-                path: "string — reassert the path from the current_batch entry exactly",
-                search_intent: {
-                  primary: "reassert the primary_intent from the global intent plan",
-                  secondary: "string[]",
-                  journey_stage: "reassert the journey_stage from the global intent plan",
-                },
-                targets: {
-                  primary_query: "reassert the primary_query from the global intent plan",
-                  supporting_queries: "string[]",
-                  topics: "string[]",
-                  entities: "string[]",
-                },
-                requirements: {
-                  requirement_id: "string",
-                  target_slots: "content slot names (string[])",
-                  placement: "one of: FIRST_MATCH | ALL_MATCHES",
-                  required_topics: "string[]",
-                  required_entities: "string[]",
-                  questions: "string[]",
-                  proof_needed:
-                    "string[] — only proof the verified business facts or honest methodology can support; never demand quantifiable achievements, third-party validation, client names, or credentials the facts cannot back",
-                  required: "boolean",
-                },
-                competitive_gaps: [
-                  {
-                    gap_id: "string",
-                    description: "string",
-                    donor_domains: "string[]",
-                    opportunity: "string",
-                  },
-                ],
-                internal_links: [
-                  {
-                    target_route_id:
-                      "string (must be one of the all_route_index ids — other batches are valid targets)",
-                    purpose: "string",
-                  },
-                ],
-                aeo_geo: { answer_targets: "string[]", schema_requirements: "string[]" },
-                metadata: { title_requirements: "string[]", description_requirements: "string[]" },
-                forbidden_claims: "string[]",
-                acceptance_tests: "string[]",
-              },
-              content_slots: [
-                "primary_offer",
-                "service_overview",
-                "differentiation",
-                "trust",
-                "process",
-                "project_proof",
-                "local_relevance",
-                "objection_handling",
-                "faq",
-                "conversion",
-                "metadata",
-              ],
               note: `Return a single JSON object whose only top-level key is "routes": an array of exactly one route object per route_id in the current_batch, in the same order, matching route_shape exactly. The global strategy is already decided — do not silently change it in this batch. The verified business facts are COMPLETE: never demand case studies, substantiated innovations, client examples, metrics, credentials, or industry-specific proof the facts cannot support — such requirements make the contract unsatisfiable and the build fails closed.${
                 landscape
                   ? ""

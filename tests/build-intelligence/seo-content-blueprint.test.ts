@@ -137,7 +137,7 @@ function fakeLlm(modelRoutes: SEOContentBlueprintRoute[]): {
             journey_stage: model?.search_intent.journey_stage ?? "commercial",
           };
         });
-        return args.validate(intents);
+        return args.validate({ routes: intents });
       }
       // Phase B — return only the routes of the requested batch.
       const prompt = JSON.parse(args.userPrompt) as {
@@ -321,14 +321,16 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
       strategizeJson: async (args: { userPrompt: string; validate: (v: unknown) => unknown }) => {
         const prompt = JSON.parse(args.userPrompt) as { task?: string };
         if (prompt.task === "global_route_intent_plan") {
-          return args.validate([
-            {
-              route_id: "home",
-              primary_query: "metal roofing",
-              primary_intent: "commercial",
-              journey_stage: "commercial",
-            },
-          ]);
+          return args.validate({
+            routes: [
+              {
+                route_id: "home",
+                primary_query: "metal roofing",
+                primary_intent: "commercial",
+                journey_stage: "commercial",
+              },
+            ],
+          });
         }
         return args.validate({ routes: [extra] });
       },
@@ -409,14 +411,14 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
         const prompt = JSON.parse(args.userPrompt);
         // PHASE A: the global route intent plan — one entry per route.
         if (prompt.task === "global_route_intent_plan") {
-          return args.validate(
-            requested.map((r) => ({
+          return args.validate({
+            routes: requested.map((r) => ({
               route_id: r.route_id,
               primary_query: `query-${r.route_id}`,
               primary_intent: "informational",
               journey_stage: "informational",
             })),
-          );
+          });
         }
         calls.strategize += 1;
         // Each batch call must return EXACTLY its batch's routes — the
@@ -456,14 +458,14 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
       strategizeJson: async (args: { userPrompt: string; validate: (v: unknown) => unknown }) => {
         const prompt = JSON.parse(args.userPrompt);
         if (prompt.task === "global_route_intent_plan") {
-          return args.validate(
-            requested.map((r) => ({
+          return args.validate({
+            routes: requested.map((r) => ({
               route_id: r.route_id,
               primary_query: `query-${r.route_id}`,
               primary_intent: "informational",
               journey_stage: "informational",
             })),
-          );
+          });
         }
         // Wrong-batch answer: always return route-5 regardless of the batch
         // the producer asked for. Batch 1 (routes 1-4) must reject it.
@@ -783,14 +785,14 @@ describe("SEOContentBlueprint — full-site batching (two-phase)", () => {
       strategizeJson: async (args: { userPrompt: string; validate: (v: unknown) => unknown }) => {
         const prompt = JSON.parse(args.userPrompt) as { task?: string };
         if (prompt.task === "global_route_intent_plan") {
-          return args.validate(
-            routesFor(5).map((route, index) => ({
+          return args.validate({
+            routes: routesFor(5).map((route, index) => ({
               route_id: route.route_id,
               primary_query: `query ${index + 1}`,
               primary_intent: "commercial",
               journey_stage: "commercial",
             })),
-          );
+          });
         }
         batchCalls += 1;
         if (batchCalls === 2) throw new Error("repair exhausted");
