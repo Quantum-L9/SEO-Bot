@@ -235,7 +235,9 @@ function buildFromContract(
     })),
   );
   const sections = prompt.required_section_ids.map((sectionId) => {
-    const section = instantiate(sectionTemplate, write) as Record<string, unknown>;
+    const section = withoutUnsourcedQuotes(
+      instantiate(sectionTemplate, write) as Record<string, unknown>,
+    );
     section.section_id = sectionId;
     if (options.nestFaqs && sectionId === "faq") section.faqs = faqs;
     return section;
@@ -250,6 +252,22 @@ function buildFromContract(
       target_route_id: target,
       anchor_text: `Talk to ${QAP_FACTS[0]?.value}`,
     })),
+  };
+}
+
+/**
+ * The checklist's quote rule: a quote needs an attribution the verified facts
+ * name. This route's facts name no external source, so a compliant model writes
+ * the quote's words as a paragraph rather than inventing an attribution.
+ */
+function withoutUnsourcedQuotes(section: Record<string, unknown>): Record<string, unknown> {
+  const blocks = section.blocks;
+  if (!Array.isArray(blocks)) return section;
+  return {
+    ...section,
+    blocks: blocks.map((block: Record<string, unknown>) =>
+      block.kind === "quote" ? { kind: "paragraph", text: block.text } : block,
+    ),
   };
 }
 

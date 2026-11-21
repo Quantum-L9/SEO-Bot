@@ -334,6 +334,7 @@ const CHECKLIST_INSTRUCTION_FOR: Record<RequirementFailureKind, string> = {
   heading_restated: "never restate a heading as body copy",
   build_mechanics_in_copy: '"webhook"',
   presentation_limit: "Short rendered fields have word limits",
+  unsupported_quote_attribution: "A quote block needs an attribution",
 };
 
 describe("validator ⇄ checklist conformance (property)", () => {
