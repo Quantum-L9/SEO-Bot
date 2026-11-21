@@ -353,7 +353,7 @@ async function produceRoute(args: {
     // failure: it must surface as itself (typed, at the real boundary), and
     // the route's one bounded repair is never spent on it (L2-S6-001).
     if (isTerminalLlmFailure(error)) throw error;
-    schemaFailures = schemaFailureDetails(error);
+    schemaFailures = schemaFailureDetails(error, structuredContentRouteSchema);
     schemaFailureCount += 1;
     logger.warn(
       { routeId: contractRoute.route_id, failures: schemaFailures },
@@ -414,7 +414,7 @@ async function produceRoute(args: {
     );
   } catch (error) {
     if (isTerminalLlmFailure(error)) throw error;
-    const repairFailures = schemaFailureDetails(error);
+    const repairFailures = schemaFailureDetails(error, structuredContentRouteSchema);
     if (repairFailures.length > 0) {
       // A repair that still violates the strict output SHAPE is terminal with
       // the typed shape error (→ 422), not a semantic failure.
