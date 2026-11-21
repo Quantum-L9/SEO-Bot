@@ -482,18 +482,7 @@ async function produceRoute(args: {
 
   // 5. Duplicate / copy-hygiene findings that survive the one repair are
   //    terminal and typed. Nothing is silently deleted to make them pass.
-  const finalFindings = contentFindings(acceptedRoute);
-  if (finalFindings.length > 0) {
-    logger.warn(
-      { routeId: contractRoute.route_id, contentFindings: finalFindings },
-      "Route still repeats or leaks content after one bounded repair",
-    );
-    throw new ContentRequirementUnsatisfiedError(
-      `Route "${contractRoute.route_id}" still repeats content or describes the build after one bounded repair`,
-      finalFindings,
-      [],
-    );
-  }
+  assertNoContentFindings(contractRoute.route_id, contentFindings(acceptedRoute));
   return {
     route: acceptedRoute,
     verdict: groundedVerdict(acceptedRoute, contractRoute, verdict),
@@ -502,6 +491,24 @@ async function produceRoute(args: {
     semantic_validation_calls: validationCalls.value,
     schema_failure_count: schemaFailureCount,
   };
+}
+
+/**
+ * Duplicate / copy-hygiene findings left after the one bounded repair are
+ * terminal: a typed CONTENT_REQUIREMENT_UNSATISFIED (422) carrying the exact
+ * evidence. No second repair, and no silent deletion to make them pass.
+ */
+function assertNoContentFindings(routeId: string, findings: string[]): void {
+  if (findings.length === 0) return;
+  logger.warn(
+    { routeId, contentFindings: findings },
+    "Route still repeats or leaks content after one bounded repair",
+  );
+  throw new ContentRequirementUnsatisfiedError(
+    `Route "${routeId}" still repeats content or describes the build after one bounded repair`,
+    findings,
+    [],
+  );
 }
 
 /**
