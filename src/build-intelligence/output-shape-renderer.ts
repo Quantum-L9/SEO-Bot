@@ -22,7 +22,9 @@
  *   string          → "string", "string (optional)" or "string — <hint>":
  *                     a placeholder that is itself a valid string, written over
  *                     with content
- *   string[]        → ["string"]           boolean → true      number → 0
+ *   string[]        → ["string"]           number → 0
+ *   boolean         → true, with a rule that true and false are both valid
+ *                     and must be chosen (the example is not a default)
  *   literal         → its exact JSON value
  *   enum            → its first option, exactly
  *   enum[]          → [first option]
@@ -185,6 +187,11 @@ function renderNode(
   }
   if (schema instanceof z.ZodString) return placeholder(leafHint(hint, path));
   if (schema instanceof z.ZodBoolean) {
+    // The example value is a valid shape, never a default: copying `true`
+    // everywhere would claim every capability (e.g. every JSON-LD input).
+    state.rules.push(
+      `${at(path)}: true or false — choose the value that is actually true; the example's value is not a default.`,
+    );
     ruleHint(state, hint, path);
     return true;
   }

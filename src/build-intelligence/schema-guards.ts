@@ -329,8 +329,9 @@ export const STRUCTURED_CONTENT_OUTPUT_CONTRACT = [
   ...renderOutputRules(structuredContentRouteSchema, STRUCTURED_CONTENT_HINTS).map(
     (rule) => `- ${rule}`,
   ),
-  'Copy every non-string value exactly as shown (for example "kind": "paragraph"); write',
-  'your content only over the "string" placeholders.',
+  'Spell every non-string value exactly as an allowed value (for example "kind": "paragraph");',
+  "CHOOSE which allowed value is true for this route: booleans may be true or false, and an",
+  'example value is never a default. Write your content only over the "string" placeholders.',
   "FORBIDDEN field aliases: content, body, copy, html, paragraphs. Section prose exists",
   "exclusively inside blocks. sections[].blocks is REQUIRED on EVERY section — never",
   "omit it, not even on the last section; a section with nothing to say still",

@@ -94,6 +94,19 @@ describe("rendered output contracts can be copied verbatim", () => {
     );
   });
 
+  it("every boolean is taught as a choice, never as a default (review: copying true claims every JSON-LD input)", () => {
+    for (const flag of ["faq", "service", "local_business"]) {
+      expect(STRUCTURED_CONTENT_OUTPUT_CONTRACT).toContain(
+        `schema_content_inputs.${flag}: true or false — choose the value that is actually true`,
+      );
+    }
+    expect(STRUCTURED_CONTENT_OUTPUT_CONTRACT).toContain("example value is never a default");
+    expect(STRUCTURED_CONTENT_OUTPUT_CONTRACT).not.toContain("Copy every non-string value");
+    expect(batchOutputContract().rules).toContain(
+      "route_shape.requirements[].required: true or false — choose the value that is actually true; the example's value is not a default.",
+    );
+  });
+
   it("blueprint contracts carry allowed values as rules, not as values", () => {
     expect(globalIntentOutputContract().rules).toContain(
       "routes[].journey_stage: exactly one of: informational, commercial, transactional.",

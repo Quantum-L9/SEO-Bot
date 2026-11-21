@@ -85,6 +85,7 @@ describe("renderOutputShape — the prompt shape is generated from the parsing s
     expect(renderOutputRules(schema, { b: "pick one" })).toEqual([
       "b: exactly one of: x, y.",
       "b: pick one.",
+      "d: true or false — choose the value that is actually true; the example's value is not a default.",
       'e: always exactly "fixed".',
       "Optional fields (may be omitted; never add other keys): a.",
     ]);
