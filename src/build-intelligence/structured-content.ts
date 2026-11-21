@@ -31,7 +31,6 @@ import {
   type StructuredContentRoute,
   sameArtifactRef,
   sealIntelligenceArtifact,
-  type VerifiedFactValue,
   WEBSITE_INTELLIGENCE_SCHEMAS,
 } from "@quantum-l9/bot-interop";
 import { createModuleLogger } from "../core/logger.js";
@@ -910,22 +909,37 @@ function scrubIdentifierFactValues(
   const identifiers = identifierFactValues(facts);
   if (identifiers.length === 0) return;
   const pattern = new RegExp(
-    `(?<![\\w-])(?:${identifiers.map(escapeRegex).join("|")})(?![\\w-])`,
+    String.raw`(?<![\w-])(?:${identifiers.map(escapeRegex).join("|")})(?![\w-])`,
     "gi",
   );
   for (const surface of collectTextSurfaces(route)) {
     const text = surface.read();
     if (text === undefined || !pattern.test(text)) continue;
     pattern.lastIndex = 0;
-    surface.write(
-      text
-        .replace(pattern, "")
-        .replace(/[ \t]{2,}/g, " ")
-        .replace(/ +([.,;:!?])/g, "$1")
-        .trim(),
-    );
+    surface.write(tidySpacing(text.replace(pattern, "")));
     pattern.lastIndex = 0;
   }
+}
+
+const CLOSING_PUNCTUATION = new Set([".", ",", ";", ":", "!", "?"]);
+
+/**
+ * Collapse the space/tab runs an omission leaves behind and drop a space that
+ * now precedes closing punctuation. A single linear pass (a `/ +([.,;:!?])/`
+ * regex backtracks super-linearly on long space runs, typescript:S8786).
+ */
+function tidySpacing(text: string): string {
+  let out = "";
+  for (const char of text) {
+    const isGap = char === " " || char === "\t";
+    if (isGap) {
+      if (out.length > 0 && !out.endsWith(" ")) out += " ";
+      continue;
+    }
+    if (CLOSING_PUNCTUATION.has(char) && out.endsWith(" ")) out = out.slice(0, -1);
+    out += char;
+  }
+  return out.trim();
 }
 
 /** A single mutable author-visible string field of a route. */
@@ -1078,15 +1092,6 @@ function trailingNumber(text: string): string | undefined {
     if (/^\d[\d,]*(?:\.\d+)?$/.test(candidate)) return candidate;
   }
   return undefined;
-}
-
-/** The prose a content block contributes, by block shape. */
-function blockText(block: unknown): string[] {
-  if (block && typeof block === "object") {
-    if ("text" in block && typeof block.text === "string") return [block.text];
-    if ("items" in block && Array.isArray(block.items)) return block.items.map(String);
-  }
-  return [];
 }
 
 function endsWithWord(text: string, word: string): boolean {
