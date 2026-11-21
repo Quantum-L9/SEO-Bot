@@ -4152,6 +4152,15 @@
       "source_of_generation": null
     },
     {
+      "path": "tests/setup/isolated-run-evidence-dir.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
       "path": "tests/validation/aggregate-status.test.ts",
       "owner": "quality",
       "purpose": "Automated behavioral and assurance tests",
@@ -4368,5 +4377,5 @@
       "source_of_generation": null
     }
   ],
-  "inventory_digest": "fd4ff81db00bc1a9485ea8de06e9a257bdfa9a4d2b6b1730ddf6cf6228d09c08"
+  "inventory_digest": "0c79d85702c7af3fc68c412c7042cbb764bf6760da20827ee7e4c380c4f95a57"
 }
