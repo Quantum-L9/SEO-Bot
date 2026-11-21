@@ -608,7 +608,8 @@ describe("StructuredContentPackage — the exact contract is the only authority"
               kind: "paragraph",
               text:
                 "With decades of experience roofing Austin, Texas homes, our crews install " +
-                "durable metal roof systems backed by a 25 year manufacturer warranty.",
+                "durable metal roof systems, chosen for durability and backed by a 25 year " +
+                "manufacturer warranty.",
             },
           ];
           return args.validate(bad);
@@ -739,10 +740,14 @@ describe("StructuredContentPackage — NC-11 shape discipline (content-alias →
     expect(counts.val).toBe(2);
   });
 
-  it("a validator quoting a deterministic remediation sentence cannot veto the seal (golden run #48)", async () => {
+  it("a required topic still missed after the one bounded repair fails typed — no filler is appended (QAP canary 2026-11-21; supersedes golden run #48)", async () => {
+    // Previously the deterministic remediation appended "Regarding expertise:
+    // <fact filler>" to manufacture coverage, and this test only checked the
+    // validator could not veto that sentence. That encoded the wrong contract:
+    // remediation may only remove text, so an uncovered topic is a typed
+    // failure after the one bounded LLM repair.
     const payload = structuredClone(makeContract().payload);
-    // genRoute() never writes the literal token "expertise" — the
-    // deterministic remediation will append a coverage sentence for it.
+    // genRoute() never writes the literal token "expertise".
     payload.routes[0]!.sections[0]!.content_requirements.topics.push("expertise");
     const contract = sealIntelligenceArtifact({
       artifact_type: "page_content_contract",
@@ -751,23 +756,20 @@ describe("StructuredContentPackage — NC-11 shape discipline (content-alias →
       producer: { repo: "Website-Bot", version: "1.0.0" },
       payload,
     });
-    const quoteFail: ContentValidationVerdict = {
-      seo_blueprint_passed: true,
-      contract_passed: false,
-      unsupported_claims: [],
-      failed_requirements: [
-        // The remediation sentence is strictly fact-derived now — this test
-        // contract carries no business_name/vertical facts, so the sentence
-        // uses the route-id fallback (biz="home") and does not invent an offering.
-        "Regarding expertise: home.",
-      ],
-    };
-    const { llm } = fakeLlm([quoteFail]);
-    const { artifact } = await createStructuredContentPackageWithEvidence(
+    const { llm, counts } = fakeLlm([pass]);
+    const error = await createStructuredContentPackageWithEvidence(
       { client_id: "client-1", build_id: "build-1", page_content_contract: contract },
       { llm },
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ContentRequirementUnsatisfiedError);
+    expect((error as ContentRequirementUnsatisfiedError).code).toBe(
+      "CONTENT_REQUIREMENT_UNSATISFIED",
     );
-    expect(artifact.payload.validation.failed_requirements).toEqual([]);
+    expect((error as ContentRequirementUnsatisfiedError).failedRequirements.join(" ")).toContain(
+      "expertise",
+    );
+    // Initial generation + exactly one bounded repair, never a third call.
+    expect(counts.gen).toBe(2);
   });
 
   it("proof-requirement echoes drive the repair but do not veto the seal when the section covers the proof (golden run #50)", async () => {

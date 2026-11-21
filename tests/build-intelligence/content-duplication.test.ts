@@ -151,7 +151,7 @@ const INTRO: Readonly<Record<string, string>> = {
   revops:
     "Revenue operations activation means routing, scoring and forecasting run from one model, which is where our crm transformation work pays back first.",
   "how-it-works":
-    "Every engagement follows four remote-first stages, and each stage ends with a working change your team can inspect before the next one begins.",
+    "Every crm transformation engagement follows four remote-first stages, and each stage ends with a working change your revenue operations team can inspect before the next one begins.",
   contact:
     "Tell us which pipeline reports you distrust today; a short call is enough to scope crm transformation and the revenue operations work around it.",
 };
