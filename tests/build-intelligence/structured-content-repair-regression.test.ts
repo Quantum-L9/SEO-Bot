@@ -36,11 +36,6 @@ import {
 } from "@quantum-l9/bot-interop";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  contentUnits,
-  DUPLICATE_SIMILARITY,
-  shingleSimilarity,
-} from "../../src/build-intelligence/content-duplication.js";
-import {
   createDeepSeekBuildIntelligenceLlm,
   DeepSeekOutputTruncatedError,
   isIncompleteFinish,
@@ -52,6 +47,7 @@ import {
 } from "../../src/build-intelligence/structured-content.js";
 import type { LlmService } from "../../src/services/llm.js";
 import { parseJsonFromLlm } from "../../src/services/llm-parse.js";
+import { expectNoRepeatedBodyCopy, routePromptModel } from "./fixtures/route-prompt-model.js";
 
 vi.mock("../../src/core/logger.js", () => ({
   createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
@@ -380,61 +376,17 @@ describe("canary8 regression — an interrupted repair reply is typed truncation
 
 /* ── 2. Cross-route: a duplicate first draft is repaired into new copy ───────── */
 
-interface Seen {
-  routeId: string;
-  repair: boolean;
-  evidence: string[];
-  doNotReuse: string[];
-  framing?: {
-    shared_components: Array<{ section_id: string; also_on_routes: string[] }>;
-    repeated_faq_questions: Array<{ question: string; also_on_routes: string[] }>;
-  };
-}
-
 describe("canary8 regression — cross-route duplicates across the QAP routes", () => {
   it("lists the exact earlier sentences, names the shared components, and repairs a copied first draft into route-specific copy", async () => {
-    const seen: Seen[] = [];
-    const llm = {
-      async executePolicyJson(
-        operation: string,
-        args: {
-          purpose: string;
-          userPrompt: string;
-          validate: (value: unknown) => unknown;
-          callCounter?: { value: number };
-        },
-      ) {
-        if (args.callCounter) args.callCounter.value += 1;
-        if (operation === "CONTENT_VALIDATION") return args.validate(pass);
-        const routeId = args.purpose.split(":")[1] as string;
-        const prompt = JSON.parse(args.userPrompt.split("\n\n---\n")[0] ?? "{}") as {
-          repair_instructions?: { failed_requirements: string[] };
-          do_not_reuse_from_earlier_routes?: { sentences: Array<{ text: string }> };
-          route_specific_framing?: Seen["framing"];
-        };
-        const doNotReuse = (prompt.do_not_reuse_from_earlier_routes?.sentences ?? []).map(
-          (sentence) => sentence.text,
-        );
-        seen.push({
-          routeId,
-          repair: Boolean(prompt.repair_instructions),
-          evidence: prompt.repair_instructions?.failed_requirements ?? [],
-          doNotReuse,
-          framing: prompt.route_specific_framing,
-        });
-        if (routeId === "home")
-          return args.validate(route("home", HOME_STEPS, HOME_FAQ_ANSWER, HOME_INTRO));
-        // The canary's first draft: "/"'s steps and FAQ answer, copied.
-        const told = prompt.repair_instructions?.failed_requirements.some((line) =>
-          line.startsWith("DUPLICATE_CONTENT"),
-        );
-        return args.validate(
-          told
-            ? route("crm-transformation", CRM_STEPS, CRM_FAQ_ANSWER, CRM_INTRO)
-            : route("crm-transformation", HOME_STEPS, HOME_FAQ_ANSWER, CRM_INTRO),
-        );
-      },
-    } as unknown as LlmService;
+    const { llm, calls: seen } = routePromptModel(({ routeId, evidence }) => {
+      if (routeId === "home") return route("home", HOME_STEPS, HOME_FAQ_ANSWER, HOME_INTRO);
+      // The canary's first draft copies "/"'s steps and FAQ answer; the repair,
+      // told exactly what it repeated, writes this route's own copy.
+      const told = evidence.some((line) => line.startsWith("DUPLICATE_CONTENT"));
+      return told
+        ? route("crm-transformation", CRM_STEPS, CRM_FAQ_ANSWER, CRM_INTRO)
+        : route("crm-transformation", HOME_STEPS, HOME_FAQ_ANSWER, CRM_INTRO);
+    });
 
     const { artifact, evidence } = await createStructuredContentPackageWithEvidence(
       { client_id: "qap", build_id: "qap-canary8", page_content_contract: contract() },
@@ -446,12 +398,10 @@ describe("canary8 regression — cross-route duplicates across the QAP routes", 
     for (const step of HOME_STEPS) expect(firstCrm?.doNotReuse).toContain(step);
     expect(firstCrm?.doNotReuse).toContain(HOME_FAQ_ANSWER);
     // Shared components and the repeated FAQ question are named for framing.
-    expect(firstCrm?.framing?.shared_components.map((entry) => entry.section_id)).toEqual([
-      "hero",
-      "process",
-      "faq",
-    ]);
-    expect(firstCrm?.framing?.repeated_faq_questions).toEqual([
+    expect(
+      firstCrm?.prompt.route_specific_framing?.shared_components.map((entry) => entry.section_id),
+    ).toEqual(["hero", "process", "faq"]);
+    expect(firstCrm?.prompt.route_specific_framing?.repeated_faq_questions).toEqual([
       { question: SHARED_QUESTION, also_on_routes: ["home"] },
     ]);
     // The first route has nothing to avoid.
@@ -463,14 +413,6 @@ describe("canary8 regression — cross-route duplicates across the QAP routes", 
     expect(evidence.repaired_route_ids).toEqual(["crm-transformation"]);
 
     // No body unit of 8+ words repeats anywhere in the sealed package.
-    const units = artifact.payload.routes
-      .flatMap((sealed) => contentUnits(sealed))
-      .filter((unit) => !["heading", "subheading", "eyebrow"].includes(unit.kind));
-    for (const [index, unit] of units.entries()) {
-      for (const other of units.slice(index + 1)) {
-        const similarity = shingleSimilarity(unit.text, other.text);
-        expect(similarity === null || similarity < DUPLICATE_SIMILARITY).toBe(true);
-      }
-    }
+    expectNoRepeatedBodyCopy(artifact.payload.routes);
   });
 });

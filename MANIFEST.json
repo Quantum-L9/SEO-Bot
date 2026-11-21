@@ -3531,6 +3531,15 @@
       "source_of_generation": null
     },
     {
+      "path": "tests/build-intelligence/fixtures/route-prompt-model.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
       "path": "tests/build-intelligence/integrity-receipt.test.ts",
       "owner": "quality",
       "purpose": "Automated behavioral and assurance tests",
@@ -4395,5 +4404,5 @@
       "source_of_generation": null
     }
   ],
-  "inventory_digest": "57471600ec2a3c19883f4303335a0e78a88925d427b7cfa113fd3c7b8d6fd705"
+  "inventory_digest": "aa1fbc80815e9174e3ad501d0f947247635a2b9f21749449191cc3df39f96b70"
 }
