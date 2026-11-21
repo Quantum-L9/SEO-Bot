@@ -3639,6 +3639,15 @@
       "source_of_generation": null
     },
     {
+      "path": "tests/build-intelligence/structured-content-no-filler.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
       "path": "tests/build-intelligence/structured-content-output-contract.test.ts",
       "owner": "quality",
       "purpose": "Automated behavioral and assurance tests",
@@ -4323,5 +4332,5 @@
       "source_of_generation": null
     }
   ],
-  "inventory_digest": "3704050435c40d9c2dbd7a62a77c522c4f7a84f6f224d9e9c0926cb05dab0a4c"
+  "inventory_digest": "efc01bc6d2ae3f7a4fda9ac5d68478be23368384e6feb249a7f872965f35b339"
 }
