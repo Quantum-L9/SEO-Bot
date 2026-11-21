@@ -832,22 +832,32 @@ function countingValidationLlm(
 }
 
 /**
- * Deterministic remediation — NOT an LLM call, NOT a second repair. Applied
- * after the one bounded LLM repair still fails validation:
+ * Deterministic remediation — NOT an LLM call, NOT a second repair, and NEVER
+ * an author. Applied after the one bounded LLM repair still fails validation,
+ * it only REMOVES text:
  *
  *  a. Scrub: credential/guarantee phrases the model wrote but the verified
- *     facts do not ground are removed from every block/FAQ/metadata text.
- *  b. Literal coverage: failed requirements of the form
- *     "required topic/entity X (missing: term)" get one deterministic,
- *     fact-derived sentence appended to the first section (as a proper
- *     block), carrying the exact literal term the validator requires.
+ *     facts do not ground, ungrounded numbers, and forbidden claims are removed
+ *     from every block/FAQ/metadata text.
+ *  b. Identifier guard: a business-fact value shaped like an identifier
+ *     (`ai_revops_crm_transformation`) is a machine slug, not prose. The
+ *     contract carries no human label for it, so it is omitted wherever the
+ *     model copied it into customer-facing text.
+ *
+ * It no longer appends anything. Missed required topics/entities and thin
+ * sections are evidence for the one bounded LLM repair (they reach it through
+ * the verdict's failed_requirements); if they are still unmet afterwards the
+ * route fails with ContentRequirementUnsatisfiedError instead of shipping
+ * manufactured copy. The previous fact-template filler ("Regarding <labels>:
+ * <business> provides <slug> services…") existed only to pass the checker and
+ * leaked raw fact slugs into rendered pages (QAP canary 2026-11-21).
  *
  * The oracle's repair budget is untouched: repair_attempts stays 1 and
  * generation_calls stays 2 — no second LLM generation happens.
  */
 export function applyDeterministicRemediation(
   route: StructuredContentRoute,
-  verdict: RouteValidationVerdict,
+  _verdict: RouteValidationVerdict,
   contractRoute: PageContentContractRoute,
 ): StructuredContentRoute {
   const corpus = buildFactCorpus(contractRoute.business_facts);
@@ -860,76 +870,62 @@ export function applyDeterministicRemediation(
   //    adjacent text fields, the escape that failed golden run #40).
   scrubTextSurfaces(route, corpus, allowedNumbers, contractRoute.forbidden_claims);
 
-  const facts = new Map(contractRoute.business_facts.map((f) => [f.key, f.value]));
-  const biz = factText(facts.get("business_name")) || contractRoute.route_id;
-  // Number("") is 0 — an absent years fact must not read as "0 years".
-  const years = Number(facts.get("years_local_experience") ?? Number.NaN);
-  const fillerYearsPhrase =
-    Number.isFinite(years) && years > 0 ? ` with ${years} years of local experience` : "";
-  // c. Substantive-content floor: scrubbing (or a lazy model) can leave a
-  //    section under the 10-word threshold. Fill thin sections from present
-  //    facts only. Do not invent a vertical or an offering when the contract
-  //    has no vertical fact — the previous fallback ("professional services")
-  //    was not fact-derived.
-  const vertical = factText(facts.get("vertical"));
-  const offering = vertical ? ` provides ${vertical} services` : "";
-  const states = factText(facts.get("states_served"));
-  const phone = factText(facts.get("phone"));
-  const siteUrl = factText(facts.get("site_url"));
-  const coverage = states ? ` across ${states}` : "";
-  const filler = [
-    `${biz}${offering}${coverage}${fillerYearsPhrase}.`,
-    phone ? `${biz} can be reached at ${phone}.` : "",
-    siteUrl ? `Learn more at ${siteUrl}.` : "",
-  ]
-    .filter((part) => part.length > 0)
-    .join(" ");
-  for (const section of route.sections ?? []) {
-    const words = (section.blocks ?? []).flatMap(blockText).join(" ").trim();
-    if (words.split(/\s+/).filter(Boolean).length < 10) {
-      section.blocks = [...(section.blocks ?? []), { kind: "paragraph", text: filler }];
-    }
-  }
-  // b. Fact-derived literal sentences for each failed requirement.
-
-  const topics: string[] = [];
-  const entities: string[] = [];
-  for (const failure of verdict.failed_requirements) {
-    const topic = /required topic "([^"]+)"/.exec(failure)?.[1];
-    const entity = /required entity "([^"]+)"/.exec(failure)?.[1];
-    if (entity) entities.push(entity);
-    else if (topic) topics.push(topic);
-  }
-  const sentences: string[] = [];
-  const pushUnique = (text: string) => {
-    const existing = collectRouteText(route);
-    if (!existing.includes(text)) sentences.push(text);
-  };
-  // Generic coverage: topic/entity labels carry their own significant
-  // tokens (and entities must appear literally), so stating them verbatim
-  // covers EVERY stem the deterministic check derives from them. All
-  // missed labels share ONE sentence — one per failure reads as duplicated
-  // boilerplate (golden run #48). The sentence tail is the strictly
-  // fact-derived filler — never a local-business template.
-  const labels = [...new Set([...topics, ...entities])];
-  if (labels.length > 0) {
-    pushUnique(`Regarding ${labels.join(" and ")}: ${filler}`);
-  }
-
-  if (sentences.length > 0) {
-    const first = route.sections?.[0];
-    if (first && Array.isArray(first.blocks)) {
-      for (const text of sentences) {
-        first.blocks.push({ kind: "paragraph", text });
-      }
-    }
-  }
-
-  // d. Total-scrub guarantee: the fact-derived filler/sentences appended
-  //    above get the same surface pass, then the route is returned directly —
-  //    all scrubbing mutated fields in place, no JSON round-trip needed.
-  scrubTextSurfaces(route, corpus, allowedNumbers, contractRoute.forbidden_claims);
+  // b. Never render an identifier-shaped fact value into prose.
+  scrubIdentifierFactValues(route, contractRoute.business_facts);
   return route;
+}
+
+/**
+ * True when a fact value is a machine identifier rather than prose: snake_case,
+ * or a single space-free token containing an underscore. Such a value has no
+ * customer-facing rendering unless the contract supplies a human label.
+ */
+export function isIdentifierLikeFactValue(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || /\s/.test(trimmed)) return false;
+  return trimmed.includes("_");
+}
+
+/** Identifier-shaped string values among the verified facts (array entries included). */
+function identifierFactValues(facts: PageContentContractRoute["business_facts"]): string[] {
+  const values: string[] = [];
+  for (const fact of facts) {
+    const entries = Array.isArray(fact.value) ? fact.value : [fact.value];
+    for (const entry of entries) {
+      if (typeof entry === "string" && isIdentifierLikeFactValue(entry)) values.push(entry.trim());
+    }
+  }
+  return [...new Set(values)].sort((left, right) => right.length - left.length);
+}
+
+/**
+ * Remove identifier-shaped fact values from every author-visible surface. No
+ * human label exists for them in the contract, so the value is omitted rather
+ * than rewritten; whitespace left behind is collapsed.
+ */
+function scrubIdentifierFactValues(
+  route: StructuredContentRoute,
+  facts: PageContentContractRoute["business_facts"],
+): void {
+  const identifiers = identifierFactValues(facts);
+  if (identifiers.length === 0) return;
+  const pattern = new RegExp(
+    `(?<![\\w-])(?:${identifiers.map(escapeRegex).join("|")})(?![\\w-])`,
+    "gi",
+  );
+  for (const surface of collectTextSurfaces(route)) {
+    const text = surface.read();
+    if (text === undefined || !pattern.test(text)) continue;
+    pattern.lastIndex = 0;
+    surface.write(
+      text
+        .replace(pattern, "")
+        .replace(/[ \t]{2,}/g, " ")
+        .replace(/ +([.,;:!?])/g, "$1")
+        .trim(),
+    );
+    pattern.lastIndex = 0;
+  }
 }
 
 /** A single mutable author-visible string field of a route. */
@@ -1045,27 +1041,6 @@ function collectTextSurfaces(route: StructuredContentRoute): TextSurface[] {
     });
   }
   return surfaces;
-}
-
-/**
- * Render a verified fact for prose.
- *
- * `VerifiedFactValue` is `string | number | boolean | string[]`, and the array
- * variant is the reason this exists: `String(["CA", "NV"])` yields "CA,NV",
- * which is what a bare `String(facts.get("states_served"))` was interpolating
- * into a generated sentence — commas with no spaces, mid-paragraph. Arrays are
- * joined the way prose wants them; a boolean is not a noun phrase and renders
- * as nothing rather than a literal "true" in a customer-facing sentence.
- */
-function factText(value: VerifiedFactValue | undefined): string {
-  if (value === undefined) return "";
-  if (Array.isArray(value))
-    return value
-      .map((entry) => entry.trim())
-      .filter(Boolean)
-      .join(", ");
-  if (typeof value === "boolean") return "";
-  return String(value).trim();
 }
 
 function escapeRegex(value: string): string {
