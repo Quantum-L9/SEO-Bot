@@ -575,35 +575,32 @@ export async function registerBuildIntelligenceRoutes(app: FastifyInstance): Pro
 
   // 7. Provider attempts — one receipt per provider attempt of the run,
   //    failed legs included, with spend equal to the sum of the receipts.
-  app.get(
-    "/api/build-intelligence/run-evidence/:run_id/provider-attempts",
-    async (request, reply) => {
-      const { run_id: runId } = request.params as { run_id: string };
-      let document: ReturnType<typeof getRunProviderAttempts>;
-      try {
-        document = getRunProviderAttempts(runId);
-      } catch (error) {
-        if (error instanceof ProviderAttemptsInvalidError) {
-          logger.error(
-            { runId, violations: error.violations },
-            "Provider attempts failed validation",
-          );
-          return reply
-            .status(422)
-            .send({ error: error.code, message: error.message, violations: error.violations });
-        }
-        throw error;
+  app.get("/api/build-intelligence/run-evidence/:run_id/provider-attempts", (request, reply) => {
+    const { run_id: runId } = request.params as { run_id: string };
+    let document: ReturnType<typeof getRunProviderAttempts>;
+    try {
+      document = getRunProviderAttempts(runId);
+    } catch (error) {
+      if (error instanceof ProviderAttemptsInvalidError) {
+        logger.error(
+          { runId, violations: error.violations },
+          "Provider attempts failed validation",
+        );
+        return reply
+          .status(422)
+          .send({ error: error.code, message: error.message, violations: error.violations });
       }
-      if (!document) {
-        return reply.status(404).send({
-          error: "RUN_EVIDENCE_NOT_FOUND",
-          message: `no ${PROVIDER_ATTEMPTS_SCHEMA} evidence for ${runId}`,
-        });
-      }
-      reply.header(RUN_ID_HEADER, document.run_id);
-      return reply.status(200).send(document);
-    },
-  );
+      throw error;
+    }
+    if (!document) {
+      return reply.status(404).send({
+        error: "RUN_EVIDENCE_NOT_FOUND",
+        message: `no ${PROVIDER_ATTEMPTS_SCHEMA} evidence for ${runId}`,
+      });
+    }
+    reply.header(RUN_ID_HEADER, document.run_id);
+    return reply.status(200).send(document);
+  });
 
   app.get("/api/build-intelligence/run-evidence", async (request, reply) => {
     const parsed = runEvidenceQuery.safeParse(request.query);
@@ -794,7 +791,7 @@ function classifyProducerError(error: unknown, recorder: LlmRunRecorder): Produc
   // failed on it: a schema failure, after the bounded repair when the last
   // attempt was the repair. Read from the attempt receipt, not guessed from
   // the message.
-  if (last && last.outcome === "SCHEMA_INVALID") {
+  if (last?.outcome === "SCHEMA_INVALID") {
     return {
       status: 422,
       body: {

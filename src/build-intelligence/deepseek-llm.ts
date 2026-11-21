@@ -340,6 +340,19 @@ function settingsFromConfig(): DeepSeekSettings {
   );
 }
 
+/** Price a receipt from provider-reported usage; null when usage is missing. */
+function attemptCost(
+  model: string,
+  promptTokens: number | null,
+  completionTokens: number | null,
+): number | null {
+  const pricing = DEEPSEEK_PEAK_PRICING[model];
+  if (!pricing || promptTokens === null || completionTokens === null) return null;
+  return (
+    (promptTokens * pricing.inputPerMTok + completionTokens * pricing.outputPerMTok) / 1_000_000
+  );
+}
+
 export function createDeepSeekBuildIntelligenceLlm(options?: {
   env?: NodeJS.ProcessEnv;
   transport?: Transport;
@@ -362,19 +375,6 @@ export function createDeepSeekBuildIntelligenceLlm(options?: {
         },
       )
     : settingsFromConfig();
-
-  /** Price a receipt from provider-reported usage; null when usage is missing. */
-  function attemptCost(
-    model: string,
-    promptTokens: number | null,
-    completionTokens: number | null,
-  ): number | null {
-    const pricing = DEEPSEEK_PEAK_PRICING[model];
-    if (!pricing || promptTokens === null || completionTokens === null) return null;
-    return (
-      (promptTokens * pricing.inputPerMTok + completionTokens * pricing.outputPerMTok) / 1_000_000
-    );
-  }
 
   function record(args: BuildIntelligenceLlmArgs<unknown>, receipt: ProviderAttemptReceipt): void {
     args.recorder?.recordProviderAttempt(receipt);
