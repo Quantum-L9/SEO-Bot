@@ -25,6 +25,11 @@ import type {
   StructuredContentRoute,
 } from "@quantum-l9/bot-interop";
 import { z } from "zod";
+import {
+  keyPlacements,
+  type OutputShapeHints,
+  renderOutputShape,
+} from "./output-shape-renderer.js";
 
 const CONTENT_SLOTS: readonly [ContentSlot, ...ContentSlot[]] = [
   "primary_offer",
@@ -144,45 +149,49 @@ export type GlobalRouteIntentRoute = z.infer<typeof globalRouteIntentRouteSchema
 
 /* ── StructuredContentPackage (model-produced routes) ───────────────────────── */
 
-/**
- * Reusable generation-prompt contract, kept adjacent to the runtime schema
- * guard it teaches. The zod schema above/below remains FINAL authority — this
- * text exists only so the generation prompt teaches the exact shape instead of
- * letting the model invent `content: "..."` in place of the blocks union.
- *
- * Forbidden field aliases (`content`, `body`, `copy`, `html`, `paragraphs`)
- * are named explicitly: section prose must exist exclusively inside `blocks`.
- * The strict zod schema rejects every alias anyway; the prompt contract makes
- * the first generation far more likely to be right, which is what keeps a
- * route inside its two-call generation budget.
- */
-export const STRUCTURED_CONTENT_OUTPUT_CONTRACT = [
-  "Produce EXACTLY this JSON object (zod is final authority; this text only teaches it):",
-  "- route_id: string — the exact route_id from the contract.",
-  "- path: string — the exact path from the contract.",
-  "- metadata: { title: string, description: string } — both non-empty.",
-  "- sections: array — exactly one object per contract section_id, same ids, contract order. Each:",
-  "  - section_id: string — the exact contract section_id.",
-  "  - eyebrow: string (optional), heading: string (optional), subheading: string (optional).",
-  "  - blocks: array of ONE kind per entry — the ONLY place section prose lives:",
-  '    - { kind: "paragraph", text: string }',
-  '    - { kind: "bullets", items: string[] }',
-  '    - { kind: "steps", items: string[] }',
-  '    - { kind: "quote", text: string, attribution: string (optional) }',
-  "  - cta (optional): { label: string, action: string }.",
-  "- faqs: array of { question: string, answer: string }.",
-  "- internal_links: array of { target_route_id: string, anchor_text: string } — include every required target.",
-  "- schema_content_inputs: object with optional booleans faq, service, local_business.",
-  "FORBIDDEN field aliases: content, body, copy, html, paragraphs. Section prose exists",
-  "exclusively inside blocks. sections[].blocks is REQUIRED on EVERY section — never",
-  "omit it, not even on the last section; a section with nothing to say still",
-  "carries blocks: []. Respond with ONLY the JSON object — no markdown fences.",
-].join("\n");
-
 /** One observed schema/JSON failure, shaped for the bounded repair prompt. */
 export interface SchemaFailure {
   path: string;
   message: string;
+}
+
+/** Schema path of an issue, with array indexes collapsed to `[]` (`sections.6` → `sections[]`). */
+function schemaPathOf(path: readonly (string | number)[]): string {
+  let rendered = "";
+  for (const segment of path) {
+    if (typeof segment === "number") rendered += "[]";
+    else rendered = rendered ? `${rendered}.${segment}` : segment;
+  }
+  return rendered;
+}
+
+function describePlacement(path: string): string {
+  return path.includes(".") || path.includes("[]")
+    ? `\`${path}\``
+    : `the route level (top-level key \`${path}\`)`;
+}
+
+/**
+ * For an unrecognized key the schema accepts elsewhere, name where it belongs.
+ * Read from the schema, so the hint can never point at a field that does not
+ * exist. Empty when the key exists nowhere in the schema.
+ */
+function placementHint(
+  keys: readonly string[],
+  issuePath: readonly (string | number)[],
+  placements: ReadonlyMap<string, readonly string[]>,
+): string {
+  const here = schemaPathOf(issuePath);
+  const hints: string[] = [];
+  for (const key of keys) {
+    const own = here ? `${here}.${key}` : key;
+    const elsewhere = (placements.get(key) ?? []).filter((at) => at !== own);
+    if (elsewhere.length === 0) continue;
+    hints.push(
+      `"${key}" is not allowed here; it belongs ONLY at ${elsewhere.map(describePlacement).join(" or ")}. Move it there.`,
+    );
+  }
+  return hints.length > 0 ? ` — ${hints.join(" ")}` : "";
 }
 
 /**
@@ -192,12 +201,17 @@ export interface SchemaFailure {
  * the repair always receives exact, actionable evidence — never raw model
  * output (error messages here are already sanitized by the parsers).
  */
-export function schemaFailureDetails(error: unknown): SchemaFailure[] {
+export function schemaFailureDetails(error: unknown, schema?: z.ZodTypeAny): SchemaFailure[] {
   if (error instanceof z.ZodError) {
-    return error.issues.map((issue) => ({
-      path: issue.path.map(String).join(".") || "$",
-      message: issue.message,
-    }));
+    const placements = schema ? keyPlacements(schema) : undefined;
+    return error.issues.map((issue) => {
+      const path = issue.path.map(String).join(".") || "$";
+      const placement =
+        placements && issue.code === "unrecognized_keys"
+          ? placementHint(issue.keys, issue.path, placements)
+          : "";
+      return { path, message: `${issue.message}${placement}` };
+    });
   }
   const message = error instanceof Error ? error.message : String(error);
   return [{ path: "$", message }];
@@ -252,6 +266,70 @@ export const structuredContentRouteSchema = z
       .strict(),
   })
   .strict();
+
+/* ── Structured-content output contract (rendered from the schema) ─────────── */
+
+/**
+ * Field guidance for the rendered contract. Every key must name a field the
+ * schema has: a renamed or removed field throws instead of leaving stale text.
+ */
+const STRUCTURED_CONTENT_HINTS: OutputShapeHints = {
+  route_id: "the exact route_id from the contract",
+  path: "the exact path from the contract",
+  metadata: { title: "non-empty", description: "non-empty" },
+  sections: { section_id: "the exact contract section_id" },
+  faqs: {
+    question:
+      "FAQ question/answer pairs live ONLY here, in the route-level faqs array, never inside a section",
+  },
+  internal_links: { target_route_id: "include every required internal-link target" },
+};
+
+const sectionSchema = structuredContentRouteSchema.shape.sections.element;
+
+/** Keys a section may carry, read from the schema that enforces them. */
+export const STRUCTURED_CONTENT_SECTION_KEYS: readonly string[] = Object.keys(sectionSchema.shape);
+
+/** Block kinds of the taught union, read from the schema. */
+export const STRUCTURED_CONTENT_BLOCK_KINDS: readonly string[] = [
+  ...sectionSchema.shape.blocks.element.options,
+].map((option) => String(option.shape.kind.value));
+
+const optionalSectionKeys = STRUCTURED_CONTENT_SECTION_KEYS.filter((key) =>
+  sectionSchema.shape[key as keyof typeof sectionSchema.shape].isOptional(),
+);
+
+/**
+ * Generation-prompt contract, RENDERED from `structuredContentRouteSchema` so
+ * the prompt and the parser cannot drift. The zod schema remains FINAL
+ * authority; this text only teaches it.
+ *
+ * Forbidden field aliases (`content`, `body`, `copy`, `html`, `paragraphs`)
+ * are named explicitly: section prose must exist exclusively inside `blocks`.
+ * FAQ placement is stated explicitly because the live QAP canary nested `faqs`
+ * inside the FAQ section, which the strict schema rejects.
+ */
+export const STRUCTURED_CONTENT_OUTPUT_CONTRACT = [
+  "Produce EXACTLY this JSON object (zod is final authority; this shape is rendered from it):",
+  JSON.stringify(
+    renderOutputShape(structuredContentRouteSchema, STRUCTURED_CONTENT_HINTS),
+    null,
+    2,
+  ),
+  "Rules:",
+  "- sections: exactly one object per contract section_id, same ids, contract order.",
+  `- A section may carry ONLY these keys: ${STRUCTURED_CONTENT_SECTION_KEYS.join(", ")}. No other key, ever.`,
+  `- blocks: array of ONE kind per entry (kind is one of: ${STRUCTURED_CONTENT_BLOCK_KINDS.join(", ")}) — the ONLY place section prose lives.`,
+  "- FAQ question/answer pairs belong ONLY in the route-level `faqs` array, never inside a section.",
+  "  A section whose section_id is an FAQ section (e.g. faq) still carries only the allowed section",
+  `  keys: blocks (intro prose, or []), plus optional ${optionalSectionKeys.join(", ")}.`,
+  "  Never put a faqs key on a section.",
+  "- internal_links: include every required internal-link target.",
+  "FORBIDDEN field aliases: content, body, copy, html, paragraphs. Section prose exists",
+  "exclusively inside blocks. sections[].blocks is REQUIRED on EVERY section — never",
+  "omit it, not even on the last section; a section with nothing to say still",
+  "carries blocks: []. Respond with ONLY the JSON object — no markdown fences.",
+].join("\n");
 
 export type _StructuredRouteParity =
   z.infer<typeof structuredContentRouteSchema> extends StructuredContentRoute ? true : never;
