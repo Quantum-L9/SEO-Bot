@@ -158,6 +158,18 @@
       "owner": "continuous-assurance",
       "purpose": "Machine-readable assurance contract",
       "classification": "schema"
+    },
+    {
+      "path": ".l9/ci.json",
+      "owner": "continuous-assurance",
+      "purpose": "Consumer CI class declaration read by the org CI workflow (schema l9.ci-consumer/v1)",
+      "classification": "configuration"
+    },
+    {
+      "path": ".l9/repo-workflow.json",
+      "owner": "continuous-assurance",
+      "purpose": "Repository execution facade declaration (schema l9.repo-execution/v2)",
+      "classification": "configuration"
     }
   ]
 }
