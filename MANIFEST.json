@@ -3531,6 +3531,15 @@
       "source_of_generation": null
     },
     {
+      "path": "tests/build-intelligence/output-contract-verbatim.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
       "path": "tests/build-intelligence/preflight.test.ts",
       "owner": "quality",
       "purpose": "Automated behavioral and assurance tests",
@@ -4314,5 +4323,5 @@
       "source_of_generation": null
     }
   ],
-  "inventory_digest": "89715e438d122b8eb5a9b9697421389ad5be832cbe391250194458d9962c3e89"
+  "inventory_digest": "3704050435c40d9c2dbd7a62a77c522c4f7a84f6f224d9e9c0926cb05dab0a4c"
 }

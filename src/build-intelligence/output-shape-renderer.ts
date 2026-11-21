@@ -9,18 +9,33 @@
  * Output-shape renderer — turns a zod schema into the prompt-facing shape the
  * model is taught, so the prompt and the parser cannot drift.
  *
- * Generalised from the SEOContentBlueprint contract (which re-exports it
- * unchanged) so the structured-content contract can be rendered the same way.
- * It lives in its own module because `schema-guards.ts` renders its own
- * contract from it, while the blueprint contract module imports
- * `schema-guards.ts`; a shared home avoids that import cycle.
+ * Shared by the SEOContentBlueprint contracts (which re-export it) and the
+ * structured-content contract. It lives in its own module because
+ * `schema-guards.ts` renders its contract from it while the blueprint contract
+ * module imports `schema-guards.ts`.
  *
- * Rendered leaf grammar (deterministic, parsed back by the conformance tests):
- *   "string" | "string[]" | "boolean" | "number" | "one of: a | b" |
- *   "array of (a | b)" | "literal: x"   optionally followed by " — <hint>",
- *   and " (optional)" on optional leaves.
- * Objects render as objects; arrays of objects render as a one-element array;
- * a discriminated union renders as `{ "one of": [variant, ...] }`.
+ * The rendered shape is an EXAMPLE DOCUMENT: a model that copies it verbatim
+ * produces a value the schema accepts. A model copies what it sees, so no leaf
+ * may DESCRIBE a value. The QAP canary copied `"kind": "literal: paragraph"`
+ * verbatim, and every block failed the discriminator.
+ *
+ *   string          → "string", "string (optional)" or "string — <hint>":
+ *                     a placeholder that is itself a valid string, written over
+ *                     with content
+ *   string[]        → ["string"]           number → 0
+ *   boolean         → true, with a rule that true and false are both valid
+ *                     and must be chosen (the example is not a default)
+ *   literal         → its exact JSON value
+ *   enum            → its first option, exactly
+ *   enum[]          → [first option]
+ *   object          → an object of rendered children
+ *   object[]        → a one-element array
+ *   union[]         → one concrete example object per variant, each with its
+ *                     exact discriminator value
+ *
+ * Everything that is guidance rather than a value goes to `renderOutputRules`:
+ * allowed enum and discriminator values, hints on non-string fields, and
+ * optional fields, each as one plain sentence.
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -29,19 +44,21 @@ import { z } from "zod";
 /** Separator between a rendered leaf type and its guidance text. */
 export const OUTPUT_SHAPE_HINT_SEPARATOR = " — ";
 
-/** Key under which a discriminated union lists its rendered variants. */
-export const OUTPUT_SHAPE_UNION_KEY = "one of";
+/** Prefix of every string placeholder. No exact value may start with it. */
+export const STRING_PLACEHOLDER = "string";
 
 /**
  * Per-field guidance. A string attaches to the node at that key; a nested
  * object descends into an object (or into the element of an array of
- * objects). A string on an array-of-objects node replaces its rendering with
- * `"array — <hint>"` (used for envelopes that point at a separately rendered
- * element shape).
+ * objects). A string on an array of objects renders the array as `[]` and
+ * moves the hint into the rules (used for envelopes whose element shape is
+ * rendered separately).
  */
 export interface OutputShapeHints {
   readonly [key: string]: string | OutputShapeHints;
 }
+
+type FieldHint = string | OutputShapeHints | undefined;
 
 /** A hint names a field the schema does not have, or a schema node is unsupported. */
 export class OutputContractDriftError extends Error {
@@ -52,42 +69,48 @@ export class OutputContractDriftError extends Error {
   }
 }
 
-function withHint(type: string, hint: string | undefined): string {
-  return hint ? `${type}${OUTPUT_SHAPE_HINT_SEPARATOR}${hint}` : type;
+interface RenderState {
+  rules: string[];
+  optional: string[];
 }
 
-function leafType(schema: z.ZodTypeAny, path: string): string | undefined {
-  if (schema instanceof z.ZodString) return "string";
-  if (schema instanceof z.ZodBoolean) return "boolean";
-  if (schema instanceof z.ZodNumber) return "number";
-  if (schema instanceof z.ZodLiteral) return `literal: ${String(schema.value)}`;
-  if (schema instanceof z.ZodEnum) return `one of: ${(schema.options as string[]).join(" | ")}`;
-  if (schema instanceof z.ZodArray) {
-    const element = schema.element as z.ZodTypeAny;
-    if (element instanceof z.ZodString) return "string[]";
-    if (element instanceof z.ZodEnum) {
-      return `array of (${(element.options as string[]).join(" | ")})`;
-    }
-    if (element instanceof z.ZodObject || element instanceof z.ZodDiscriminatedUnion) {
-      return undefined;
-    }
-    throw new OutputContractDriftError(`unsupported array element at ${path || "$"}`);
+function at(path: string): string {
+  return path || "$";
+}
+
+function childPath(path: string, key: string): string {
+  return path ? `${path}.${key}` : key;
+}
+
+function placeholder(hint: string | undefined): string {
+  return hint ? `${STRING_PLACEHOLDER}${OUTPUT_SHAPE_HINT_SEPARATOR}${hint}` : STRING_PLACEHOLDER;
+}
+
+/** An exact value must never be mistaken for a string placeholder. */
+function exactValue(value: unknown, path: string): unknown {
+  if (typeof value === "string" && value.startsWith(STRING_PLACEHOLDER)) {
+    throw new OutputContractDriftError(
+      `exact value "${value}" at ${at(path)} collides with the string placeholder`,
+    );
   }
-  if (schema instanceof z.ZodObject || schema instanceof z.ZodDiscriminatedUnion) return undefined;
-  throw new OutputContractDriftError(
-    `unsupported schema node ${schema.constructor.name} at ${path || "$"}`,
-  );
+  return value;
 }
 
-function renderLeaf(
-  leaf: string,
-  hint: string | OutputShapeHints | undefined,
-  path: string,
-): string {
+function leafHint(hint: FieldHint, path: string): string | undefined {
   if (hint !== undefined && typeof hint !== "string") {
     throw new OutputContractDriftError(`nested hints given for leaf field ${path}`);
   }
-  return withHint(leaf, hint);
+  return hint;
+}
+
+/** A hint on a field whose example value is not a string becomes a rule. */
+function ruleHint(state: RenderState, hint: FieldHint, path: string): void {
+  const text = leafHint(hint, path);
+  if (text) state.rules.push(`${at(path)}: ${text}.`);
+}
+
+function enumOptions(schema: z.ZodEnum<[string, ...string[]]>): string[] {
+  return [...(schema.options as string[])];
 }
 
 /** Variants of a discriminated union, in declaration order. */
@@ -97,45 +120,116 @@ function unionVariants(
   return [...union.options] as z.ZodObject<z.ZodRawShape>[];
 }
 
-function renderNode(
-  schema: z.ZodTypeAny,
-  hint: string | OutputShapeHints | undefined,
+/** One example object per variant, plus the sentence naming the allowed values. */
+function renderUnion(
+  union: z.ZodDiscriminatedUnion<string, z.ZodDiscriminatedUnionOption<string>[]>,
+  hint: FieldHint,
   path: string,
-): unknown {
-  if (schema instanceof z.ZodOptional) {
-    const inner = renderNode(schema.unwrap() as z.ZodTypeAny, hint, path);
-    return typeof inner === "string" ? `${inner} (optional)` : inner;
+  state: RenderState,
+): Record<string, unknown>[] {
+  if (hint !== undefined) {
+    throw new OutputContractDriftError(`hints are not supported on union ${at(path)}`);
   }
-  const leaf = leafType(schema, path);
-  if (leaf !== undefined) return renderLeaf(leaf, hint, path);
-  if (schema instanceof z.ZodArray) {
-    if (typeof hint === "string") return withHint("array", hint);
-    return [renderNode(schema.element as z.ZodTypeAny, hint, `${path}[]`)];
-  }
-  if (schema instanceof z.ZodDiscriminatedUnion) {
-    if (hint !== undefined) {
-      throw new OutputContractDriftError(`hints are not supported on union ${path || "$"}`);
-    }
-    return {
-      [OUTPUT_SHAPE_UNION_KEY]: unionVariants(schema).map((variant) =>
-        renderObject(variant, undefined, path),
-      ),
-    };
-  }
-  return renderObject(schema as z.ZodObject<z.ZodRawShape>, hint, path);
+  const variants = unionVariants(union);
+  const discriminator = union.discriminator;
+  const values = variants.map((variant) =>
+    String((variant.shape[discriminator] as z.ZodLiteral<unknown>).value),
+  );
+  state.rules.push(
+    `${at(path)}: each entry is exactly one of the ${variants.length} example objects shown, ` +
+      `chosen by its "${discriminator}" value, which must be exactly one of: ${values.join(", ")}. ` +
+      "Use only the keys of the matching example.",
+  );
+  return variants.map((variant) => renderObject(variant, undefined, path, state, discriminator));
 }
 
-function childPath(path: string, key: string): string {
-  return path ? `${path}.${key}` : key;
+function renderArray(
+  schema: z.ZodArray<z.ZodTypeAny>,
+  hint: FieldHint,
+  path: string,
+  state: RenderState,
+): unknown[] {
+  const element = schema.element as z.ZodTypeAny;
+  const elementPath = `${path}[]`;
+  if (element instanceof z.ZodString) return [placeholder(leafHint(hint, path))];
+  if (element instanceof z.ZodEnum) {
+    const options = enumOptions(element);
+    state.rules.push(`${at(elementPath)}: each entry is exactly one of: ${options.join(", ")}.`);
+    ruleHint(state, hint, path);
+    return [exactValue(options[0], elementPath)];
+  }
+  if (element instanceof z.ZodDiscriminatedUnion) {
+    return renderUnion(element, hint, elementPath, state);
+  }
+  if (element instanceof z.ZodObject) {
+    if (typeof hint === "string") {
+      state.rules.push(`${at(path)}: ${hint}.`);
+      return [];
+    }
+    return [renderObject(element, hint, elementPath, state)];
+  }
+  throw new OutputContractDriftError(`unsupported array element at ${at(path)}`);
+}
+
+function renderNode(
+  schema: z.ZodTypeAny,
+  hint: FieldHint,
+  path: string,
+  state: RenderState,
+  discriminator = false,
+): unknown {
+  if (schema instanceof z.ZodOptional) {
+    state.optional.push(at(path));
+    const inner = renderNode(schema.unwrap() as z.ZodTypeAny, hint, path, state);
+    return typeof inner === "string" && inner.startsWith(STRING_PLACEHOLDER)
+      ? `${inner} (optional)`
+      : inner;
+  }
+  if (schema instanceof z.ZodString) return placeholder(leafHint(hint, path));
+  if (schema instanceof z.ZodBoolean) {
+    // The example value is a valid shape, never a default: copying `true`
+    // everywhere would claim every capability (e.g. every JSON-LD input).
+    state.rules.push(
+      `${at(path)}: true or false — choose the value that is actually true; the example's value is not a default.`,
+    );
+    ruleHint(state, hint, path);
+    return true;
+  }
+  if (schema instanceof z.ZodNumber) {
+    ruleHint(state, hint, path);
+    return 0;
+  }
+  if (schema instanceof z.ZodLiteral) {
+    ruleHint(state, hint, path);
+    if (!discriminator)
+      state.rules.push(`${at(path)}: always exactly ${JSON.stringify(schema.value)}.`);
+    return exactValue(schema.value, path);
+  }
+  if (schema instanceof z.ZodEnum) {
+    const options = enumOptions(schema);
+    state.rules.push(`${at(path)}: exactly one of: ${options.join(", ")}.`);
+    ruleHint(state, hint, path);
+    return exactValue(options[0], path);
+  }
+  if (schema instanceof z.ZodArray) return renderArray(schema, hint, path, state);
+  if (schema instanceof z.ZodDiscriminatedUnion) {
+    return renderUnion(schema, hint, path, state)[0];
+  }
+  if (schema instanceof z.ZodObject) return renderObject(schema, hint, path, state);
+  throw new OutputContractDriftError(
+    `unsupported schema node ${schema.constructor.name} at ${at(path)}`,
+  );
 }
 
 function renderObject(
   object: z.ZodObject<z.ZodRawShape>,
-  hint: string | OutputShapeHints | undefined,
+  hint: FieldHint,
   path: string,
+  state: RenderState,
+  discriminatorKey?: string,
 ): Record<string, unknown> {
   if (typeof hint === "string") {
-    throw new OutputContractDriftError(`string hint given for object field ${path || "$"}`);
+    throw new OutputContractDriftError(`string hint given for object field ${at(path)}`);
   }
   const shape = object.shape;
   for (const key of Object.keys(hint ?? {})) {
@@ -148,14 +242,46 @@ function renderObject(
   }
   const rendered: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(shape)) {
-    rendered[key] = renderNode(child as z.ZodTypeAny, hint?.[key], childPath(path, key));
+    rendered[key] = renderNode(
+      child as z.ZodTypeAny,
+      hint?.[key],
+      childPath(path, key),
+      state,
+      key === discriminatorKey,
+    );
   }
   return rendered;
 }
 
-/** Render the prompt-facing output shape of `schema`, with optional field guidance. */
+function render(
+  schema: z.ZodTypeAny,
+  hints?: OutputShapeHints,
+): {
+  shape: unknown;
+  state: RenderState;
+} {
+  const state: RenderState = { rules: [], optional: [] };
+  return { shape: renderNode(schema, hints, "", state), state };
+}
+
+/** Render the prompt-facing example document of `schema`, with optional field guidance. */
 export function renderOutputShape(schema: z.ZodTypeAny, hints?: OutputShapeHints): unknown {
-  return renderNode(schema, hints, "");
+  return render(schema, hints).shape;
+}
+
+/**
+ * The guidance that is not a value, one plain sentence each: allowed enum and
+ * discriminator values, hints on non-string fields, and the optional fields.
+ */
+export function renderOutputRules(schema: z.ZodTypeAny, hints?: OutputShapeHints): string[] {
+  const { state } = render(schema, hints);
+  const optional = [...new Set(state.optional)];
+  return [
+    ...new Set(state.rules),
+    ...(optional.length > 0
+      ? [`Optional fields (may be omitted; never add other keys): ${optional.join(", ")}.`]
+      : []),
+  ];
 }
 
 /* ── Key placement index ─────────────────────────────────────────────────────── */

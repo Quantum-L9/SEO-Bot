@@ -382,7 +382,14 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
     expect(batchPrompt.all_route_index).toHaveLength(1);
     expect(batchPrompt.global_route_intent_plan).toHaveLength(1);
     const contract = batchPrompt.output_contract;
-    expect(contract.route_shape.search_intent.journey_stage).toContain("reassert");
+    // journey_stage renders as an exact enum value a model can copy; the
+    // instruction to reassert it from the intent plan travels as a rule.
+    expect(["informational", "commercial", "transactional"]).toContain(
+      contract.route_shape.search_intent.journey_stage,
+    );
+    expect(contract.rules).toContain(
+      "route_shape.search_intent.journey_stage: reassert the journey_stage from the global intent plan.",
+    );
     expect(contract.route_shape.targets.primary_query).toBeTruthy();
     expect(contract.journey_stage).toBeUndefined();
     // Identity fields are schema-required on the model's raw output
@@ -395,7 +402,11 @@ describe("SEOContentBlueprint — strategic reasoning, exact lineage", () => {
     // bare array (mirroring the global plan's array shape) and its repair
     // returned a path-keyed map — the contract had never stated the
     // { routes: [...] } root.
-    expect(contract.container.routes).toContain("ONLY top-level key");
+    // The root renders as a copyable `{ routes: [] }` and the instruction that
+    // `routes` is the only top-level key travels as a rule.
+    expect(Object.keys(contract.container)).toEqual(["routes"]);
+    expect(contract.container.routes).toEqual([]);
+    expect(contract.rules.some((rule: string) => rule.includes("ONLY top-level key"))).toBe(true);
   });
 
   it("batches 29 routes into 8 batches of 4 and persists batch_size/batch_count (oracle: 4 and 8)", async () => {
