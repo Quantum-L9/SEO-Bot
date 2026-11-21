@@ -229,9 +229,9 @@ export function checkRouteGrounding(
 ): GroundingVerdict {
   const text = collectRouteText(route);
   const haystack = normalize(text);
-  const corpus = buildFactCorpus(contractRoute.business_facts);
   const numbers = factNumbers(contractRoute.business_facts);
 
+  const checklist = routeRequirementChecklist(contractRoute);
   const unsupportedClaims: string[] = [];
   const failures: string[] = [];
   const seen = new Set<string>();
@@ -253,8 +253,8 @@ export function checkRouteGrounding(
   }
 
   // 2. Unquantified magnitude claims — the phrase itself must be verified.
-  for (const phrase of MAGNITUDE_PHRASES) {
-    if (haystack.includes(phrase) && !corpus.includes(phrase)) {
+  for (const phrase of checklist.ungrounded_magnitude_phrases) {
+    if (haystack.includes(phrase)) {
       flag(
         `${route.route_id}: unsupported magnitude claim "${phrase}" — no verified fact asserts it`,
       );
@@ -262,8 +262,8 @@ export function checkRouteGrounding(
   }
 
   // 3. Credential / warranty / availability claims — must be corroborated.
-  for (const token of CREDENTIAL_CLAIM_TOKENS) {
-    if (haystack.includes(token) && !corpus.includes(token)) {
+  for (const token of checklist.ungrounded_claim_tokens) {
+    if (haystack.includes(token)) {
       flag(
         `${route.route_id}: unsupported credential/guarantee claim "${token}" — no verified fact asserts it`,
       );
@@ -271,15 +271,14 @@ export function checkRouteGrounding(
   }
 
   // 4. Explicitly forbidden claims from the contract.
-  for (const forbidden of contractRoute.forbidden_claims) {
-    const normalized = normalize(forbidden);
-    if (normalized && haystack.includes(normalized)) {
+  for (const forbidden of checklist.forbidden_claims) {
+    if (haystack.includes(normalize(forbidden))) {
       failures.push(`${route.route_id}: contains forbidden claim "${forbidden}"`);
     }
   }
 
   // 5. Placeholder / unwritten content.
-  for (const marker of PLACEHOLDER_MARKERS) {
+  for (const marker of checklist.placeholder_markers) {
     if (haystack.includes(marker)) {
       failures.push(`${route.route_id}: contains placeholder content "${marker}"`);
     }
@@ -289,18 +288,19 @@ export function checkRouteGrounding(
   //    faqs (the output contract puts Q&A ONLY there and lets the section carry
   //    `blocks: []`), so its substance counts the faqs it renders. The 10-word
   //    floor itself is unchanged.
-  const faqSections = faqSectionIds(contractRoute);
+  const sectionRules = new Map(checklist.sections.map((entry) => [entry.section_id, entry]));
   const routeFaqProse = route.faqs.flatMap((faq) => [faq.question, faq.answer]);
   for (const section of route.sections) {
+    const rules = sectionRules.get(section.section_id);
     const words = [
       ...section.blocks.flatMap((block) =>
         block.kind === "paragraph" || block.kind === "quote" ? [block.text] : block.items,
       ),
-      ...(faqSections.has(section.section_id) ? routeFaqProse : []),
+      ...(rules?.is_faq ? routeFaqProse : []),
     ]
       .join(" ")
       .trim();
-    if (words.split(/\s+/).filter(Boolean).length < 10) {
+    if (words.split(/\s+/).filter(Boolean).length < (rules?.min_words ?? SUBSTANCE_MIN_WORDS)) {
       failures.push(
         `${route.route_id}: section "${section.section_id}" has no substantive content`,
       );
@@ -308,7 +308,7 @@ export function checkRouteGrounding(
   }
 
   // 7. Required topics and entities are actually represented.
-  failures.push(...checkRequiredCoverage(route.route_id, contractRoute, haystack));
+  failures.push(...checkRequiredCoverage(route.route_id, checklist, haystack));
 
   return { unsupportedClaims, failures };
 }
@@ -333,18 +333,194 @@ export function faqSectionIds(contractRoute: PageContentContractRoute): Set<stri
 
 /**
  * Required entities, per contract section, exactly as the coverage check
- * matches them: literal, case-insensitive, whitespace-collapsed. The prompt
- * lists these verbatim so the writer cannot paraphrase an entity away.
+ * matches them: literal, case-insensitive, whitespace-collapsed.
  */
 export function requiredEntitiesBySection(
   contractRoute: PageContentContractRoute,
 ): Array<{ section_id: string; entities: string[] }> {
-  return contractRoute.sections
-    .map((section) => ({
-      section_id: section.section_id,
-      entities: section.content_requirements.entities.filter((entity) => entity.trim()),
-    }))
+  return routeRequirementChecklist(contractRoute)
+    .sections.map((section) => ({ section_id: section.section_id, entities: section.entities }))
     .filter((entry) => entry.entities.length > 0);
+}
+
+/* ── Requirement checklist: the ONE spec the validator and the prompt share ── */
+
+/** Words a section must carry before it counts as substantive content. */
+export const SUBSTANCE_MIN_WORDS = 10;
+
+/** A topic and the stemmed tokens the coverage check looks for, as substrings. */
+export interface TokenRequirement {
+  phrase: string;
+  tokens: string[];
+}
+
+/** Every deterministic requirement one contract section imposes. */
+export interface SectionRequirementChecklist {
+  section_id: string;
+  /** Renders the route-level faqs: its substance counts them. */
+  is_faq: boolean;
+  min_words: number;
+  /** Must appear literally (case-insensitive, whitespace-collapsed). */
+  entities: string[];
+  /** Every token must appear (as a substring) somewhere in the route. */
+  topics: Array<{ topic: string; tokens: string[] }>;
+  /** Questions the section must answer (judged semantically). */
+  questions: string[];
+  /** Every token must appear in THIS section's prose (proof-echo gate). */
+  proofs: Array<{ proof: string; tokens: string[] }>;
+}
+
+/**
+ * Every deterministic check the validator applies to one route, derived from
+ * the contract. `checkRouteGrounding`, `unsatisfiedProofRequirements` and the
+ * generation/repair prompts all read THIS object, so the prompt can never ask
+ * for less than the validator checks.
+ */
+export interface RouteRequirementChecklist {
+  route_id: string;
+  section_ids: string[];
+  sections: SectionRequirementChecklist[];
+  internal_link_targets: string[];
+  metadata: { title: string[]; description: string[] };
+  forbidden_claims: string[];
+  placeholder_markers: readonly string[];
+  /** Credential/guarantee tokens no verified fact grounds. */
+  ungrounded_claim_tokens: string[];
+  /** Magnitude phrases no verified fact grounds. */
+  ungrounded_magnitude_phrases: string[];
+  /** The only numbers a quantified claim may assert. */
+  verified_numbers: string[];
+}
+
+export function routeRequirementChecklist(
+  contractRoute: PageContentContractRoute,
+): RouteRequirementChecklist {
+  const corpus = buildFactCorpus(contractRoute.business_facts);
+  return {
+    route_id: contractRoute.route_id,
+    section_ids: contractRoute.sections.map((section) => section.section_id),
+    sections: contractRoute.sections.map((section) => ({
+      section_id: section.section_id,
+      is_faq: isFaqContractSection(section),
+      min_words: SUBSTANCE_MIN_WORDS,
+      entities: section.content_requirements.entities.filter((entity) => normalize(entity)),
+      topics: section.content_requirements.topics
+        .filter((topic) => normalize(topic))
+        .map((topic) => ({ topic, tokens: significantTokens(topic) }))
+        .filter((entry) => entry.tokens.length > 0),
+      questions: [...section.content_requirements.questions],
+      proofs: (section.proof_requirements ?? [])
+        .filter((proof) => normalize(proof))
+        .map((proof) => ({ proof, tokens: significantTokens(proof) })),
+    })),
+    internal_link_targets: contractRoute.internal_link_requirements.map(
+      (link) => link.target_route_id,
+    ),
+    metadata: {
+      title: [...contractRoute.metadata_requirements.title],
+      description: [...contractRoute.metadata_requirements.description],
+    },
+    forbidden_claims: contractRoute.forbidden_claims.filter((claim) => normalize(claim)),
+    placeholder_markers: PLACEHOLDER_MARKERS,
+    ungrounded_claim_tokens: CREDENTIAL_CLAIM_TOKENS.filter((token) => !corpus.includes(token)),
+    ungrounded_magnitude_phrases: MAGNITUDE_PHRASES.filter((phrase) => !corpus.includes(phrase)),
+    verified_numbers: [...factNumbers(contractRoute.business_facts)],
+  };
+}
+
+/** Every kind of requirement failure the deterministic validator can emit. */
+export type RequirementFailureKind =
+  | "route_identity"
+  | "unexpected_section"
+  | "missing_section"
+  | "missing_metadata"
+  | "missing_internal_link"
+  | "unsupported_quantified_claim"
+  | "unsupported_magnitude_claim"
+  | "unsupported_credential_claim"
+  | "forbidden_claim"
+  | "placeholder_content"
+  | "thin_section"
+  | "missing_entity"
+  | "missing_topic"
+  | "duplicate_content"
+  | "heading_restated"
+  | "build_mechanics_in_copy";
+
+/** A validator message reduced to its kind and the exact subject it names. */
+export interface ClassifiedRequirementFailure {
+  kind: RequirementFailureKind;
+  message: string;
+  /** Section the failure is about, when the message names one. */
+  section_id?: string;
+  /** The exact phrase/term/target the message quotes. */
+  subject?: string;
+  /** For missing topics: the exact stemmed tokens the check did not find. */
+  missing_tokens?: string[];
+}
+
+/**
+ * Patterns for every message the deterministic validator emits
+ * (claim-grounding, content-validator structural checks, content-duplication).
+ * The conformance test scans those modules' message templates and fails when
+ * one does not match here — a new rule cannot ship without a checklist entry.
+ */
+export const REQUIREMENT_FAILURE_PATTERNS: ReadonlyArray<{
+  kind: RequirementFailureKind;
+  pattern: RegExp;
+}> = [
+  { kind: "route_identity", pattern: /: route_id does not match contract \(/ },
+  { kind: "unexpected_section", pattern: /: unexpected section_id "([^"]*)" not in contract$/ },
+  { kind: "missing_section", pattern: /: missing required section_id "([^"]*)"$/ },
+  { kind: "missing_metadata", pattern: /: missing metadata\.(title|description)$/ },
+  { kind: "missing_internal_link", pattern: /: missing required internal link to "([^"]*)"$/ },
+  { kind: "unsupported_magnitude_claim", pattern: /: unsupported magnitude claim "([^"]*)"/ },
+  {
+    kind: "unsupported_credential_claim",
+    pattern: /: unsupported credential\/guarantee claim "([^"]*)"/,
+  },
+  { kind: "unsupported_quantified_claim", pattern: /: unsupported [^"]+ claim "([^"]*)"/ },
+  { kind: "forbidden_claim", pattern: /: contains forbidden claim "([^"]*)"$/ },
+  { kind: "placeholder_content", pattern: /: contains placeholder content "([^"]*)"$/ },
+  { kind: "thin_section", pattern: /: section "([^"]*)" has no substantive content$/ },
+  { kind: "missing_entity", pattern: /: required entity "([^"]*)" is not represented$/ },
+  {
+    kind: "missing_topic",
+    pattern: /: required topic "([^"]*)" is not covered \(missing: ([^)]*)\)$/,
+  },
+  { kind: "duplicate_content", pattern: /^DUPLICATE_CONTENT: / },
+  { kind: "heading_restated", pattern: /^HEADING_RESTATED: / },
+  { kind: "build_mechanics_in_copy", pattern: /^BUILD_MECHANICS_IN_COPY: .* says "([^"]*)"/ },
+];
+
+const SECTION_SCOPED_KINDS: ReadonlySet<RequirementFailureKind> = new Set([
+  "unexpected_section",
+  "missing_section",
+  "thin_section",
+]);
+
+/** Reduce one validator message to its kind and subject; undefined when unknown. */
+export function classifyRequirementFailure(
+  message: string,
+): ClassifiedRequirementFailure | undefined {
+  for (const { kind, pattern } of REQUIREMENT_FAILURE_PATTERNS) {
+    const match = pattern.exec(message);
+    if (!match) continue;
+    const subject = match[1];
+    const classified: ClassifiedRequirementFailure = { kind, message };
+    if (subject !== undefined) {
+      if (SECTION_SCOPED_KINDS.has(kind)) classified.section_id = subject;
+      else classified.subject = subject;
+    }
+    if (kind === "missing_topic") {
+      classified.missing_tokens = (match[2] ?? "")
+        .split(",")
+        .map((token) => token.trim())
+        .filter(Boolean);
+    }
+    return classified;
+  }
+  return undefined;
 }
 
 /**
@@ -354,27 +530,25 @@ export function requiredEntitiesBySection(
  */
 function checkRequiredCoverage(
   routeId: string,
-  contractRoute: PageContentContractRoute,
+  checklist: RouteRequirementChecklist,
   haystack: string,
 ): string[] {
   const failures: string[] = [];
   const reportedTopics = new Set<string>();
   const reportedEntities = new Set<string>();
 
-  for (const section of contractRoute.sections) {
-    for (const entity of section.content_requirements.entities) {
+  for (const section of checklist.sections) {
+    for (const entity of section.entities) {
       const normalized = normalize(entity);
-      if (!normalized || reportedEntities.has(normalized)) continue;
+      if (reportedEntities.has(normalized)) continue;
       if (!haystack.includes(normalized)) {
         reportedEntities.add(normalized);
         failures.push(`${routeId}: required entity "${entity}" is not represented`);
       }
     }
-    for (const topic of section.content_requirements.topics) {
+    for (const { topic, tokens } of section.topics) {
       const normalized = normalize(topic);
-      if (!normalized || reportedTopics.has(normalized)) continue;
-      const tokens = significantTokens(topic);
-      if (tokens.length === 0) continue;
+      if (reportedTopics.has(normalized)) continue;
       const missing = tokens.filter((token) => !haystack.includes(token));
       if (missing.length > 0) {
         reportedTopics.add(normalized);
@@ -397,15 +571,13 @@ export function unsatisfiedProofRequirements(
   contractRoute: PageContentContractRoute,
 ): Set<string> {
   const missing = new Set<string>();
-  for (const contractSection of contractRoute.sections ?? []) {
+  for (const sectionRules of routeRequirementChecklist(contractRoute).sections) {
     const generated = route.sections.find(
-      (section) => section.section_id === contractSection.section_id,
+      (section) => section.section_id === sectionRules.section_id,
     );
     const haystack = normalize(generated ? collectSectionProse(generated) : "");
-    for (const proof of contractSection.proof_requirements ?? []) {
+    for (const { proof, tokens } of sectionRules.proofs) {
       const normalized = normalize(proof);
-      if (!normalized) continue;
-      const tokens = significantTokens(proof);
       const uncovered =
         tokens.length === 0
           ? !haystack.includes(normalized)
