@@ -2586,6 +2586,15 @@
       "source_of_generation": null
     },
     {
+      "path": "src/build-intelligence/content-duplication.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
       "path": "src/build-intelligence/content-validator.ts",
       "owner": "seo-bot-runtime",
       "purpose": "SEO Bot runtime implementation",
@@ -3468,6 +3477,15 @@
       "source_of_generation": null
     },
     {
+      "path": "tests/build-intelligence/content-duplication.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
       "path": "tests/build-intelligence/deepseek-llm.test.ts",
       "owner": "quality",
       "purpose": "Automated behavioral and assurance tests",
@@ -4332,5 +4350,5 @@
       "source_of_generation": null
     }
   ],
-  "inventory_digest": "efc01bc6d2ae3f7a4fda9ac5d68478be23368384e6feb249a7f872965f35b339"
+  "inventory_digest": "9d447e220c37316140dc87cccfe20e41cf66d2ebddf35306c1bb675fd3f1a78c"
 }
