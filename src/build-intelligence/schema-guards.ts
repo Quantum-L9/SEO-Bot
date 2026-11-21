@@ -28,6 +28,7 @@ import { z } from "zod";
 import {
   keyPlacements,
   type OutputShapeHints,
+  renderOutputRules,
   renderOutputShape,
 } from "./output-shape-renderer.js";
 
@@ -319,12 +320,17 @@ export const STRUCTURED_CONTENT_OUTPUT_CONTRACT = [
   "Rules:",
   "- sections: exactly one object per contract section_id, same ids, contract order.",
   `- A section may carry ONLY these keys: ${STRUCTURED_CONTENT_SECTION_KEYS.join(", ")}. No other key, ever.`,
-  `- blocks: array of ONE kind per entry (kind is one of: ${STRUCTURED_CONTENT_BLOCK_KINDS.join(", ")}) — the ONLY place section prose lives.`,
+  `- blocks: array of ONE kind per entry (kind is exactly one of: ${STRUCTURED_CONTENT_BLOCK_KINDS.join(", ")}) — the ONLY place section prose lives. The example shows one block of each kind.`,
   "- FAQ question/answer pairs belong ONLY in the route-level `faqs` array, never inside a section.",
   "  A section whose section_id is an FAQ section (e.g. faq) still carries only the allowed section",
   `  keys: blocks (intro prose, or []), plus optional ${optionalSectionKeys.join(", ")}.`,
   "  Never put a faqs key on a section.",
   "- internal_links: include every required internal-link target.",
+  ...renderOutputRules(structuredContentRouteSchema, STRUCTURED_CONTENT_HINTS).map(
+    (rule) => `- ${rule}`,
+  ),
+  'Copy every non-string value exactly as shown (for example "kind": "paragraph"); write',
+  'your content only over the "string" placeholders.',
   "FORBIDDEN field aliases: content, body, copy, html, paragraphs. Section prose exists",
   "exclusively inside blocks. sections[].blocks is REQUIRED on EVERY section — never",
   "omit it, not even on the last section; a section with nothing to say still",

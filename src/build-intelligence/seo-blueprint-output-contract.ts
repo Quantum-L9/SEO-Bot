@@ -19,22 +19,27 @@
  * field that exists — an unknown hint path throws, so a renamed or removed
  * field cannot leave stale guidance behind.
  *
- * Rendered leaf grammar (deterministic, parsed back by the conformance tests):
- *   "string" | "string[]" | "boolean" | "number" | "one of: a | b" |
- *   "array of (a | b)"   optionally followed by " — <hint>".
- * Objects render as objects; arrays of objects render as a one-element array.
+ * The rendered shape is an example document a model can copy verbatim (see
+ * output-shape-renderer.ts for the grammar). Allowed enum values and hints on
+ * non-string fields travel in each contract's `rules`.
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
 import { z } from "zod";
-import { type OutputShapeHints, renderOutputShape } from "./output-shape-renderer.js";
+import {
+  type OutputShapeHints,
+  renderOutputRules,
+  renderOutputShape,
+} from "./output-shape-renderer.js";
 import { globalRouteIntentRouteSchema, seoContentBlueprintRoutesSchema } from "./schema-guards.js";
 
 export {
   OUTPUT_SHAPE_HINT_SEPARATOR,
   OutputContractDriftError,
   type OutputShapeHints,
+  renderOutputRules,
   renderOutputShape,
+  STRING_PLACEHOLDER,
 } from "./output-shape-renderer.js";
 
 /* ── Global route intent plan (Phase A) ──────────────────────────────────────── */
@@ -56,9 +61,14 @@ const GLOBAL_INTENT_HINTS: OutputShapeHints = {
   },
 };
 
-export function globalIntentOutputContract(): { shape: unknown; note: string } {
+export function globalIntentOutputContract(): {
+  shape: unknown;
+  rules: string[];
+  note: string;
+} {
   return {
     shape: renderOutputShape(globalRouteIntentPlanSchema, GLOBAL_INTENT_HINTS),
+    rules: renderOutputRules(globalRouteIntentPlanSchema, GLOBAL_INTENT_HINTS),
     note:
       'Return a single JSON object whose only top-level key is "routes": exactly one entry per ' +
       "route_id above, in the requested order. No other fields. Every primary_query must be " +
@@ -104,11 +114,18 @@ const BATCH_ROUTE_HINTS: OutputShapeHints = {
 export function batchOutputContract(): {
   container: unknown;
   route_shape: unknown;
+  rules: string[];
   content_slots: readonly string[];
 } {
   return {
     container: renderOutputShape(seoContentBlueprintRoutesSchema, BATCH_CONTAINER_HINTS),
     route_shape: renderOutputShape(seoContentBlueprintRouteSchema, BATCH_ROUTE_HINTS),
+    rules: [
+      ...renderOutputRules(seoContentBlueprintRoutesSchema, BATCH_CONTAINER_HINTS),
+      ...renderOutputRules(seoContentBlueprintRouteSchema, BATCH_ROUTE_HINTS).map(
+        (rule) => `route_shape.${rule}`,
+      ),
+    ],
     content_slots: SEO_BLUEPRINT_CONTENT_SLOTS,
   };
 }

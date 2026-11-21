@@ -1026,7 +1026,7 @@ describe("StructuredContentPackage — blocks-union output contract (schema regr
     expect(systemPrompts).toHaveLength(1);
     // The shape is rendered from the schema: every block kind of the union is taught.
     for (const kind of ["paragraph", "bullets", "steps", "quote"]) {
-      expect(systemPrompts[0]).toContain(`"kind": "literal: ${kind}"`);
+      expect(systemPrompts[0]).toContain(`"kind": "${kind}"`);
     }
     expect(systemPrompts[0]).toContain(
       "FORBIDDEN field aliases: content, body, copy, html, paragraphs",

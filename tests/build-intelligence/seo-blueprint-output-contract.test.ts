@@ -13,6 +13,7 @@ import {
   globalIntentOutputContract,
   globalRouteIntentPlanSchema,
   OutputContractDriftError,
+  renderOutputRules,
   renderOutputShape,
   SEO_BLUEPRINT_CONTENT_SLOTS,
 } from "../../src/build-intelligence/seo-blueprint-output-contract.js";
@@ -66,16 +67,27 @@ describe("renderOutputShape — the prompt shape is generated from the parsing s
     expect(() => renderOutputShape(z.object({ when: z.date() }))).toThrow(OutputContractDriftError);
   });
 
-  it("renders optional leaves and hints in the documented grammar", () => {
-    const rendered = renderOutputShape(
-      z.object({ a: z.string().optional(), b: z.enum(["x", "y"]), c: z.array(z.string()) }),
-      { b: "pick one" },
-    );
-    expect(rendered).toEqual({
-      a: "string (optional)",
-      b: "one of: x | y — pick one",
-      c: "string[]",
+  it("renders copyable values; allowed values and non-string hints go to the rules", () => {
+    const schema = z.object({
+      a: z.string().optional(),
+      b: z.enum(["x", "y"]),
+      c: z.array(z.string()),
+      d: z.boolean(),
+      e: z.literal("fixed"),
     });
+    expect(renderOutputShape(schema, { b: "pick one" })).toEqual({
+      a: "string (optional)",
+      b: "x",
+      c: ["string"],
+      d: true,
+      e: "fixed",
+    });
+    expect(renderOutputRules(schema, { b: "pick one" })).toEqual([
+      "b: exactly one of: x, y.",
+      "b: pick one.",
+      'e: always exactly "fixed".',
+      "Optional fields (may be omitted; never add other keys): a.",
+    ]);
   });
 });
 

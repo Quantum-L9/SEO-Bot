@@ -16,13 +16,23 @@
  * plan, valid internal-link targets, no gaps without market research).
  */
 
-const SEPARATOR = " — ";
+/**
+ * Prefix of every string placeholder in a rendered contract. A faithful model
+ * writes content only over these; every other value is copied verbatim.
+ */
+const PLACEHOLDER = "string";
 
-/** Synthesize a value that satisfies a rendered output shape. */
+/**
+ * Synthesize a reply from a rendered output shape the way a model that copies
+ * the contract would: structure, booleans, numbers and every exact value
+ * (enum options, discriminators) are copied VERBATIM; only string
+ * placeholders are written over, with `seed` text. It never translates
+ * descriptive text into a value. A contract that describes a value instead of
+ * showing it therefore fails here exactly as it fails a real model.
+ */
 export function exampleFromOutputShape(shape: unknown, seed = "example"): unknown {
   if (Array.isArray(shape)) {
-    if (shape.length !== 1) throw new Error("rendered array shapes carry exactly one element");
-    return [exampleFromOutputShape(shape[0], seed)];
+    return shape.map((element) => exampleFromOutputShape(element, seed));
   }
   if (shape !== null && typeof shape === "object") {
     return Object.fromEntries(
@@ -32,16 +42,8 @@ export function exampleFromOutputShape(shape: unknown, seed = "example"): unknow
       ]),
     );
   }
-  if (typeof shape !== "string") throw new Error(`unexpected shape node: ${String(shape)}`);
-  const type = shape.split(SEPARATOR)[0]!.replace(/ \(optional\)$/, "");
-  if (type === "string") return seed;
-  if (type === "string[]") return [seed];
-  if (type === "boolean") return true;
-  if (type === "number") return 1;
-  if (type.startsWith("one of: ")) return type.slice("one of: ".length).split(" | ")[0];
-  const arrayOf = /^array of \((.+)\)$/.exec(type);
-  if (arrayOf) return [arrayOf[1]!.split(" | ")[0]];
-  throw new Error(`unrecognized rendered leaf type: "${type}"`);
+  if (typeof shape === "string" && shape.startsWith(PLACEHOLDER)) return seed;
+  return shape;
 }
 
 interface IntentEntry {

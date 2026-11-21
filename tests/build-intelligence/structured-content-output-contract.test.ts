@@ -164,24 +164,21 @@ function renderedShape(contract: string): Record<string, unknown> {
   return JSON.parse(contract.slice(start, end)) as Record<string, unknown>;
 }
 
-const leafKind = (leaf: string): string => leaf.split(" — ")[0]?.replace(" (optional)", "") ?? "";
-
-/** Instantiate a value from a rendered shape node, filling text with `prose`. */
+/**
+ * Instantiate a reply from a rendered shape as a faithful model would: every
+ * non-placeholder value (structure, booleans, discriminators) is copied
+ * VERBATIM, and only "string…" placeholders are written over with `prose`. It
+ * never translates descriptive text into a value.
+ */
 function instantiate(node: unknown, prose: string): unknown {
-  if (typeof node === "string") {
-    const kind = leafKind(node);
-    if (kind.startsWith("literal: ")) return kind.slice("literal: ".length);
-    if (kind === "string") return prose;
-    if (kind === "string[]") return [prose];
-    if (kind === "boolean") return true;
-    throw new Error(`fake model cannot instantiate leaf ${node}`);
+  if (Array.isArray(node)) return node.map((element) => instantiate(element, prose));
+  if (node !== null && typeof node === "object") {
+    return Object.fromEntries(
+      Object.entries(node).map(([key, child]) => [key, instantiate(child, prose)]),
+    );
   }
-  if (Array.isArray(node)) return [instantiate(node[0], prose)];
-  const object = node as Record<string, unknown>;
-  if ("one of" in object) return instantiate((object["one of"] as unknown[])[0], prose);
-  return Object.fromEntries(
-    Object.entries(object).map(([key, child]) => [key, instantiate(child, prose)]),
-  );
+  if (typeof node === "string" && node.startsWith("string")) return prose;
+  return node;
 }
 
 interface RoutePrompt {
