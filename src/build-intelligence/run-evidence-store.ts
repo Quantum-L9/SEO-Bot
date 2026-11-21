@@ -24,9 +24,21 @@
 
 import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { DirectProviderBypassEvidence, LlmRunRecorder } from "../services/llm-run-recorder.js";
+import type {
+  DirectProviderBypassEvidence,
+  LlmRunRecorder,
+  ProviderAttemptReceipt,
+} from "../services/llm-run-recorder.js";
 import type { RecordedAuditCall } from "./llm-audit.js";
 import { PRODUCER } from "./producer.js";
+import {
+  assertProviderAttempts,
+  PROVIDER_ATTEMPTS_SCHEMA,
+  type ProviderAttemptsV1,
+  type ProviderLegFailure,
+  spendOf,
+  unpricedCountOf,
+} from "./provider-attempts.js";
 import {
   assertRunLlmAudit,
   RUN_LLM_AUDIT_SCHEMA,
@@ -314,9 +326,93 @@ function assembleRunLlmAudit(target: RunRecord): RunLlmAuditV1 {
   });
 }
 
+/* ── Provider attempt ledger (l9.seo-bot-provider-attempts/v1) ──────────────────
+ * Kept apart from the audit records above: a leg that FAILED still spent
+ * provider attempts, and those are recorded here, while the v1 audit keeps
+ * describing successful legs only. Same run id, same capacity bound.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+interface AttemptLedger {
+  run_id: string;
+  client_id: string;
+  build_id: string;
+  updated_at: string;
+  attempts: ProviderAttemptReceipt[];
+  leg_failures: ProviderLegFailure[];
+}
+
+const attemptLedgers = new Map<string, AttemptLedger>();
+
+function ledgerFor(clientId: string, buildId: string, now: string): AttemptLedger {
+  const runId = runIdFor(clientId, buildId);
+  const existing = attemptLedgers.get(runId);
+  if (existing) {
+    existing.updated_at = now;
+    return existing;
+  }
+  const created: AttemptLedger = {
+    run_id: runId,
+    client_id: clientId,
+    build_id: buildId,
+    updated_at: now,
+    attempts: [],
+    leg_failures: [],
+  };
+  attemptLedgers.set(runId, created);
+  while (attemptLedgers.size > RUN_EVIDENCE_CAPACITY) {
+    const oldest = attemptLedgers.keys().next();
+    if (oldest.done) break;
+    attemptLedgers.delete(oldest.value);
+  }
+  return created;
+}
+
+/**
+ * Record a leg's provider attempts, whatever the leg's outcome. A failed leg
+ * also records which typed failure ended it. Attempts are de-duplicated by
+ * attempt id, so recording the same recorder twice never double-counts spend.
+ */
+export function recordProviderAttempts(input: {
+  client_id: string;
+  build_id: string;
+  recorder: LlmRunRecorder;
+  failure?: ProviderLegFailure;
+  now?: string;
+}): string {
+  const ledger = ledgerFor(input.client_id, input.build_id, input.now ?? new Date().toISOString());
+  const seen = new Set(ledger.attempts.map((entry) => entry.attempt_id));
+  for (const receipt of input.recorder.providerAttemptReceipts()) {
+    if (seen.has(receipt.attempt_id)) continue;
+    seen.add(receipt.attempt_id);
+    ledger.attempts.push(receipt);
+  }
+  if (input.failure) ledger.leg_failures.push({ ...input.failure });
+  return ledger.run_id;
+}
+
+/** The run's provider attempts, validated fail-closed, or null when unknown. */
+export function getRunProviderAttempts(runId: string): ProviderAttemptsV1 | null {
+  const ledger = attemptLedgers.get(runId);
+  if (!ledger) return null;
+  const attempts = ledger.attempts.map((entry) => ({ ...entry }));
+  return assertProviderAttempts({
+    schema: PROVIDER_ATTEMPTS_SCHEMA,
+    run_id: ledger.run_id,
+    client_id: ledger.client_id,
+    build_id: ledger.build_id,
+    produced_at: ledger.updated_at,
+    attempt_count: attempts.length,
+    attempts,
+    spend_usd: spendOf(attempts),
+    unpriced_attempt_count: unpricedCountOf(attempts),
+    leg_failures: ledger.leg_failures.map((entry) => ({ ...entry })),
+  });
+}
+
 /** Test-only: drop every retained run. */
 export function _resetRunEvidenceStore(): void {
   runs.clear();
+  attemptLedgers.clear();
   clearFailedSerpRefusals();
 }
 

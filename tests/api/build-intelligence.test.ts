@@ -99,6 +99,9 @@ vi.mock("../../src/build-intelligence/seo-content-blueprint.js", () => ({
   SeoContentBlueprintInvalidError: class extends Error {
     code = "SEO_CONTENT_BLUEPRINT_INVALID";
   },
+  SeoContentBlueprintBatchInvalidError: class extends Error {
+    code = "SEO_CONTENT_BLUEPRINT_BATCH_INVALID";
+  },
 }));
 vi.mock("../../src/build-intelligence/structured-content.js", () => ({
   createStructuredContentPackageWithEvidence: vi.fn(),

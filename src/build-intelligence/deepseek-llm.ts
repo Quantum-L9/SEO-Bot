@@ -16,7 +16,12 @@ import {
   parseJsonFromLlm,
 } from "../services/llm-parse.js";
 import { LLM_PROVIDER_TIMEOUT_MS } from "../services/llm-provider-timeout.js";
-import type { LlmRunRecorder, OperationAttempt } from "../services/llm-run-recorder.js";
+import type {
+  LlmRunRecorder,
+  OperationAttempt,
+  ProviderAttemptOutcome,
+  ProviderAttemptReceipt,
+} from "../services/llm-run-recorder.js";
 import {
   clearSpendLedger,
   type DirectSpendCeilings,
@@ -39,14 +44,108 @@ const DEEPSEEK_PEAK_PRICING: Readonly<
   "deepseek-v4-pro": { inputPerMTok: 1.32, outputPerMTok: 3.96 },
 };
 
+/**
+ * DeepSeek pricing basis recorded on every attempt receipt: cost is computed
+ * from the provider-reported usage at the peak table above, so it is an upper
+ * bound that anyone can recompute from the receipt's own token counts.
+ */
+export const DEEPSEEK_PRICING_BASIS = "deepseek-peak-per-mtok";
+
+/**
+ * Build-intelligence operations this client serves. Each one has exactly one
+ * typed provider policy below; an operation without a policy is refused before
+ * dispatch.
+ */
+export type BuildIntelligenceOperation =
+  | "SEO_CONTENT_BLUEPRINT"
+  | "STRUCTURED_CONTENT_GENERATION"
+  | "CONTENT_VALIDATION";
+
+/**
+ * Per-operation provider policy. Every DeepSeek request states its thinking
+ * mode explicitly from here. Nothing relies on the provider default, which
+ * enables thinking at reasoning_effort high when the request sets neither
+ * `thinking` nor `reasoning_effort`. Reasoning tokens then consume the output
+ * budget of a structured reply.
+ *
+ * DeepSeek chat-completions request fields used (api-docs.deepseek.com,
+ * create-chat-completion): `thinking: { type: "enabled" | "disabled" }`, which
+ * takes precedence over `reasoning_effort`, and
+ * `response_format: { type: "json_object" }`.
+ */
+export interface DeepSeekProviderPolicy {
+  /** Stable name recorded on every attempt receipt. */
+  readonly name: string;
+  readonly responseFormat: "json_object";
+  readonly thinking: "enabled" | "disabled";
+}
+
+/** Structured JSON output: thinking off, so the whole budget is the reply. */
+export const STRUCTURED_JSON_NO_THINKING: DeepSeekProviderPolicy = Object.freeze({
+  name: "structured-json/thinking-disabled@1",
+  responseFormat: "json_object",
+  thinking: "disabled",
+});
+
+export const DEEPSEEK_PROVIDER_POLICIES: Readonly<
+  Record<BuildIntelligenceOperation, DeepSeekProviderPolicy>
+> = Object.freeze({
+  SEO_CONTENT_BLUEPRINT: STRUCTURED_JSON_NO_THINKING,
+  STRUCTURED_CONTENT_GENERATION: STRUCTURED_JSON_NO_THINKING,
+  CONTENT_VALIDATION: STRUCTURED_JSON_NO_THINKING,
+});
+
+/** The policy for an operation, or null when it has none (refused, never defaulted). */
+export function providerPolicyFor(operation: string): DeepSeekProviderPolicy | null {
+  return Object.hasOwn(DEEPSEEK_PROVIDER_POLICIES, operation)
+    ? DEEPSEEK_PROVIDER_POLICIES[operation as BuildIntelligenceOperation]
+    : null;
+}
+
+/** The DeepSeek request-body fields a policy fixes. */
+export function policyRequestFields(policy: DeepSeekProviderPolicy): {
+  response_format: { type: "json_object" };
+  thinking: { type: "enabled" | "disabled" };
+} {
+  return {
+    response_format: { type: policy.responseFormat },
+    thinking: { type: policy.thinking },
+  };
+}
+
+/**
+ * The batch a purpose names: `global-intent`, `batch-N`, or null. The
+ * blueprint producer's purposes are `seo-content-blueprint:global-intent:<build>`
+ * and `seo-content-blueprint:batch-<n>:<build>`.
+ */
+export function batchFromPurpose(purpose: string): string | null {
+  const batch = /(?:^|:)batch-(\d+)(?::|$)/.exec(purpose);
+  if (batch) return `batch-${batch[1]}`;
+  if (/(?:^|:)global-intent(?::|$)/.test(purpose)) return "global-intent";
+  return null;
+}
+
+/** Where a typed provider failure happened, carried to the API response. */
+export interface ProviderFailureSite {
+  operation: string;
+  purpose: string;
+  batch: string | null;
+  attempt: OperationAttempt;
+}
+
 export class ProviderRequestError extends Error {
+  readonly code: string = "PROVIDER_NOT_CONFIGURED";
+  site?: ProviderFailureSite;
   constructor(message: string) {
     super(message);
     this.name = "ProviderRequestError";
   }
 }
 
+/** The spend ledger refused the reservation; nothing was dispatched. */
 export class BudgetExhaustedError extends Error {
+  readonly code = "SPEND_CAP_REFUSED";
+  site?: ProviderFailureSite;
   constructor(message: string) {
     super(message);
     this.name = "BudgetExhaustedError";
@@ -54,6 +153,8 @@ export class BudgetExhaustedError extends Error {
 }
 
 export class TaskValidationError extends Error {
+  readonly code = "PROVIDER_NOT_CONFIGURED";
+  site?: ProviderFailureSite;
   constructor(message: string) {
     super(message);
     this.name = "TaskValidationError";
@@ -66,12 +167,49 @@ const OUTPUT_CEILING = 16_000;
  * callers that treat provider failures as terminal keep doing so.
  */
 export class DeepSeekTransportError extends ProviderRequestError {
-  readonly code = "DEEPSEEK_TRANSPORT_ERROR";
+  override readonly code = "DEEPSEEK_TRANSPORT_ERROR";
   constructor(message: string) {
     super(message);
     this.name = "DeepSeekTransportError";
   }
 }
+/**
+ * A DeepSeek reply stopped at its output cap. Same code and contract as
+ * `LlmOutputTruncatedError` (never parsed, never repaired), plus the token
+ * measurements that show where the budget went.
+ */
+export class DeepSeekOutputTruncatedError extends LlmOutputTruncatedError {
+  readonly site: ProviderFailureSite;
+  readonly promptTokens: number | null;
+  readonly reasoningTokens: number | null;
+  readonly policy: string;
+  constructor(details: {
+    site: ProviderFailureSite;
+    maxOutputTokens: number;
+    outputTokens: number;
+    promptTokens: number | null;
+    reasoningTokens: number | null;
+    finishReason: string | null | undefined;
+    responseLength: number;
+    policy: string;
+  }) {
+    super({
+      operation: details.site.operation,
+      purpose: details.site.purpose,
+      attempt: details.site.attempt,
+      maxOutputTokens: details.maxOutputTokens,
+      outputTokens: details.outputTokens,
+      finishReason: details.finishReason,
+      responseLength: details.responseLength,
+    });
+    this.name = "DeepSeekOutputTruncatedError";
+    this.site = details.site;
+    this.promptTokens = details.promptTokens;
+    this.reasoningTokens = details.reasoningTokens;
+    this.policy = details.policy;
+  }
+}
+
 const DEFAULT_OUTPUT_TOKENS: Record<string, number> = {
   SEO_CONTENT_BLUEPRINT: 5_000,
   STRUCTURED_CONTENT_GENERATION: 12_000,
@@ -94,7 +232,10 @@ export interface BuildIntelligenceLlmArgs<T> {
 
 export interface BuildIntelligenceLlm {
   strategizeJson<T>(args: BuildIntelligenceLlmArgs<T>): Promise<T>;
-  executePolicyJson<T>(operation: string, args: BuildIntelligenceLlmArgs<T>): Promise<T>;
+  executePolicyJson<T>(
+    operation: BuildIntelligenceOperation,
+    args: BuildIntelligenceLlmArgs<T>,
+  ): Promise<T>;
 }
 
 type Transport = (url: string, init: RequestInit) => Promise<Response>;
@@ -104,7 +245,15 @@ interface Completion {
     finish_reason?: string;
     message?: { content?: string };
   }>;
-  usage?: { completion_tokens?: number };
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    completion_tokens_details?: { reasoning_tokens?: number };
+  };
+}
+
+function reportedCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
 }
 
 interface DeepSeekSettings {
@@ -191,6 +340,19 @@ function settingsFromConfig(): DeepSeekSettings {
   );
 }
 
+/** Price a receipt from provider-reported usage; null when usage is missing. */
+function attemptCost(
+  model: string,
+  promptTokens: number | null,
+  completionTokens: number | null,
+): number | null {
+  const pricing = DEEPSEEK_PEAK_PRICING[model];
+  if (!pricing || promptTokens === null || completionTokens === null) return null;
+  return (
+    (promptTokens * pricing.inputPerMTok + completionTokens * pricing.outputPerMTok) / 1_000_000
+  );
+}
+
 export function createDeepSeekBuildIntelligenceLlm(options?: {
   env?: NodeJS.ProcessEnv;
   transport?: Transport;
@@ -214,27 +376,94 @@ export function createDeepSeekBuildIntelligenceLlm(options?: {
       )
     : settingsFromConfig();
 
+  function record(args: BuildIntelligenceLlmArgs<unknown>, receipt: ProviderAttemptReceipt): void {
+    args.recorder?.recordProviderAttempt(receipt);
+  }
+
+  interface Attempt {
+    content: string;
+    receipt: ProviderAttemptReceipt;
+  }
+
+  /**
+   * One provider attempt. Every exit records exactly one receipt, except a
+   * reply that came back usable: its receipt is returned unrecorded so the
+   * caller can record the schema outcome once it has validated the reply.
+   */
   async function complete(
     operation: string,
+    policy: DeepSeekProviderPolicy,
     args: BuildIntelligenceLlmArgs<unknown>,
     userPrompt: string,
     maxOutputTokens: number,
     attempt: OperationAttempt,
-  ): Promise<{ content: string; finishReason: string; outputTokens: number }> {
+  ): Promise<Attempt> {
+    const site: ProviderFailureSite = {
+      operation,
+      purpose: args.purpose,
+      batch: batchFromPurpose(args.purpose),
+      attempt,
+    };
+    const base: ProviderAttemptReceipt = {
+      attempt_id: randomUUID(),
+      operation,
+      purpose: args.purpose,
+      batch: site.batch,
+      attempt,
+      provider: DEEPSEEK_PROVIDER,
+      model: settings.model,
+      policy: policy.name,
+      max_tokens: maxOutputTokens,
+      dispatched: false,
+      finish_reason: null,
+      prompt_tokens: null,
+      completion_tokens: null,
+      reasoning_tokens: null,
+      // Not dispatched: nothing was spent, which is known rather than assumed.
+      cost_usd: 0,
+      pricing_basis: DEEPSEEK_PRICING_BASIS,
+      outcome: "PROVIDER_NOT_CONFIGURED",
+    };
+    const refuse = (error: ProviderRequestError | TaskValidationError | BudgetExhaustedError) => {
+      error.site = site;
+      record(args, {
+        ...base,
+        outcome: error instanceof BudgetExhaustedError ? "SPEND_CAP_REFUSED" : base.outcome,
+      });
+      return error;
+    };
     if (!settings.apiKey) {
-      throw new ProviderRequestError("Missing required LLM configuration: DEEPSEEK_API_KEY");
+      throw refuse(
+        new ProviderRequestError("Missing required LLM configuration: DEEPSEEK_API_KEY"),
+      );
     }
     const pricing = DEEPSEEK_PEAK_PRICING[settings.model];
     if (!pricing) {
-      throw new TaskValidationError(
-        `DEEPSEEK_MODEL ${settings.model} has no verified pricing; not dispatched`,
+      throw refuse(
+        new TaskValidationError(
+          `DEEPSEEK_MODEL ${settings.model} has no verified pricing; not dispatched`,
+        ),
       );
     }
     const inputBound =
       Buffer.byteLength(args.systemPrompt, "utf8") + Buffer.byteLength(userPrompt, "utf8");
     const reservation =
       (inputBound * pricing.inputPerMTok + maxOutputTokens * pricing.outputPerMTok) / 1_000_000;
-    reserveSpend(ledgerDir, args, settings.ceilings, reservation, now());
+    try {
+      reserveSpend(ledgerDir, args, settings.ceilings, reservation, now());
+    } catch (error) {
+      if (error instanceof BudgetExhaustedError) throw refuse(error);
+      throw error;
+    }
+    // From here the request is dispatched. A transport failure leaves the
+    // provider's charge unknown, so its cost is null, not 0.
+    const dispatched: ProviderAttemptReceipt = { ...base, dispatched: true, cost_usd: null };
+    const transportFailure = (message: string) => {
+      record(args, { ...dispatched, outcome: "TRANSPORT_ERROR" });
+      const error = new DeepSeekTransportError(message);
+      error.site = site;
+      return error;
+    };
     let response: Response;
     try {
       response = await transport(`${settings.baseUrl}/chat/completions`, {
@@ -251,24 +480,43 @@ export function createDeepSeekBuildIntelligenceLlm(options?: {
             { role: "user", content: userPrompt },
           ],
           max_tokens: maxOutputTokens,
-          response_format: { type: "json_object" },
+          ...policyRequestFields(policy),
           stream: false,
         }),
         signal: AbortSignal.timeout(LLM_PROVIDER_TIMEOUT_MS),
       });
     } catch (error) {
-      throw new DeepSeekTransportError(
+      throw transportFailure(
         `DeepSeek request failed for ${operation} (${error instanceof Error ? error.name : "error"})`,
       );
     }
     if (!response.ok) {
-      throw new DeepSeekTransportError(`DeepSeek HTTP ${response.status} for ${operation}`);
+      throw transportFailure(`DeepSeek HTTP ${response.status} for ${operation}`);
     }
-    const completion = (await response.json()) as Completion;
+    let completion: Completion;
+    try {
+      completion = (await response.json()) as Completion;
+    } catch {
+      throw transportFailure(`DeepSeek returned a non-JSON body for ${operation}`);
+    }
     const choice = completion.choices?.[0];
     const content = choice?.message?.content ?? "";
     const finishReason = choice?.finish_reason ?? "missing";
-    const outputTokens = completion.usage?.completion_tokens ?? 0;
+    const promptTokens = reportedCount(completion.usage?.prompt_tokens);
+    const completionTokens = reportedCount(completion.usage?.completion_tokens);
+    const reasoningTokens = reportedCount(
+      completion.usage?.completion_tokens_details?.reasoning_tokens,
+    );
+    const outputTokens = completionTokens ?? 0;
+    const measured: ProviderAttemptReceipt = {
+      ...dispatched,
+      finish_reason: choice?.finish_reason ?? null,
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      reasoning_tokens: reasoningTokens,
+      cost_usd: attemptCost(settings.model, promptTokens, completionTokens),
+      outcome: "OK",
+    };
     if (args.callCounter) args.callCounter.value += 1;
     args.recorder?.attributeOperationCall({
       operation,
@@ -277,7 +525,7 @@ export function createDeepSeekBuildIntelligenceLlm(options?: {
       descriptorRequiresSearch: false,
       decisions: [
         {
-          taskId: randomUUID(),
+          taskId: measured.attempt_id,
           provider: DEEPSEEK_PROVIDER,
           model: settings.model,
           searchRequired: false,
@@ -288,17 +536,36 @@ export function createDeepSeekBuildIntelligenceLlm(options?: {
       response: { provider: DEEPSEEK_PROVIDER },
     });
     if (isTruncatedFinish(finishReason, outputTokens, maxOutputTokens)) {
-      throw new LlmOutputTruncatedError({
-        operation,
-        purpose: args.purpose,
-        attempt,
+      record(args, { ...measured, outcome: "OUTPUT_TRUNCATED" });
+      throw new DeepSeekOutputTruncatedError({
+        site,
         maxOutputTokens,
         outputTokens,
+        promptTokens,
+        reasoningTokens,
         finishReason,
         responseLength: content.length,
+        policy: policy.name,
       });
     }
-    return { content, finishReason, outputTokens };
+    return { content, receipt: measured };
+  }
+
+  /** Validate one reply and record its attempt with the schema outcome. */
+  function settle<T>(
+    args: BuildIntelligenceLlmArgs<T>,
+    result: Attempt,
+  ): { ok: true; value: T } | { ok: false; error: unknown } {
+    let outcome: ProviderAttemptOutcome = "OK";
+    try {
+      const value = args.validate(parseJsonFromLlm(result.content));
+      return { ok: true, value };
+    } catch (error) {
+      outcome = "SCHEMA_INVALID";
+      return { ok: false, error };
+    } finally {
+      record(args as BuildIntelligenceLlmArgs<unknown>, { ...result.receipt, outcome });
+    }
   }
 
   const client: BuildIntelligenceLlm = {
@@ -306,19 +573,39 @@ export function createDeepSeekBuildIntelligenceLlm(options?: {
       return client.executePolicyJson("SEO_CONTENT_BLUEPRINT", args);
     },
     async executePolicyJson(operation, args) {
+      const policy = providerPolicyFor(operation);
+      if (!policy) {
+        const error = new TaskValidationError(
+          `operation ${String(operation)} has no DeepSeek provider policy; not dispatched`,
+        );
+        error.site = {
+          operation: String(operation),
+          purpose: args.purpose,
+          batch: batchFromPurpose(args.purpose),
+          attempt: "initial",
+        };
+        throw error;
+      }
       const repairAttempts = args.schemaRepairAttempts ?? 1;
       const requested = args.expectedOutputTokens ?? DEFAULT_OUTPUT_TOKENS[operation] ?? 2_500;
       const maxOutputTokens = Math.min(OUTPUT_CEILING, Math.max(1, requested));
-      const first = await complete(operation, args, args.userPrompt, maxOutputTokens, "initial");
-      try {
-        return args.validate(parseJsonFromLlm(first.content));
-      } catch (error) {
-        if (repairAttempts === 0 || error instanceof LlmOutputTruncatedError) throw error;
-        const reason = error instanceof Error ? error.message : String(error);
-        const repairPrompt = `${args.userPrompt}\n\n---\nYour previous response was rejected: ${reason}\nRespond again with ONLY a single valid JSON value. No prose, no markdown fences.`;
-        const second = await complete(operation, args, repairPrompt, maxOutputTokens, "repair");
-        return args.validate(parseJsonFromLlm(second.content));
-      }
+      const unknownArgs = args as BuildIntelligenceLlmArgs<unknown>;
+      const first = settle(
+        args,
+        await complete(operation, policy, unknownArgs, args.userPrompt, maxOutputTokens, "initial"),
+      );
+      if (first.ok) return first.value;
+      // The validator's own error is rethrown unchanged: callers tell a failed
+      // validation from a failed call by its identity.
+      if (repairAttempts === 0) throw first.error;
+      const reason = first.error instanceof Error ? first.error.message : String(first.error);
+      const repairPrompt = `${args.userPrompt}\n\n---\nYour previous response was rejected: ${reason}\nRespond again with ONLY a single valid JSON value. No prose, no markdown fences.`;
+      const second = settle(
+        args,
+        await complete(operation, policy, unknownArgs, repairPrompt, maxOutputTokens, "repair"),
+      );
+      if (second.ok) return second.value;
+      throw second.error;
     },
   };
   return client;
