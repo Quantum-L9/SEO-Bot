@@ -3702,6 +3702,15 @@
       "source_of_generation": null
     },
     {
+      "path": "tests/build-intelligence/structured-content-presentation-limits.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
       "path": "tests/build-intelligence/structured-content-repair-regression.test.ts",
       "owner": "quality",
       "purpose": "Automated behavioral and assurance tests",
@@ -4404,5 +4413,5 @@
       "source_of_generation": null
     }
   ],
-  "inventory_digest": "aa1fbc80815e9174e3ad501d0f947247635a2b9f21749449191cc3df39f96b70"
+  "inventory_digest": "e25dcb6dbbc335b3932fd34912df77afda6642c6f50dd1a235a7451298b29c26"
 }

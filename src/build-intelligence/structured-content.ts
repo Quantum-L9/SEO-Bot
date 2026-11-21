@@ -39,6 +39,7 @@ import { LlmOutputTruncatedError } from "../services/llm-parse.js";
 import type { LlmRunRecorder } from "../services/llm-run-recorder.js";
 import {
   buildFactCorpus,
+  type ClassifiedRequirementFailure,
   CREDENTIAL_CLAIM_TOKENS,
   checkRouteGrounding,
   classifyRequirementFailure,
@@ -46,6 +47,7 @@ import {
   MAGNITUDE_PHRASES,
   type RouteRequirementChecklist,
   routeRequirementChecklist,
+  SUBSTANCE_MIN_WORDS,
   unsatisfiedProofRequirements,
 } from "./claim-grounding.js";
 import {
@@ -923,6 +925,7 @@ export function renderRequirementChecklist(
       ? `A number in any claim about years, projects, clients, team size, response time, warranty term, price, rating or founding year must be one of: ${quoteList(checklist.verified_numbers)}.`
       : "Do not state any number of years, projects, clients, staff, response time, warranty term, price, rating or founding year: no verified fact supplies one.",
     "Never repeat a paragraph, list item or FAQ answer, and never restate a heading as body copy.",
+    `Short rendered fields have word limits: every internal_links[].anchor_text at most ${checklist.presentation_limits.anchor_text} words (it is a nav label); every sections[].eyebrow at most ${checklist.presentation_limits.eyebrow} words (it renders uppercase); every sections[].cta.label at most ${checklist.presentation_limits.cta_label} words (it is a button).`,
   ];
   if (checklist.internal_link_targets.length > 0) {
     route_instructions.push(
@@ -965,15 +968,118 @@ function inSections(sectionIds: readonly string[]): string {
  * deterministic validator does not emit (the semantic judge's) pass through
  * verbatim as their own evidence — never reinterpreted.
  */
+interface RepairTarget {
+  sectionIds: string[];
+  mustWrite: string[];
+  instruction: string;
+}
+
+function entityRepair(subject: string, checklist: RouteRequirementChecklist): RepairTarget {
+  const lower = subject.toLowerCase();
+  const sectionIds = sectionsRequiring(checklist, (s) =>
+    s.entities.some((entity) => entity.toLowerCase() === lower),
+  );
+  return {
+    sectionIds,
+    mustWrite: [subject],
+    instruction: `Write the exact phrase ${JSON.stringify(subject)} (case-insensitive) ${inSections(sectionIds)}, in a sentence that uses it naturally. A synonym or variant does not count.`,
+  };
+}
+
+function topicRepair(
+  subject: string,
+  missingTokens: readonly string[],
+  checklist: RouteRequirementChecklist,
+): RepairTarget {
+  const lower = subject.toLowerCase();
+  const sectionIds = sectionsRequiring(checklist, (s) =>
+    s.topics.some((topic) => topic.topic.toLowerCase() === lower),
+  );
+  return {
+    sectionIds,
+    mustWrite: [...missingTokens],
+    instruction: `Topic ${JSON.stringify(subject)} is missing these exact words: ${quoteList(missingTokens)}. Write each of them as written (a longer word that contains it also counts) ${inSections(sectionIds)}.`,
+  };
+}
+
+function thinSectionInstruction(
+  sectionId: string | undefined,
+  checklist: RouteRequirementChecklist,
+): string {
+  const rules = checklist.sections.find((s) => s.section_id === sectionId);
+  const minWords = rules?.min_words ?? SUBSTANCE_MIN_WORDS;
+  return rules?.is_faq
+    ? `FAQ section ${JSON.stringify(sectionId)}: its blocks plus the route's faqs must contain at least ${minWords} words. Add real faqs or intro prose.`
+    : `Section ${JSON.stringify(sectionId)} needs at least ${minWords} words of prose in its blocks.`;
+}
+
+function presentationRepair(classified: ClassifiedRequirementFailure): RepairTarget {
+  const field = classified.subject ?? "";
+  const section = /^sections\.([^.]+)\./.exec(field)?.[1];
+  return {
+    sectionIds: section ? [section] : [],
+    mustWrite: [],
+    instruction: `Shorten ${field} from ${classified.word_count} words to at most ${classified.limit} words. Rewrite it as a complete short phrase with the same meaning; do not cut it off mid-phrase.`,
+  };
+}
+
+function quantifiedClaimInstruction(subject: string, checklist: RouteRequirementChecklist): string {
+  return checklist.verified_numbers.length > 0
+    ? `Remove ${JSON.stringify(subject)} or restate it with only these verified numbers: ${quoteList(checklist.verified_numbers)}. Rewrite the sentence so it stays grammatical.`
+    : `Remove ${JSON.stringify(subject)}: no verified fact supplies a number. Rewrite the sentence so it stays grammatical.`;
+}
+
+/** The exact repair for one classified failure, from the same checklist. */
+function repairTarget(
+  classified: ClassifiedRequirementFailure,
+  checklist: RouteRequirementChecklist,
+): RepairTarget {
+  const subject = classified.subject ?? "";
+  const sectionIds = classified.section_id ? [classified.section_id] : [];
+  const only = (instruction: string): RepairTarget => ({ sectionIds, mustWrite: [], instruction });
+  switch (classified.kind) {
+    case "missing_entity":
+      return entityRepair(subject, checklist);
+    case "missing_topic":
+      return topicRepair(subject, classified.missing_tokens ?? [], checklist);
+    case "thin_section":
+      return only(thinSectionInstruction(classified.section_id, checklist));
+    case "missing_internal_link":
+      return only(`Add an internal link to route id ${JSON.stringify(subject)}.`);
+    case "missing_metadata":
+      return only(`Write a non-empty metadata.${subject}.`);
+    case "route_identity":
+    case "unexpected_section":
+    case "missing_section":
+      return only(
+        `Produce exactly these section_ids, in this order: ${quoteList(checklist.section_ids)}.`,
+      );
+    case "unsupported_quantified_claim":
+      return only(quantifiedClaimInstruction(subject, checklist));
+    case "unsupported_magnitude_claim":
+    case "unsupported_credential_claim":
+    case "forbidden_claim":
+    case "placeholder_content":
+    case "build_mechanics_in_copy":
+      return only(
+        `Remove every occurrence of ${JSON.stringify(subject)} and rewrite each affected sentence so it stays complete and grammatical.`,
+      );
+    case "presentation_limit":
+      return presentationRepair(classified);
+    case "duplicate_content":
+    case "heading_restated":
+      // The finding already names the exact location, the repeated text and
+      // what to do; it is the evidence.
+      return only(classified.message);
+  }
+}
+
 export function repairEvidence(
   failures: readonly string[],
   checklist: RouteRequirementChecklist,
 ): RepairEvidenceItem[] {
   const evidence: RepairEvidenceItem[] = [];
-  const seen = new Set<string>();
-  for (const failure of failures) {
-    if (seen.has(failure)) continue;
-    seen.add(failure);
+  for (const failure of new Set(failures)) {
     const classified = classifyRequirementFailure(failure);
     if (!classified) {
       evidence.push({
@@ -985,72 +1091,13 @@ export function repairEvidence(
       });
       continue;
     }
-    const subject = classified.subject ?? "";
-    const lower = subject.toLowerCase();
-    let sectionIds: string[] = classified.section_id ? [classified.section_id] : [];
-    let mustWrite: string[] = [];
-    let instruction: string;
-    switch (classified.kind) {
-      case "missing_entity":
-        sectionIds = sectionsRequiring(checklist, (s) =>
-          s.entities.some((entity) => entity.toLowerCase() === lower),
-        );
-        mustWrite = [subject];
-        instruction = `Write the exact phrase ${JSON.stringify(subject)} (case-insensitive) ${inSections(sectionIds)}, in a sentence that uses it naturally. A synonym or variant does not count.`;
-        break;
-      case "missing_topic": {
-        sectionIds = sectionsRequiring(checklist, (s) =>
-          s.topics.some((topic) => topic.topic.toLowerCase() === lower),
-        );
-        mustWrite = [...(classified.missing_tokens ?? [])];
-        instruction = `Topic ${JSON.stringify(subject)} is missing these exact words: ${quoteList(classified.missing_tokens ?? [])}. Write each of them as written (a longer word that contains it also counts) ${inSections(sectionIds)}.`;
-        break;
-      }
-      case "thin_section": {
-        const rules = checklist.sections.find((s) => s.section_id === classified.section_id);
-        const minWords = rules?.min_words ?? 10;
-        instruction = rules?.is_faq
-          ? `FAQ section ${JSON.stringify(classified.section_id)}: its blocks plus the route's faqs must contain at least ${minWords} words. Add real faqs or intro prose.`
-          : `Section ${JSON.stringify(classified.section_id)} needs at least ${minWords} words of prose in its blocks.`;
-        break;
-      }
-      case "missing_internal_link":
-        instruction = `Add an internal link to route id ${JSON.stringify(subject)}.`;
-        break;
-      case "missing_metadata":
-        instruction = `Write a non-empty metadata.${subject}.`;
-        break;
-      case "route_identity":
-      case "unexpected_section":
-      case "missing_section":
-        instruction = `Produce exactly these section_ids, in this order: ${quoteList(checklist.section_ids)}.`;
-        break;
-      case "unsupported_quantified_claim":
-        instruction =
-          checklist.verified_numbers.length > 0
-            ? `Remove ${JSON.stringify(subject)} or restate it with only these verified numbers: ${quoteList(checklist.verified_numbers)}. Rewrite the sentence so it stays grammatical.`
-            : `Remove ${JSON.stringify(subject)}: no verified fact supplies a number. Rewrite the sentence so it stays grammatical.`;
-        break;
-      case "unsupported_magnitude_claim":
-      case "unsupported_credential_claim":
-      case "forbidden_claim":
-      case "placeholder_content":
-      case "build_mechanics_in_copy":
-        instruction = `Remove every occurrence of ${JSON.stringify(subject)} and rewrite each affected sentence so it stays complete and grammatical.`;
-        break;
-      case "duplicate_content":
-      case "heading_restated":
-        // The finding already names the exact location, the repeated text and
-        // what to do; it is the evidence.
-        instruction = failure;
-        break;
-    }
+    const target = repairTarget(classified, checklist);
     evidence.push({
       failure,
       kind: classified.kind,
-      section_ids: sectionIds,
-      must_write: mustWrite,
-      instruction,
+      section_ids: target.sectionIds,
+      must_write: target.mustWrite,
+      instruction: target.instruction,
     });
   }
   return evidence;

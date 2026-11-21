@@ -307,8 +307,14 @@ export function checkRouteGrounding(
     }
   }
 
-  // 7. Required topics and entities are actually represented.
-  failures.push(...checkRequiredCoverage(route.route_id, checklist, haystack));
+  // 7. Presentation limits: short fields the renderer shows as nav labels,
+  //    uppercase eyebrows and buttons. A violation is reported with the exact
+  //    field and word count — never truncated.
+  // 8. Required topics and entities are actually represented.
+  failures.push(
+    ...checkPresentationLimits(route, checklist.presentation_limits),
+    ...checkRequiredCoverage(route.route_id, checklist, haystack),
+  );
 
   return { unsupportedClaims, failures };
 }
@@ -347,6 +353,54 @@ export function requiredEntitiesBySection(
 
 /** Words a section must carry before it counts as substantive content. */
 export const SUBSTANCE_MIN_WORDS = 10;
+
+/**
+ * Word limits for short fields, mirroring Website-Bot's blocking site-quality
+ * checker (src/validation/site-quality/checks.ts), which is the rendering
+ * authority. These are mirrored constants until the page-content contract
+ * carries them from Website-Bot.
+ */
+export const PRESENTATION_LIMITS = {
+  /** `internal_links[].anchor_text` renders as a nav label: nav-label-run-on, at most 5 words. */
+  anchor_text: 5,
+  /**
+   * `sections[].eyebrow` renders UPPERCASE: isTitleCaseRunOn flags 6+ letter
+   * tokens without sentence punctuation when ≥85% are capitalized, and
+   * uppercase always counts as capitalized — so at most 5 words.
+   */
+  eyebrow: 5,
+  /** `sections[].cta.label` renders as a non-link control (button): at most 8 words. */
+  cta_label: 8,
+} as const;
+
+export type PresentationLimits = { readonly [K in keyof typeof PRESENTATION_LIMITS]: number };
+
+/** Whitespace-separated words, as the renderer's checker counts them. */
+export function presentationWordCount(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+function checkPresentationLimits(
+  route: StructuredContentRoute,
+  limits: PresentationLimits,
+): string[] {
+  const failures: string[] = [];
+  const over = (field: string, text: string | undefined, limit: number): void => {
+    if (text === undefined) return;
+    const words = presentationWordCount(text);
+    if (words > limit) {
+      failures.push(`${route.route_id}: ${field} has ${words} words (limit ${limit})`);
+    }
+  };
+  route.internal_links.forEach((link, index) => {
+    over(`internal_links[${index}].anchor_text`, link.anchor_text, limits.anchor_text);
+  });
+  for (const section of route.sections) {
+    over(`sections.${section.section_id}.eyebrow`, section.eyebrow, limits.eyebrow);
+    over(`sections.${section.section_id}.cta.label`, section.cta?.label, limits.cta_label);
+  }
+  return failures;
+}
 
 /** A topic and the stemmed tokens the coverage check looks for, as substrings. */
 export interface TokenRequirement {
@@ -390,6 +444,8 @@ export interface RouteRequirementChecklist {
   ungrounded_magnitude_phrases: string[];
   /** The only numbers a quantified claim may assert. */
   verified_numbers: string[];
+  /** Word limits for short rendered fields (Website-Bot site-quality rules). */
+  presentation_limits: PresentationLimits;
 }
 
 export function routeRequirementChecklist(
@@ -425,6 +481,7 @@ export function routeRequirementChecklist(
     ungrounded_claim_tokens: CREDENTIAL_CLAIM_TOKENS.filter((token) => !corpus.includes(token)),
     ungrounded_magnitude_phrases: MAGNITUDE_PHRASES.filter((phrase) => !corpus.includes(phrase)),
     verified_numbers: [...factNumbers(contractRoute.business_facts)],
+    presentation_limits: { ...PRESENTATION_LIMITS },
   };
 }
 
@@ -445,7 +502,8 @@ export type RequirementFailureKind =
   | "missing_topic"
   | "duplicate_content"
   | "heading_restated"
-  | "build_mechanics_in_copy";
+  | "build_mechanics_in_copy"
+  | "presentation_limit";
 
 /** A validator message reduced to its kind and the exact subject it names. */
 export interface ClassifiedRequirementFailure {
@@ -457,6 +515,9 @@ export interface ClassifiedRequirementFailure {
   subject?: string;
   /** For missing topics: the exact stemmed tokens the check did not find. */
   missing_tokens?: string[];
+  /** For presentation limits: the field's word count and its limit. */
+  word_count?: number;
+  limit?: number;
 }
 
 /**
@@ -491,6 +552,10 @@ export const REQUIREMENT_FAILURE_PATTERNS: ReadonlyArray<{
   { kind: "duplicate_content", pattern: /^DUPLICATE_CONTENT: / },
   { kind: "heading_restated", pattern: /^HEADING_RESTATED: / },
   { kind: "build_mechanics_in_copy", pattern: /^BUILD_MECHANICS_IN_COPY: .* says "([^"]*)"/ },
+  {
+    kind: "presentation_limit",
+    pattern: /: (\S+) has (\S+) words \(limit (\S+)\)$/,
+  },
 ];
 
 const SECTION_SCOPED_KINDS: ReadonlySet<RequirementFailureKind> = new Set([
@@ -511,6 +576,10 @@ export function classifyRequirementFailure(
     if (subject !== undefined) {
       if (SECTION_SCOPED_KINDS.has(kind)) classified.section_id = subject;
       else classified.subject = subject;
+    }
+    if (kind === "presentation_limit") {
+      classified.word_count = Number(match[2]);
+      classified.limit = Number(match[3]);
     }
     if (kind === "missing_topic") {
       classified.missing_tokens = (match[2] ?? "")

@@ -25,6 +25,7 @@ import type {
   StructuredContentRoute,
 } from "@quantum-l9/bot-interop";
 import { z } from "zod";
+import { PRESENTATION_LIMITS } from "./claim-grounding.js";
 import {
   keyPlacements,
   type OutputShapeHints,
@@ -326,6 +327,8 @@ export const STRUCTURED_CONTENT_OUTPUT_CONTRACT = [
   `  keys: blocks (intro prose, or []), plus optional ${optionalSectionKeys.join(", ")}.`,
   "  Never put a faqs key on a section. An FAQ section renders the route-level faqs, so its",
   "  substance is its intro blocks plus those faqs: together they must say at least 10 words.",
+  `- Word limits for short rendered fields: internal_links[].anchor_text at most ${PRESENTATION_LIMITS.anchor_text} words (nav label),`,
+  `  sections[].eyebrow at most ${PRESENTATION_LIMITS.eyebrow} words (rendered uppercase), sections[].cta.label at most ${PRESENTATION_LIMITS.cta_label} words (button).`,
   "- Every required entity must appear literally (case-insensitive) in the prose of the section",
   "  that requires it — never a synonym or variant.",
   "- internal_links: include every required internal-link target.",
