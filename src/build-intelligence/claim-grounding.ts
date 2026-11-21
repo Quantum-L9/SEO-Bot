@@ -309,13 +309,12 @@ export function checkRouteGrounding(
 
   // 7. Quote attribution: a quote must name an external source that the
   //    contract's evidence (the verified facts) contains, never the business.
-  failures.push(...checkQuoteAttributions(route, checklist.quote_attribution));
-
   // 8. Presentation limits: short fields the renderer shows as nav labels,
   //    uppercase eyebrows and buttons. A violation is reported with the exact
   //    field and word count — never truncated.
   // 9. Required topics and entities are actually represented.
   failures.push(
+    ...checkQuoteAttributions(route, checklist.quote_attribution),
     ...checkPresentationLimits(route, checklist.presentation_limits),
     ...checkRequiredCoverage(route.route_id, checklist, haystack),
   );
@@ -500,12 +499,21 @@ function quoteAttributionRules(facts: VerifiedBusinessFact[]): QuoteAttributionR
   };
 }
 
+/** Strip a leading dash ("— Jane Doe") and trailing dots or spaces, without regex backtracking. */
+function trimAttribution(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && /[-–—\s]/.test(value.charAt(start))) start += 1;
+  while (end > start && /[.\s]/.test(value.charAt(end - 1))) end -= 1;
+  return value.slice(start, end);
+}
+
 /** Why an attribution is not acceptable, or null when it is. */
 export function quoteAttributionProblem(
   attribution: string | undefined,
   rules: QuoteAttributionRules,
 ): string | null {
-  const name = normalize(attribution ?? "").replace(/^[-–—\s]+|[.\s]+$/g, "");
+  const name = trimAttribution(normalize(attribution ?? ""));
   if (!name) return "no attribution";
   if (rules.self_names.some((self) => name.includes(self))) return "names the business itself";
   const words = new Set(name.split(/[^\p{L}\p{N}]+/u).filter(Boolean));

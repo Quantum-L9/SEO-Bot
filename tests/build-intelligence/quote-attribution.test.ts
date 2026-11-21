@@ -202,6 +202,7 @@ describe("quote attribution — the checklist rule", () => {
 
   it("passes a quote whose attribution is a source present in the verified facts", () => {
     expect(quoteAttributionProblem("Harvard Business Review", rules)).toBeNull();
+    expect(quoteAttributionProblem("— Harvard Business Review. ", rules)).toBeNull();
     const sourced: ProofBlock = {
       kind: "quote",
       text: "Revenue operations is now a board-level discipline for growing sales teams.",
