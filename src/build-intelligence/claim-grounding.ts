@@ -307,10 +307,14 @@ export function checkRouteGrounding(
     }
   }
 
-  // 7. Presentation limits: short fields the renderer shows as nav labels,
+  // 7. Quote attribution: a quote must name an external source that the
+  //    contract's evidence (the verified facts) contains, never the business.
+  failures.push(...checkQuoteAttributions(route, checklist.quote_attribution));
+
+  // 8. Presentation limits: short fields the renderer shows as nav labels,
   //    uppercase eyebrows and buttons. A violation is reported with the exact
   //    field and word count — never truncated.
-  // 8. Required topics and entities are actually represented.
+  // 9. Required topics and entities are actually represented.
   failures.push(
     ...checkPresentationLimits(route, checklist.presentation_limits),
     ...checkRequiredCoverage(route.route_id, checklist, haystack),
@@ -446,6 +450,92 @@ export interface RouteRequirementChecklist {
   verified_numbers: string[];
   /** Word limits for short rendered fields (Website-Bot site-quality rules). */
   presentation_limits: PresentationLimits;
+  /** Who a quote block may be attributed to (and who it never may be). */
+  quote_attribution: QuoteAttributionRules;
+}
+
+/**
+ * Quote attribution rules. A quote block is evidence of what someone else
+ * said, so its attribution must name a source the contract's evidence (the
+ * route's verified facts) contains, and never the business itself. QAP
+ * canary10 shipped "The operational test is whether a team can follow through
+ * …" attributed to "Quantum AI Partners methodology statement".
+ */
+export interface QuoteAttributionRules {
+  /** Normalized text of the route's verified facts: an attribution must appear in it. */
+  evidence_corpus: string;
+  /** The business's own names, from its verified name facts (normalized). */
+  self_names: string[];
+  /** Words that make an attribution a self-reference, whoever it names. */
+  self_reference_terms: readonly string[];
+}
+
+/** Attribution words that describe the business's own voice, not a source. */
+export const QUOTE_SELF_REFERENCE_TERMS: readonly string[] = [
+  "methodology",
+  "statement",
+  "philosophy",
+  "manifesto",
+  "principle",
+  "principles",
+  "approach",
+  "our",
+  "we",
+  "us",
+];
+
+/** Verified facts that name the business itself. */
+const BUSINESS_NAME_FACT_KEY =
+  /(^|_)(company|business|brand|legal|trading|organization|organisation)?_?name$/;
+
+function quoteAttributionRules(facts: VerifiedBusinessFact[]): QuoteAttributionRules {
+  return {
+    evidence_corpus: normalize(buildFactCorpus(facts)),
+    self_names: facts
+      .filter((fact) => BUSINESS_NAME_FACT_KEY.test(fact.key.trim().toLowerCase()))
+      .flatMap((fact) => (Array.isArray(fact.value) ? fact.value : [fact.value]))
+      .map((value) => normalize(String(value)))
+      .filter(Boolean),
+    self_reference_terms: QUOTE_SELF_REFERENCE_TERMS,
+  };
+}
+
+/** Why an attribution is not acceptable, or null when it is. */
+export function quoteAttributionProblem(
+  attribution: string | undefined,
+  rules: QuoteAttributionRules,
+): string | null {
+  const name = normalize(attribution ?? "").replace(/^[-–—\s]+|[.\s]+$/g, "");
+  if (!name) return "no attribution";
+  if (rules.self_names.some((self) => name.includes(self))) return "names the business itself";
+  const words = new Set(name.split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+  const term = rules.self_reference_terms.find((candidate) => words.has(candidate));
+  if (term) return `is a self-reference ("${term}")`;
+  // The source is the name before any role or affiliation ("Jane Doe, VP at X").
+  const source = name.split(",")[0]?.trim() ?? name;
+  if (!rules.evidence_corpus.includes(name) && !rules.evidence_corpus.includes(source)) {
+    return "is not in the contract's evidence";
+  }
+  return null;
+}
+
+function checkQuoteAttributions(
+  route: StructuredContentRoute,
+  rules: QuoteAttributionRules,
+): string[] {
+  const failures: string[] = [];
+  for (const section of route.sections) {
+    section.blocks.forEach((block, index) => {
+      if (block.kind !== "quote") return;
+      const problem = quoteAttributionProblem(block.attribution, rules);
+      if (problem) {
+        failures.push(
+          `${route.route_id}: quote at sections.${section.section_id}.blocks[${index}] has an unsupported attribution "${block.attribution ?? ""}" (${problem})`,
+        );
+      }
+    });
+  }
+  return failures;
 }
 
 export function routeRequirementChecklist(
@@ -482,6 +572,7 @@ export function routeRequirementChecklist(
     ungrounded_magnitude_phrases: MAGNITUDE_PHRASES.filter((phrase) => !corpus.includes(phrase)),
     verified_numbers: [...factNumbers(contractRoute.business_facts)],
     presentation_limits: { ...PRESENTATION_LIMITS },
+    quote_attribution: quoteAttributionRules(contractRoute.business_facts),
   };
 }
 
@@ -503,7 +594,8 @@ export type RequirementFailureKind =
   | "duplicate_content"
   | "heading_restated"
   | "build_mechanics_in_copy"
-  | "presentation_limit";
+  | "presentation_limit"
+  | "unsupported_quote_attribution";
 
 /** A validator message reduced to its kind and the exact subject it names. */
 export interface ClassifiedRequirementFailure {
@@ -555,6 +647,10 @@ export const REQUIREMENT_FAILURE_PATTERNS: ReadonlyArray<{
   {
     kind: "presentation_limit",
     pattern: /: (\S+) has (\S+) words \(limit (\S+)\)$/,
+  },
+  {
+    kind: "unsupported_quote_attribution",
+    pattern: /: quote at (\S+) has an unsupported attribution "(.*)" \(/,
   },
 ];
 

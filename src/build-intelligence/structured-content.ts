@@ -925,6 +925,10 @@ export function renderRequirementChecklist(
       ? `A number in any claim about years, projects, clients, team size, response time, warranty term, price, rating or founding year must be one of: ${quoteList(checklist.verified_numbers)}.`
       : "Do not state any number of years, projects, clients, staff, response time, warranty term, price, rating or founding year: no verified fact supplies one.",
     "Never repeat a paragraph, list item or FAQ answer, and never restate a heading as body copy.",
+    "A quote block needs an attribution naming an external person or publication that appears " +
+      "in the verified business facts. Never attribute a quote to the business itself or to its " +
+      `methodology, statement, philosophy or approach (never use: ${quoteList(checklist.quote_attribution.self_reference_terms)}). ` +
+      "With no such source, write the words as a paragraph instead of a quote. Never invent an attribution.",
     `Short rendered fields have word limits: every internal_links[].anchor_text at most ${checklist.presentation_limits.anchor_text} words (it is a nav label); every sections[].eyebrow at most ${checklist.presentation_limits.eyebrow} words (it renders uppercase); every sections[].cta.label at most ${checklist.presentation_limits.cta_label} words (it is a button).`,
   ];
   if (checklist.internal_link_targets.length > 0) {
@@ -1029,6 +1033,23 @@ function quantifiedClaimInstruction(subject: string, checklist: RouteRequirement
     : `Remove ${JSON.stringify(subject)}: no verified fact supplies a number. Rewrite the sentence so it stays grammatical.`;
 }
 
+/**
+ * A quote with no valid source is rewritten as a paragraph or dropped. The
+ * repair never supplies an attribution: one the evidence does not contain
+ * would be invented.
+ */
+function quoteAttributionRepair(location: string): RepairTarget {
+  const section = /^sections\.([^.]+)\./.exec(location)?.[1];
+  return {
+    sectionIds: section ? [section] : [],
+    mustWrite: [],
+    instruction:
+      `The quote at ${location} has no attribution the verified facts support. Rewrite it as a ` +
+      `paragraph block (kind "paragraph", no attribution) in the same section, or drop it. ` +
+      "Never invent or change an attribution to make a quote pass.",
+  };
+}
+
 /** The exact repair for one classified failure, from the same checklist. */
 function repairTarget(
   classified: ClassifiedRequirementFailure,
@@ -1066,6 +1087,8 @@ function repairTarget(
       );
     case "presentation_limit":
       return presentationRepair(classified);
+    case "unsupported_quote_attribution":
+      return quoteAttributionRepair(subject);
     case "duplicate_content":
     case "heading_restated":
       // The finding already names the exact location, the repeated text and
