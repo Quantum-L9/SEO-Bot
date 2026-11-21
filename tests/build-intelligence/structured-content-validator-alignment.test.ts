@@ -35,10 +35,12 @@ import {
   checkRouteGrounding,
   faqSectionIds,
   isFaqContractSection,
+  routeRequirementChecklist,
 } from "../../src/build-intelligence/claim-grounding.js";
 import {
   createStructuredContentPackageWithEvidence,
-  entityPlacements,
+  type renderRequirementChecklist,
+  repairEvidence,
 } from "../../src/build-intelligence/structured-content.js";
 import { fakeDeepSeekLlm, isGenerationRequest, PASSING_VERDICT } from "./fixtures/fake-deepseek.js";
 
@@ -225,18 +227,27 @@ describe("required entities are literal — prompt and repair name the exact phr
     expect(failures).toEqual(['home: required entity "Relationship graph" is not represented']);
   });
 
-  it("entityPlacements names the exact phrase and the section that requires it", () => {
+  it("repair evidence names the exact phrase and the section that requires it", () => {
     expect(
-      entityPlacements(
+      repairEvidence(
         ['home: required entity "Relationship graph" is not represented', "unrelated failure"],
-        homeContract(),
+        routeRequirementChecklist(homeContract()),
       ),
     ).toEqual([
       {
-        entity: "Relationship graph",
+        failure: 'home: required entity "Relationship graph" is not represented',
+        kind: "missing_entity",
         section_ids: ["spec-component-4"],
+        must_write: ["Relationship graph"],
         instruction:
-          'Write the exact phrase "Relationship graph" (case-insensitive) in the prose of section "spec-component-4", in a sentence that uses it naturally. A synonym or variant does not count.',
+          'Write the exact phrase "Relationship graph" (case-insensitive) in section "spec-component-4", in a sentence that uses it naturally. A synonym or variant does not count.',
+      },
+      {
+        failure: "unrelated failure",
+        kind: "semantic",
+        section_ids: [],
+        must_write: [],
+        instruction: "unrelated failure",
       },
     ]);
   });
@@ -258,16 +269,17 @@ describe("QAP '/' end to end on a fake DeepSeek transport", () => {
       generationPrompts.push(request);
       const prompt = JSON.parse(request.user.split("\n\n---\n")[0] ?? "{}") as {
         repair_instructions?: {
-          entity_placements: Array<{ entity: string; section_ids: string[] }>;
+          repair_evidence: Array<{ kind: string; must_write: string[]; section_ids: string[] }>;
         };
       };
       const draft = homeRoute(PARAPHRASED);
       // A model that follows the repair's explicit instruction literally.
-      for (const placement of prompt.repair_instructions?.entity_placements ?? []) {
-        const target = draft.sections.find((s) => s.section_id === placement.section_ids[0]);
+      for (const item of prompt.repair_instructions?.repair_evidence ?? []) {
+        if (item.kind !== "missing_entity") continue;
+        const target = draft.sections.find((s) => s.section_id === item.section_ids[0]);
         target?.blocks.push({
           kind: "paragraph",
-          text: `The ${placement.entity} links each contact to the deals and accounts they influence.`,
+          text: `The ${item.must_write[0]} links each contact to the deals and accounts they influence.`,
         });
       }
       return draft;
@@ -282,22 +294,27 @@ describe("QAP '/' end to end on a fake DeepSeek transport", () => {
       { llm },
     );
 
-    // The first prompt lists the entities verbatim with the literal rule, and
-    // names the FAQ section whose substance counts the route faqs.
+    // The first prompt carries the rendered checklist: the entities verbatim
+    // with the literal rule, and the FAQ rule on the FAQ section.
     const first = JSON.parse(generationPrompts[0]?.user ?? "{}") as {
-      required_entities_by_section: Array<{ section_id: string; entities: string[]; rule: string }>;
-      faq_sections: string[];
+      requirement_checklist: ReturnType<typeof renderRequirementChecklist>;
     };
-    expect(first.required_entities_by_section).toEqual([
-      expect.objectContaining({ section_id: "spec-component-4", entities: ENTITIES }),
-    ]);
-    expect(first.required_entities_by_section[0]?.rule).toContain("exactly as listed");
-    expect(first.faq_sections).toEqual(["spec-component-7"]);
-    expect(generationPrompts[0]?.system).toContain("REQUIRED ENTITIES ARE LITERAL");
+    const bySection = new Map(
+      first.requirement_checklist.sections.map((entry) => [entry.section_id, entry.instructions]),
+    );
+    expect(bySection.get("spec-component-4")?.join("\n")).toContain(
+      'must contain these exact phrases (case-insensitive, no variants): "CRM", "Relationship graph", "RevOps"',
+    );
+    expect(bySection.get("spec-component-7")?.join("\n")).toContain(
+      "This FAQ section renders the route-level faqs",
+    );
+    expect(generationPrompts[0]?.system).toContain(
+      "requirement_checklist IS WHAT THE VALIDATOR CHECKS",
+    );
 
     // Exactly one repair, carrying the exact phrase and its section.
     expect(generationPrompts).toHaveLength(2);
-    expect(generationPrompts[1]?.user).toContain('"entity": "Relationship graph"');
+    expect(generationPrompts[1]?.user).toContain('"must_write": [\n');
     expect(generationPrompts[1]?.user).toContain('"spec-component-4"');
     expect(evidence.repair_attempts).toBe(1);
 

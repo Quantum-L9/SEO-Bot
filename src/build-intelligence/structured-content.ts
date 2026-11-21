@@ -41,13 +41,19 @@ import {
   buildFactCorpus,
   CREDENTIAL_CLAIM_TOKENS,
   checkRouteGrounding,
+  classifyRequirementFailure,
   collectRouteText,
-  faqSectionIds,
   MAGNITUDE_PHRASES,
-  requiredEntitiesBySection,
+  type RouteRequirementChecklist,
+  routeRequirementChecklist,
   unsatisfiedProofRequirements,
 } from "./claim-grounding.js";
-import { type ContentUnit, contentUnits, findContentFindings } from "./content-duplication.js";
+import {
+  BUILD_MECHANICS_TERMS,
+  type ContentUnit,
+  contentUnits,
+  findContentFindings,
+} from "./content-duplication.js";
 import { type RouteValidationVerdict, validateRoute } from "./content-validator.js";
 import { type BuildIntelligenceLlm, getDeepSeekBuildIntelligenceLlm } from "./deepseek-llm.js";
 import { byCodeUnit } from "./ordering.js";
@@ -733,10 +739,11 @@ async function generateRoute(
   recorder?: LlmRunRecorder,
   priorUnits: readonly ContentUnit[] = [],
 ): Promise<StructuredContentRoute> {
-  const factCorpus = buildFactCorpus(contractRoute.business_facts);
-  const bannedPhrases = [...CREDENTIAL_CLAIM_TOKENS, ...MAGNITUDE_PHRASES].filter(
-    (token) => !factCorpus.includes(token.toLowerCase()),
-  );
+  const checklist = routeRequirementChecklist(contractRoute);
+  const bannedPhrases = [
+    ...checklist.ungrounded_claim_tokens,
+    ...checklist.ungrounded_magnitude_phrases,
+  ];
   const systemPrompt =
     "You are the sole owner of final website prose for one route. Write ONLY from " +
     "the supplied contract and allowed facts. Never invent facts or claims; every " +
@@ -751,13 +758,12 @@ async function generateRoute(
     "verified fact asserts them — write concrete, specific prose about " +
     "methodology, process, and approach instead. Cover the " +
     "required topics, answer the required questions, and satisfy the proof " +
-    "requirements. REQUIRED ENTITIES ARE LITERAL: every phrase listed in " +
-    "required_entities_by_section must appear exactly as written (case-insensitive) " +
-    "in that section's prose — never a synonym, paraphrase or variant (for example, " +
-    "a required 'Relationship graph' is not satisfied by 'relationship intelligence'). " +
-    "An FAQ section listed in faq_sections renders the route-level faqs: its intro " +
-    "blocks plus those faqs together must say at least 10 words, so give the route " +
-    "real faqs when the section's blocks are []. When a proof requirement cannot be backed by an allowed fact " +
+    "requirements. THE requirement_checklist IS WHAT THE VALIDATOR CHECKS, word for " +
+    "word: follow every instruction in it literally. 'Exact phrases' and 'exact words' " +
+    "must appear as written (case-insensitive) — never a synonym, paraphrase or " +
+    "variant (a required 'Relationship graph' is not satisfied by 'relationship " +
+    "intelligence', and a required word 'availability' is not satisfied by " +
+    "'available'). When a proof requirement cannot be backed by an allowed fact " +
     "(quantifiable achievements, third-party validation, or credentials the contract " +
     "does not support), satisfy it with an honest methodological or commitment " +
     "statement — never fabricate the proof itself. " +
@@ -787,7 +793,10 @@ async function generateRoute(
           schema_failures: repair.schema_failures ?? [],
           failed_requirements: repair.failed_requirements ?? [],
           remove_or_support_unsupported_claims: repair.unsupported_claims ?? [],
-          entity_placements: entityPlacements(repair.failed_requirements ?? [], contractRoute),
+          repair_evidence: repairEvidence(
+            [...(repair.failed_requirements ?? []), ...(repair.unsupported_claims ?? [])],
+            checklist,
+          ),
         },
       }
     : {};
@@ -799,11 +808,10 @@ async function generateRoute(
         (link) => link.target_route_id,
       ),
       required_section_ids: contractRoute.sections.map((section) => section.section_id),
-      required_entities_by_section: requiredEntitiesBySection(contractRoute).map((entry) => ({
-        ...entry,
-        rule: "write each phrase exactly as listed (case-insensitive) in this section's prose; no synonyms or variants",
-      })),
-      faq_sections: [...faqSectionIds(contractRoute)],
+      requirement_checklist: renderRequirementChecklist(
+        checklist,
+        mechanicsTermsToAvoid(contractRoute),
+      ),
       ...earlierRouteCopy(priorUnits),
       ...repairBlock,
     },
@@ -834,38 +842,212 @@ async function generateRoute(
 const EARLIER_COPY_LIMIT = 80;
 const EARLIER_COPY_CHARS = 160;
 
+const quoteList = (values: readonly string[]): string =>
+  values.map((value) => JSON.stringify(value)).join(", ");
+
 /**
- * For each `required entity "X" is not represented` failure, the exact phrase
- * and the contract section(s) that require it, so the repair places the
- * literal phrase rather than another paraphrase. The coverage check matches
- * entities literally (case-insensitive), so a synonym can never satisfy it.
+ * Build-mechanics vocabulary the copy-hygiene gate (content-duplication.ts)
+ * rejects unless a verified fact uses the term — the same filter it applies.
  */
-export function entityPlacements(
-  failedRequirements: readonly string[],
-  contractRoute: PageContentContractRoute,
-): Array<{ entity: string; section_ids: string[]; instruction: string }> {
-  const bySection = requiredEntitiesBySection(contractRoute);
-  const placements: Array<{ entity: string; section_ids: string[]; instruction: string }> = [];
+function mechanicsTermsToAvoid(contractRoute: PageContentContractRoute): string[] {
+  const corpus = buildFactCorpus(contractRoute.business_facts);
+  return BUILD_MECHANICS_TERMS.filter((term) => !corpus.includes(term));
+}
+
+/** Plain-language instructions for one section, rendered from the checklist. */
+function sectionInstructions(section: RouteRequirementChecklist["sections"][number]): string[] {
+  const lines = [
+    section.is_faq
+      ? `This FAQ section renders the route-level faqs: its blocks plus the route's faqs (questions and answers) must together contain at least ${section.min_words} words, so give the route real faqs.`
+      : `Write at least ${section.min_words} words of prose in this section's blocks.`,
+  ];
+  if (section.entities.length > 0) {
+    lines.push(
+      `This section's prose must contain these exact phrases (case-insensitive, no variants): ${quoteList(section.entities)}.`,
+    );
+  }
+  for (const { topic, tokens } of section.topics) {
+    lines.push(
+      `Topic ${JSON.stringify(topic)}: the route's prose must contain these exact words: ${quoteList(tokens)} (as written; a longer word that contains one also counts). Put them in this section.`,
+    );
+  }
+  for (const question of section.questions) {
+    lines.push(`Answer this question in this section: ${JSON.stringify(question)}.`);
+  }
+  for (const { proof, tokens } of section.proofs) {
+    lines.push(
+      tokens.length > 0
+        ? `Address proof requirement ${JSON.stringify(proof)} in this section's prose, using these exact words: ${quoteList(tokens)}.`
+        : `Address proof requirement ${JSON.stringify(proof)} in this section's prose, using that exact phrase.`,
+    );
+  }
+  return lines;
+}
+
+/**
+ * The requirement checklist in plain terms, for the generation prompt. It is
+ * rendered from `routeRequirementChecklist`, which the validator also reads,
+ * so every deterministic check has an instruction here.
+ */
+export function renderRequirementChecklist(
+  checklist: RouteRequirementChecklist,
+  mechanicsTerms: readonly string[] = [],
+): {
+  sections: Array<{ section_id: string; instructions: string[] }>;
+  route_instructions: string[];
+} {
+  const neverWrite = [
+    ...checklist.forbidden_claims,
+    ...checklist.ungrounded_claim_tokens,
+    ...checklist.ungrounded_magnitude_phrases,
+    ...checklist.placeholder_markers,
+    ...mechanicsTerms,
+  ];
+  const route_instructions = [
+    `Produce exactly these section_ids, in this order: ${quoteList(checklist.section_ids)}.`,
+    "metadata.title and metadata.description must both be non-empty." +
+      (checklist.metadata.title.length > 0
+        ? ` The title must satisfy: ${quoteList(checklist.metadata.title)}.`
+        : "") +
+      (checklist.metadata.description.length > 0
+        ? ` The description must satisfy: ${quoteList(checklist.metadata.description)}.`
+        : ""),
+    `Never write any of these words or phrases anywhere (title, sections, faqs, links): ${quoteList(neverWrite)}.`,
+    checklist.verified_numbers.length > 0
+      ? `A number in any claim about years, projects, clients, team size, response time, warranty term, price, rating or founding year must be one of: ${quoteList(checklist.verified_numbers)}.`
+      : "Do not state any number of years, projects, clients, staff, response time, warranty term, price, rating or founding year: no verified fact supplies one.",
+    "Never repeat a paragraph, list item or FAQ answer, and never restate a heading as body copy.",
+  ];
+  if (checklist.internal_link_targets.length > 0) {
+    route_instructions.push(
+      `Include an internal link to each of these route ids: ${quoteList(checklist.internal_link_targets)}.`,
+    );
+  }
+  return {
+    sections: checklist.sections.map((section) => ({
+      section_id: section.section_id,
+      instructions: sectionInstructions(section),
+    })),
+    route_instructions,
+  };
+}
+
+/** One failed requirement, restated as the exact change the repair must make. */
+export interface RepairEvidenceItem {
+  failure: string;
+  kind: string;
+  section_ids: string[];
+  /** The exact phrases or words the repaired prose must contain. */
+  must_write: string[];
+  instruction: string;
+}
+
+function sectionsRequiring(
+  checklist: RouteRequirementChecklist,
+  matches: (section: RouteRequirementChecklist["sections"][number]) => boolean,
+): string[] {
+  return checklist.sections.filter(matches).map((section) => section.section_id);
+}
+
+function inSections(sectionIds: readonly string[]): string {
+  return sectionIds.length > 0 ? `in section ${quoteList(sectionIds)}` : "in the route's prose";
+}
+
+/**
+ * Per failed requirement, the exact missing words/phrases and target section,
+ * looked up in the same checklist the validator applies. Messages the
+ * deterministic validator does not emit (the semantic judge's) pass through
+ * verbatim as their own evidence — never reinterpreted.
+ */
+export function repairEvidence(
+  failures: readonly string[],
+  checklist: RouteRequirementChecklist,
+): RepairEvidenceItem[] {
+  const evidence: RepairEvidenceItem[] = [];
   const seen = new Set<string>();
-  for (const failure of failedRequirements) {
-    const entity = /required entity "([^"]+)" is not represented/.exec(failure)?.[1];
-    if (!entity || seen.has(entity.toLowerCase())) continue;
-    seen.add(entity.toLowerCase());
-    const sectionIds = bySection
-      .filter((entry) =>
-        entry.entities.some((required) => required.toLowerCase() === entity.toLowerCase()),
-      )
-      .map((entry) => entry.section_id);
-    const quotedIds = sectionIds.map((id) => JSON.stringify(id)).join(" or ");
-    const where =
-      sectionIds.length > 0 ? `in the prose of section ${quotedIds}` : "in the route's prose";
-    placements.push({
-      entity,
+  for (const failure of failures) {
+    if (seen.has(failure)) continue;
+    seen.add(failure);
+    const classified = classifyRequirementFailure(failure);
+    if (!classified) {
+      evidence.push({
+        failure,
+        kind: "semantic",
+        section_ids: [],
+        must_write: [],
+        instruction: failure,
+      });
+      continue;
+    }
+    const subject = classified.subject ?? "";
+    const lower = subject.toLowerCase();
+    let sectionIds: string[] = classified.section_id ? [classified.section_id] : [];
+    let mustWrite: string[] = [];
+    let instruction: string;
+    switch (classified.kind) {
+      case "missing_entity":
+        sectionIds = sectionsRequiring(checklist, (s) =>
+          s.entities.some((entity) => entity.toLowerCase() === lower),
+        );
+        mustWrite = [subject];
+        instruction = `Write the exact phrase ${JSON.stringify(subject)} (case-insensitive) ${inSections(sectionIds)}, in a sentence that uses it naturally. A synonym or variant does not count.`;
+        break;
+      case "missing_topic": {
+        sectionIds = sectionsRequiring(checklist, (s) =>
+          s.topics.some((topic) => topic.topic.toLowerCase() === lower),
+        );
+        mustWrite = [...(classified.missing_tokens ?? [])];
+        instruction = `Topic ${JSON.stringify(subject)} is missing these exact words: ${quoteList(classified.missing_tokens ?? [])}. Write each of them as written (a longer word that contains it also counts) ${inSections(sectionIds)}.`;
+        break;
+      }
+      case "thin_section": {
+        const rules = checklist.sections.find((s) => s.section_id === classified.section_id);
+        const minWords = rules?.min_words ?? 10;
+        instruction = rules?.is_faq
+          ? `FAQ section ${JSON.stringify(classified.section_id)}: its blocks plus the route's faqs must contain at least ${minWords} words. Add real faqs or intro prose.`
+          : `Section ${JSON.stringify(classified.section_id)} needs at least ${minWords} words of prose in its blocks.`;
+        break;
+      }
+      case "missing_internal_link":
+        instruction = `Add an internal link to route id ${JSON.stringify(subject)}.`;
+        break;
+      case "missing_metadata":
+        instruction = `Write a non-empty metadata.${subject}.`;
+        break;
+      case "route_identity":
+      case "unexpected_section":
+      case "missing_section":
+        instruction = `Produce exactly these section_ids, in this order: ${quoteList(checklist.section_ids)}.`;
+        break;
+      case "unsupported_quantified_claim":
+        instruction =
+          checklist.verified_numbers.length > 0
+            ? `Remove ${JSON.stringify(subject)} or restate it with only these verified numbers: ${quoteList(checklist.verified_numbers)}. Rewrite the sentence so it stays grammatical.`
+            : `Remove ${JSON.stringify(subject)}: no verified fact supplies a number. Rewrite the sentence so it stays grammatical.`;
+        break;
+      case "unsupported_magnitude_claim":
+      case "unsupported_credential_claim":
+      case "forbidden_claim":
+      case "placeholder_content":
+      case "build_mechanics_in_copy":
+        instruction = `Remove every occurrence of ${JSON.stringify(subject)} and rewrite each affected sentence so it stays complete and grammatical.`;
+        break;
+      case "duplicate_content":
+      case "heading_restated":
+        // The finding already names the exact location, the repeated text and
+        // what to do; it is the evidence.
+        instruction = failure;
+        break;
+    }
+    evidence.push({
+      failure,
+      kind: classified.kind,
       section_ids: sectionIds,
-      instruction: `Write the exact phrase "${entity}" (case-insensitive) ${where}, in a sentence that uses it naturally. A synonym or variant does not count.`,
+      must_write: mustWrite,
+      instruction,
     });
   }
-  return placements;
+  return evidence;
 }
 
 /**
