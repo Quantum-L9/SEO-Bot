@@ -36,11 +36,11 @@ import {
   faqSectionIds,
   isFaqContractSection,
 } from "../../src/build-intelligence/claim-grounding.js";
-import { createDeepSeekBuildIntelligenceLlm } from "../../src/build-intelligence/deepseek-llm.js";
 import {
   createStructuredContentPackageWithEvidence,
   entityPlacements,
 } from "../../src/build-intelligence/structured-content.js";
+import { fakeDeepSeekLlm, isGenerationRequest, PASSING_VERDICT } from "./fixtures/fake-deepseek.js";
 
 vi.mock("../../src/core/logger.js", () => ({
   createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
@@ -253,53 +253,25 @@ describe("QAP '/' end to end on a fake DeepSeek transport", () => {
 
   it("an entity-missing first draft is repaired by the prompt's explicit phrase", async () => {
     const generationPrompts: Array<{ system: string; user: string }> = [];
-    const transport = vi.fn(async (_url: string, init: RequestInit) => {
-      const body = JSON.parse(String(init.body)) as {
-        messages: Array<{ role: string; content: string }>;
+    const { llm } = fakeDeepSeekLlm((request) => {
+      if (!isGenerationRequest(request)) return PASSING_VERDICT;
+      generationPrompts.push(request);
+      const prompt = JSON.parse(request.user.split("\n\n---\n")[0] ?? "{}") as {
+        repair_instructions?: {
+          entity_placements: Array<{ entity: string; section_ids: string[] }>;
+        };
       };
-      const system = body.messages.find((m) => m.role === "system")?.content ?? "";
-      const user = body.messages.find((m) => m.role === "user")?.content ?? "";
-      let reply: unknown;
-      if (system.includes("sole owner of final website prose")) {
-        generationPrompts.push({ system, user });
-        const prompt = JSON.parse(user.split("\n\n---\n")[0] ?? "{}") as {
-          repair_instructions?: {
-            entity_placements: Array<{ entity: string; section_ids: string[] }>;
-          };
-        };
-        const placements = prompt.repair_instructions?.entity_placements ?? [];
-        const draft = homeRoute(PARAPHRASED);
-        // A model that follows the repair's explicit instruction literally.
-        for (const placement of placements) {
-          const target = draft.sections.find((s) => s.section_id === placement.section_ids[0]);
-          target?.blocks.push({
-            kind: "paragraph",
-            text: `The ${placement.entity} links each contact to the deals and accounts they influence.`,
-          });
-        }
-        reply = draft;
-      } else {
-        reply = {
-          seo_blueprint_passed: true,
-          contract_passed: true,
-          unsupported_claims: [],
-          failed_requirements: [],
-        };
+      const draft = homeRoute(PARAPHRASED);
+      // A model that follows the repair's explicit instruction literally.
+      for (const placement of prompt.repair_instructions?.entity_placements ?? []) {
+        const target = draft.sections.find((s) => s.section_id === placement.section_ids[0]);
+        target?.blocks.push({
+          kind: "paragraph",
+          text: `The ${placement.entity} links each contact to the deals and accounts they influence.`,
+        });
       }
-      const content = JSON.stringify(reply);
-      return new Response(
-        JSON.stringify({
-          choices: [{ finish_reason: "stop", message: { content } }],
-          usage: { completion_tokens: Math.ceil(content.length / 4) },
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    });
-    const llm = createDeepSeekBuildIntelligenceLlm({
-      env: { DEEPSEEK_API_KEY: "test-key" },
-      transport,
-      ledgerDir,
-    });
+      return draft;
+    }, ledgerDir);
 
     const { artifact, evidence } = await createStructuredContentPackageWithEvidence(
       {
