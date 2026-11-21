@@ -239,14 +239,16 @@ function fakeModel(defects: (routeId: string) => Defect[], stubborn = false) {
       const routeId = args.purpose.split(":")[1] as string;
       const prompt = JSON.parse(args.userPrompt.split("\n\n---\n")[0] ?? "{}") as {
         repair_instructions?: { failed_requirements: string[] };
-        already_used_on_earlier_routes?: Array<{ route_id: string; text: string }>;
+        do_not_reuse_from_earlier_routes?: {
+          sentences: Array<{ route_id: string; text: string }>;
+        };
       };
       const evidence = prompt.repair_instructions?.failed_requirements ?? [];
       calls.push({
         routeId,
         repair: Boolean(prompt.repair_instructions),
         evidence,
-        earlier: prompt.already_used_on_earlier_routes ?? [],
+        earlier: prompt.do_not_reuse_from_earlier_routes?.sentences ?? [],
       });
       const told = (code: string) => !stubborn && evidence.some((line) => line.startsWith(code));
       const remaining = defects(routeId).filter((defect) => {

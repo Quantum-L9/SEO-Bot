@@ -334,8 +334,10 @@ export const STRUCTURED_CONTENT_OUTPUT_CONTRACT = [
   "- A quote block needs an external attribution that appears in the contract's verified facts.",
   "  Never attribute a quote to the business itself; with no such attribution, use no quote.",
   "- Never repeat a paragraph, list item or FAQ answer within the route, nor any text listed",
-  "  in already_used_on_earlier_routes. A component shared across routes (e.g. a process)",
-  "  gets framing specific to this route, never the same paragraphs or steps.",
+  "  in do_not_reuse_from_earlier_routes. A component shared across routes (e.g. a process)",
+  "  gets framing specific to this route, never the same paragraphs or steps. An FAQ",
+  "  question that also appears on an earlier route gets an answer written for this",
+  "  route's subject, never the earlier answer.",
   "- Never mention how the site is built (endpoints, webhooks, HTTPS, pipelines that build the",
   "  site, placeholder or invented details) in customer copy. State availability plainly.",
   ...renderOutputRules(structuredContentRouteSchema, STRUCTURED_CONTENT_HINTS).map(
