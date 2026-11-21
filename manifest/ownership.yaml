@@ -20,6 +20,12 @@
       "classification": "configuration"
     },
     {
+      "pattern": ".vscode/**",
+      "owner": "repository-governance",
+      "purpose": "Shared editor workspace settings and recommended extensions",
+      "classification": "configuration"
+    },
+    {
       "pattern": "adr/**",
       "owner": "architecture",
       "purpose": "Architecture decision records",
@@ -62,6 +68,18 @@
       "owner": "continuous-assurance",
       "purpose": "Manifest ownership policy and generation inputs",
       "classification": "configuration"
+    },
+    {
+      "pattern": "packages/**",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime"
+    },
+    {
+      "pattern": "reports/**",
+      "owner": "continuous-assurance",
+      "purpose": "Assurance evidence, integrity receipts, and remediation reports",
+      "classification": "documentation"
     },
     {
       "pattern": "scripts/**",
@@ -158,6 +176,18 @@
       "owner": "continuous-assurance",
       "purpose": "Machine-readable assurance contract",
       "classification": "schema"
+    },
+    {
+      "path": ".l9/ci.json",
+      "owner": "continuous-assurance",
+      "purpose": "Consumer CI class declaration read by the org CI workflow (schema l9.ci-consumer/v1)",
+      "classification": "configuration"
+    },
+    {
+      "path": ".l9/repo-workflow.json",
+      "owner": "continuous-assurance",
+      "purpose": "Repository execution facade declaration (schema l9.repo-execution/v2)",
+      "classification": "configuration"
     }
   ]
 }
