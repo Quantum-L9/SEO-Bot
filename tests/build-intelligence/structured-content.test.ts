@@ -112,9 +112,30 @@ function makeContract(): PageContentContractArtifact {
  * Grounded reference prose: every factual assertion (the warranty, the 25-year
  * term, the service area) traces to a VerifiedBusinessFact on the contract.
  */
-function genRoute(): StructuredContentRoute {
+/**
+ * Route-specific grounded prose. Two routes never share a paragraph: the same
+ * paragraph on two routes is a cross-page duplicate, which the package now
+ * refuses (Website-Bot's rendered site-quality check).
+ */
+const ROUTE_PROSE: Readonly<Record<string, string>> = {
+  home:
+    "A metal roof is the most durable covering available for an Austin, Texas home, " +
+    "and every system we install carries a 25 year manufacturer warranty. Durability " +
+    "is what the material is chosen for, so we size and fasten it for the local climate.",
+  services:
+    "Our installation service replaces worn shingles with a metal roof built for " +
+    "Austin, Texas summers. Each install carries the 25 year manufacturer warranty, " +
+    "and durability guides every panel and fastener choice our crew makes on site.",
+};
+
+/** The route a generation call is for, read from its purpose (`structured-content:<route_id>`). */
+function routeOf(args: { purpose?: string }): string {
+  return args.purpose?.split(":")[1] ?? "home";
+}
+
+function genRoute(routeId = "home"): StructuredContentRoute {
   return {
-    route_id: "home",
+    route_id: routeId,
     path: "/",
     metadata: {
       title: "Metal Roofing in Austin, Texas",
@@ -127,10 +148,7 @@ function genRoute(): StructuredContentRoute {
         blocks: [
           {
             kind: "paragraph",
-            text:
-              "A metal roof is the most durable covering available for an Austin, Texas home, " +
-              "and every system we install carries a 25 year manufacturer warranty. Durability " +
-              "is what the material is chosen for, so we size and fasten it for the local climate.",
+            text: ROUTE_PROSE[routeId] ?? (ROUTE_PROSE.home as string),
           },
         ],
       },
@@ -162,7 +180,11 @@ function fakeLlm(verdicts: ContentValidationVerdict[]): {
   const llm = {
     async executePolicyJson(
       operation: string,
-      args: { validate: (v: unknown) => unknown; callCounter?: { value: number } },
+      args: {
+        validate: (v: unknown) => unknown;
+        callCounter?: { value: number };
+        purpose?: string;
+      },
     ) {
       // Mirror the real service: one counter increment per ACTUAL LLM call.
       // Generation runs with schemaRepairAttempts=0, so one invocation = one
@@ -171,7 +193,7 @@ function fakeLlm(verdicts: ContentValidationVerdict[]): {
       if (args.callCounter) args.callCounter.value += 1;
       if (operation === "STRUCTURED_CONTENT_GENERATION") {
         counts.gen += 1;
-        return args.validate(genRoute());
+        return args.validate(genRoute(routeOf(args)));
       }
       if (operation === "CONTENT_VALIDATION") {
         const v = verdicts[Math.min(counts.val, verdicts.length - 1)];
@@ -460,10 +482,16 @@ describe("StructuredContentPackage — the exact contract is the only authority"
     const llm = {
       async executePolicyJson(
         operation: string,
-        args: { validate: (v: unknown) => unknown; callCounter?: { value: number } },
+        args: {
+          validate: (v: unknown) => unknown;
+          callCounter?: { value: number };
+          purpose?: string;
+        },
       ) {
         if (args.callCounter) args.callCounter.value += 1;
-        if (operation === "STRUCTURED_CONTENT_GENERATION") return args.validate(genRoute());
+        if (operation === "STRUCTURED_CONTENT_GENERATION") {
+          return args.validate(genRoute(routeOf(args)));
+        }
         return args.validate(pass);
       },
     } as unknown as LlmService;

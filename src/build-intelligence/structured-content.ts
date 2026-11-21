@@ -46,6 +46,7 @@ import {
   MAGNITUDE_PHRASES,
   unsatisfiedProofRequirements,
 } from "./claim-grounding.js";
+import { type ContentUnit, contentUnits, findContentFindings } from "./content-duplication.js";
 import { type RouteValidationVerdict, validateRoute } from "./content-validator.js";
 import { type BuildIntelligenceLlm, getDeepSeekBuildIntelligenceLlm } from "./deepseek-llm.js";
 import { byCodeUnit } from "./ordering.js";
@@ -205,14 +206,19 @@ export async function createStructuredContentPackageWithEvidence(
   const repairedRouteIds: string[] = [];
   const routeResults: StructuredContentRouteResult[] = [];
   let schemaFailureCount = 0;
+  // Copy already accepted on earlier routes of this package. Generation is
+  // sequential per route, so each route is checked against everything before it.
+  const accepted: ContentUnit[] = [];
 
   for (const contractRoute of contract.routes) {
     const produced = await produceRoute({
       llm,
       request,
       contractRoute,
+      accepted,
       recorder: deps.recorder,
     });
+    accepted.push(...contentUnits(produced.route));
 
     routes.push(produced.route);
     verdicts.push(produced.verdict);
@@ -320,9 +326,16 @@ async function produceRoute(args: {
   llm: BuildIntelligenceLlm;
   request: StructuredContentRequest;
   contractRoute: PageContentContractRoute;
+  /** Units of routes accepted earlier in this package (cross-route duplicates). */
+  accepted: readonly ContentUnit[];
   recorder?: LlmRunRecorder;
 }): Promise<ProducedRoute> {
-  const { llm, request, contractRoute, recorder } = args;
+  const { llm, request, contractRoute, recorder, accepted } = args;
+  // Deterministic duplicate / copy-hygiene gate (checker parity). Its findings
+  // are repair evidence alongside the verdict, and never pass through the
+  // verdict's heuristic filters.
+  const contentFindings = (route: StructuredContentRoute): string[] =>
+    findContentFindings(route, contractRoute, accepted);
   // Per-route counters. THIS route's generation spend is owned by THIS route:
   // the package total is the sum of them, never their source.
   const generationCalls: LlmCallCounter = { value: 0 };
@@ -347,6 +360,7 @@ async function produceRoute(args: {
       undefined,
       generationCalls,
       recorder,
+      accepted,
     );
   } catch (error) {
     // A provider/transport/budget/circuit failure is not a content-shape
@@ -374,7 +388,12 @@ async function produceRoute(args: {
         }
       : await validateRoute(generated, contractRoute, validationArgs);
 
-  if (generated !== null && routePassed(generated, contractRoute, verdict, true)) {
+  const firstFindings = generated === null ? [] : contentFindings(generated);
+  if (
+    generated !== null &&
+    firstFindings.length === 0 &&
+    routePassed(generated, contractRoute, verdict, true)
+  ) {
     return {
       route: generated,
       verdict: groundedVerdict(generated, contractRoute, verdict),
@@ -395,6 +414,7 @@ async function produceRoute(args: {
       schemaFailures,
       failed: verdict.failed_requirements,
       unsupported: verdict.unsupported_claims,
+      contentFindings: firstFindings,
     },
     "Route failed validation; running its one bounded repair",
   );
@@ -406,11 +426,12 @@ async function produceRoute(args: {
       contractRoute,
       {
         schema_failures: schemaFailures,
-        failed_requirements: verdict.failed_requirements,
+        failed_requirements: [...verdict.failed_requirements, ...firstFindings],
         unsupported_claims: verdict.unsupported_claims,
       },
       generationCalls,
       recorder,
+      accepted,
     );
   } catch (error) {
     if (isTerminalLlmFailure(error)) throw error;
@@ -436,6 +457,7 @@ async function produceRoute(args: {
   //    deterministic remediation gets one last authority pass: scrub
   //    ungrounded credential phrases and append fact-derived literal
   //    coverage, then re-validate once. No LLM, no second repair.
+  let acceptedRoute = repaired;
   if (!routePassed(repaired, contractRoute, verdict)) {
     const remediated = applyDeterministicRemediation(repaired, verdict, contractRoute);
     verdict = await validateRoute(remediated, contractRoute, validationArgs);
@@ -455,18 +477,26 @@ async function produceRoute(args: {
         verdict.unsupported_claims,
       );
     }
-    return {
-      route: remediated,
-      verdict: groundedVerdict(remediated, contractRoute, verdict),
-      repaired: true,
-      generation_calls: generationCalls.value,
-      semantic_validation_calls: validationCalls.value,
-      schema_failure_count: schemaFailureCount,
-    };
+    acceptedRoute = remediated;
+  }
+
+  // 5. Duplicate / copy-hygiene findings that survive the one repair are
+  //    terminal and typed. Nothing is silently deleted to make them pass.
+  const finalFindings = contentFindings(acceptedRoute);
+  if (finalFindings.length > 0) {
+    logger.warn(
+      { routeId: contractRoute.route_id, contentFindings: finalFindings },
+      "Route still repeats or leaks content after one bounded repair",
+    );
+    throw new ContentRequirementUnsatisfiedError(
+      `Route "${contractRoute.route_id}" still repeats content or describes the build after one bounded repair`,
+      finalFindings,
+      [],
+    );
   }
   return {
-    route: repaired,
-    verdict: groundedVerdict(repaired, contractRoute, verdict),
+    route: acceptedRoute,
+    verdict: groundedVerdict(acceptedRoute, contractRoute, verdict),
     repaired: true,
     generation_calls: generationCalls.value,
     semantic_validation_calls: validationCalls.value,
@@ -686,6 +716,7 @@ async function generateRoute(
   },
   generationCalls?: LlmCallCounter,
   recorder?: LlmRunRecorder,
+  priorUnits: readonly ContentUnit[] = [],
 ): Promise<StructuredContentRoute> {
   const factCorpus = buildFactCorpus(contractRoute.business_facts);
   const bannedPhrases = [...CREDENTIAL_CLAIM_TOKENS, ...MAGNITUDE_PHRASES].filter(
@@ -746,6 +777,7 @@ async function generateRoute(
         (link) => link.target_route_id,
       ),
       required_section_ids: contractRoute.sections.map((section) => section.section_id),
+      ...earlierRouteCopy(priorUnits),
       ...repairBlock,
     },
     null,
@@ -769,6 +801,33 @@ async function generateRoute(
     recorder,
     validate: (value) => reconcileStructuredRoute(value, contractRoute),
   });
+}
+
+/** How many earlier-route units the prompt shows, and how much of each. */
+const EARLIER_COPY_LIMIT = 80;
+const EARLIER_COPY_CHARS = 160;
+
+/**
+ * Copy already used on earlier routes of this package, shown so the model can
+ * write route-specific framing instead of repeating it (cross-page duplicates
+ * fail the rendered site-quality check). Most recent units first.
+ */
+function earlierRouteCopy(units: readonly ContentUnit[]): {
+  already_used_on_earlier_routes?: Array<{ route_id: string; text: string }>;
+} {
+  if (units.length === 0) return {};
+  return {
+    already_used_on_earlier_routes: units
+      .slice(-EARLIER_COPY_LIMIT)
+      .reverse()
+      .map((unit) => ({
+        route_id: unit.route_id,
+        text:
+          unit.text.length > EARLIER_COPY_CHARS
+            ? `${unit.text.slice(0, EARLIER_COPY_CHARS - 3)}...`
+            : unit.text,
+      })),
+  };
 }
 
 /**
