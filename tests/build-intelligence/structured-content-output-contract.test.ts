@@ -170,15 +170,36 @@ function renderedShape(contract: string): Record<string, unknown> {
  * VERBATIM, and only "string…" placeholders are written over with `prose`. It
  * never translates descriptive text into a value.
  */
-function instantiate(node: unknown, prose: string): unknown {
-  if (Array.isArray(node)) return node.map((element) => instantiate(element, prose));
+function instantiate(node: unknown, write: () => string): unknown {
+  if (Array.isArray(node)) return node.map((element) => instantiate(element, write));
   if (node !== null && typeof node === "object") {
     return Object.fromEntries(
-      Object.entries(node).map(([key, child]) => [key, instantiate(child, prose)]),
+      Object.entries(node).map(([key, child]) => [key, instantiate(child, write)]),
     );
   }
-  if (typeof node === "string" && node.startsWith("string")) return prose;
+  if (typeof node === "string" && node.startsWith("string")) return write();
   return node;
+}
+
+/**
+ * A writer of distinct, short, grounded phrases for one route. Every phrase is
+ * under the duplicate checker's 8-word minimum and none repeats, so the fake
+ * never writes duplicate copy: it covers the route's topics, entities and
+ * facts across phrases, the way a compliant model varies its wording.
+ */
+function phraseWriter(route: PageContentContractRoute): () => string {
+  const grounded = [
+    String(QAP_FACTS[0]?.value),
+    ...route.search_context.topics,
+    ...route.search_context.entities,
+    ...route.business_facts.map((fact) => String(fact.value)),
+  ];
+  let next = 0;
+  // "Note <n>: <grounded phrase>." stays under 8 words, and <n> makes it unique.
+  return () => {
+    next += 1;
+    return `Note ${next}: ${grounded[(next - 1) % grounded.length]}.`;
+  };
 }
 
 interface RoutePrompt {
@@ -203,21 +224,18 @@ function buildFromContract(
   options: { nestFaqs: boolean },
 ): Record<string, unknown> {
   const route = prompt.contract_route;
-  const facts = route.business_facts.map((fact) => String(fact.value)).join(", ");
-  const prose =
-    `${QAP_FACTS[0]?.value} delivers ${route.search_context.topics.join(", ")} and ` +
-    `${route.search_context.entities.join(", ")} as ${facts}.`;
+  const write = phraseWriter(route);
   const shape = renderedShape(contract);
-  const base = instantiate(shape, prose) as Record<string, unknown>;
+  const base = instantiate(shape, write) as Record<string, unknown>;
   const sectionTemplate = (shape.sections as unknown[])[0];
   const faqs = route.sections.flatMap((section) =>
-    section.content_requirements.questions.map((question) => ({
+    section.content_requirements.questions.map((question, index) => ({
       question,
-      answer: `${prose} ${question.replace("?", "")}: yes, it is remote-first consulting.`,
+      answer: `Yes: remote-first consulting, answer ${index + 1}.`,
     })),
   );
   const sections = prompt.required_section_ids.map((sectionId) => {
-    const section = instantiate(sectionTemplate, prose) as Record<string, unknown>;
+    const section = instantiate(sectionTemplate, write) as Record<string, unknown>;
     section.section_id = sectionId;
     if (options.nestFaqs && sectionId === "faq") section.faqs = faqs;
     return section;
