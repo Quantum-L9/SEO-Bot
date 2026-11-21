@@ -1,0 +1,4318 @@
+{
+  "schema_version": "1.0.0",
+  "repository": "Quantum-L9/SEO-Bot",
+  "entries": [
+    {
+      "path": ".biomeignore",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".claude/hooks/session-start.sh",
+      "owner": "agent-operations",
+      "purpose": "Agent session controls and hooks",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".dockerignore",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".editorconfig",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".env.example",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".github/CODEOWNERS",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".github/dependabot.yml",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/1-bug.yml",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/2-feature.yml",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/3-task.yml",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/4-incident.yml",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/ci-failure.yml",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/config.yml",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/gov-violation.yml",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/seed-ci-failure.yml",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".github/pull_request_template.md",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE/agent.md",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".github/workflows/autonomy-ops.yml",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".github/workflows/governance.yml",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".github/workflows/l9-lint-test-node.yml",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".github/workflows/l9-lint-test.yml",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".github/workflows/memory-stack-dependency-gate.yml",
+      "owner": "continuous-assurance",
+      "purpose": "GitHub workflow and repository automation",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".gitignore",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".l9/ci.json",
+      "owner": "continuous-assurance",
+      "purpose": "Consumer CI class declaration read by the org CI workflow (schema l9.ci-consumer/v1)",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".l9/repo-workflow.json",
+      "owner": "continuous-assurance",
+      "purpose": "Repository execution facade declaration (schema l9.repo-execution/v2)",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".sonarcloud.properties",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".vscode/extensions.json",
+      "owner": "repository-governance",
+      "purpose": "Shared editor workspace settings and recommended extensions",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": ".vscode/settings.json",
+      "owner": "repository-governance",
+      "purpose": "Shared editor workspace settings and recommended extensions",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "adr/ADR-0001-single-purpose-dedicated-bot.md",
+      "owner": "architecture",
+      "purpose": "Architecture decision records",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "adr/ADR-0002-multi-tenant-architecture.md",
+      "owner": "architecture",
+      "purpose": "Architecture decision records",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "adr/ADR-0003-tiered-llm-token-efficiency.md",
+      "owner": "architecture",
+      "purpose": "Architecture decision records",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "adr/ADR-0004-bullmq-job-queue-architecture.md",
+      "owner": "architecture",
+      "purpose": "Architecture decision records",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "adr/ADR-0005-posthog-behavior-intelligence.md",
+      "owner": "architecture",
+      "purpose": "Architecture decision records",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "adr/ADR-0006-competitor-kill-chain.md",
+      "owner": "architecture",
+      "purpose": "Architecture decision records",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "adr/ADR-0007-reproducible-assurance.md",
+      "owner": "architecture",
+      "purpose": "Architecture decision records",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "adr/ADR-0008-autonomy-runtime-controls.md",
+      "owner": "architecture",
+      "purpose": "Architecture decision records",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "adr/ADR-0009-infisical-secrets-plane.md",
+      "owner": "architecture",
+      "purpose": "Architecture decision records",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "adr/ADR-0010-build-time-website-intelligence-interface.md",
+      "owner": "architecture",
+      "purpose": "Architecture decision records",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "adr/ADR-0011-search-reasoning-and-provider-isolation.md",
+      "owner": "architecture",
+      "purpose": "Architecture decision records",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "adr/ADR-0012-competitive-landscape-authority.md",
+      "owner": "architecture",
+      "purpose": "Architecture decision records",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "adr/ADR-0013-seo-content-blueprint-and-content-compiler.md",
+      "owner": "architecture",
+      "purpose": "Architecture decision records",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "adr/ADR-0014-answer-engine-observation.md",
+      "owner": "architecture",
+      "purpose": "Architecture decision records",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "adr/ADR-0015-reporting-sql-plane.md",
+      "owner": "architecture",
+      "purpose": "Architecture decision records",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "adr/ADR-0016-intelligence-plane.md",
+      "owner": "architecture",
+      "purpose": "Architecture decision records",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "adr/README.md",
+      "owner": "architecture",
+      "purpose": "Architecture decision records",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "AGENTS.md",
+      "owner": "repository-governance",
+      "purpose": "Binding agent operating contract",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "biome.json",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "client-snippets/posthog-tracking.html",
+      "owner": "client-integration",
+      "purpose": "Client-side integration snippets",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "CODE_OF_CONDUCT.md",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "contracts/BOT_INTEROP_PARITY.json",
+      "owner": "integration-contracts",
+      "purpose": "Cross-repository and external integration contracts",
+      "classification": "schema",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "contracts/website_factory_integration.yaml",
+      "owner": "integration-contracts",
+      "purpose": "Cross-repository and external integration contracts",
+      "classification": "schema",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "contracts/WEBSITE_INTELLIGENCE_LOCK.json",
+      "owner": "integration-contracts",
+      "purpose": "Cross-repository and external integration contracts",
+      "classification": "schema",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "owner": "repository-governance",
+      "purpose": "Contribution and assurance requirements",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "DECISION_LOG.md",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "DEPLOYMENT.md",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docker-compose.validation.yml",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docker-compose.yml",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docker/Dockerfile",
+      "owner": "runtime-platform",
+      "purpose": "Container build and database initialization assets",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docker/init-db.sql",
+      "owner": "runtime-platform",
+      "purpose": "Container build and database initialization assets",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docs/adr/ADR-deepseek-build-intelligence.md",
+      "owner": "repository-governance",
+      "purpose": "Repository technical and operating documentation",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docs/alignment_report.md",
+      "owner": "repository-governance",
+      "purpose": "Repository technical and operating documentation",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docs/api/handoff-and-outcome-report.md",
+      "owner": "repository-governance",
+      "purpose": "Repository technical and operating documentation",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docs/decision_extraction.md",
+      "owner": "repository-governance",
+      "purpose": "Repository technical and operating documentation",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docs/program-execution/TASK-001.md",
+      "owner": "repository-governance",
+      "purpose": "Repository technical and operating documentation",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docs/program-execution/TASK-002.md",
+      "owner": "repository-governance",
+      "purpose": "Repository technical and operating documentation",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docs/program-execution/TASK-003.md",
+      "owner": "repository-governance",
+      "purpose": "Repository technical and operating documentation",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docs/program-execution/TASK-004.md",
+      "owner": "repository-governance",
+      "purpose": "Repository technical and operating documentation",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docs/program-execution/TASK-005.md",
+      "owner": "repository-governance",
+      "purpose": "Repository technical and operating documentation",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docs/program-execution/TASK-006.md",
+      "owner": "repository-governance",
+      "purpose": "Repository technical and operating documentation",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docs/program-execution/TASK-007.md",
+      "owner": "repository-governance",
+      "purpose": "Repository technical and operating documentation",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docs/READINESS_MODEL.md",
+      "owner": "repository-governance",
+      "purpose": "Repository technical and operating documentation",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docs/RUN_LLM_AUDIT_V1.md",
+      "owner": "repository-governance",
+      "purpose": "Repository technical and operating documentation",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docs/runbooks/BIOME_INSTANTIATION.md",
+      "owner": "repository-governance",
+      "purpose": "Repository technical and operating documentation",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docs/seo-sql/CONTRACTS.md",
+      "owner": "repository-governance",
+      "purpose": "Repository technical and operating documentation",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "docs/seo-sql/TESTING.md",
+      "owner": "repository-governance",
+      "purpose": "Repository technical and operating documentation",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "drizzle.config.ts",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "drizzle/0000_steady_morlun.sql",
+      "owner": "database",
+      "purpose": "Generated and immutable database migrations",
+      "classification": "generated",
+      "status": "active",
+      "generated": true,
+      "source_of_generation": "npx drizzle-kit generate"
+    },
+    {
+      "path": "drizzle/0001_build_intelligence_artifacts.sql",
+      "owner": "database",
+      "purpose": "Generated and immutable database migrations",
+      "classification": "generated",
+      "status": "active",
+      "generated": true,
+      "source_of_generation": "npx drizzle-kit generate"
+    },
+    {
+      "path": "drizzle/0002_reporting_plane.sql",
+      "owner": "database",
+      "purpose": "Generated and immutable database migrations",
+      "classification": "generated",
+      "status": "active",
+      "generated": true,
+      "source_of_generation": "npx drizzle-kit generate"
+    },
+    {
+      "path": "drizzle/0003_intelligence_plane.sql",
+      "owner": "database",
+      "purpose": "Generated and immutable database migrations",
+      "classification": "generated",
+      "status": "active",
+      "generated": true,
+      "source_of_generation": "npx drizzle-kit generate"
+    },
+    {
+      "path": "drizzle/0004_portfolio_benchmarks.sql",
+      "owner": "database",
+      "purpose": "Generated and immutable database migrations",
+      "classification": "generated",
+      "status": "active",
+      "generated": true,
+      "source_of_generation": "npx drizzle-kit generate"
+    },
+    {
+      "path": "drizzle/0005_intelligence_reporting_views.sql",
+      "owner": "database",
+      "purpose": "Generated and immutable database migrations",
+      "classification": "generated",
+      "status": "active",
+      "generated": true,
+      "source_of_generation": "npx drizzle-kit generate"
+    },
+    {
+      "path": "drizzle/CHECKSUMS.json",
+      "owner": "database",
+      "purpose": "Generated and immutable database migrations",
+      "classification": "generated",
+      "status": "active",
+      "generated": true,
+      "source_of_generation": "npx drizzle-kit generate"
+    },
+    {
+      "path": "drizzle/meta/_journal.json",
+      "owner": "database",
+      "purpose": "Generated and immutable database migrations",
+      "classification": "generated",
+      "status": "active",
+      "generated": true,
+      "source_of_generation": "npx drizzle-kit generate"
+    },
+    {
+      "path": "drizzle/meta/0000_snapshot.json",
+      "owner": "database",
+      "purpose": "Generated and immutable database migrations",
+      "classification": "generated",
+      "status": "active",
+      "generated": true,
+      "source_of_generation": "npx drizzle-kit generate"
+    },
+    {
+      "path": "eslint.config.js",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "LICENSE_NOTICE.md",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "Makefile",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "MANIFEST.json",
+      "owner": "continuous-assurance",
+      "purpose": "Generated machine-readable repository inventory",
+      "classification": "generated",
+      "status": "active",
+      "generated": true,
+      "source_of_generation": "npm run manifest:generate"
+    },
+    {
+      "path": "MANIFEST.md",
+      "owner": "continuous-assurance",
+      "purpose": "Generated human-readable repository inventory",
+      "classification": "generated",
+      "status": "active",
+      "generated": true,
+      "source_of_generation": "npm run manifest:generate"
+    },
+    {
+      "path": "manifest/ownership.yaml",
+      "owner": "continuous-assurance",
+      "purpose": "Manifest ownership policy and generation inputs",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "PACK_INDEX.md",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "package-lock.json",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "package.json",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/bot-interop/package-lock.json",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/bot-interop/package.json",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/bot-interop/README.md",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/bot-interop/src/ack.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/bot-interop/src/handoff.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/bot-interop/src/index.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/bot-interop/src/posthog-events.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/bot-interop/src/website-intelligence.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/bot-interop/tests/contracts.test.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/bot-interop/tests/posthog-events.test.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/bot-interop/tests/website-intelligence.test.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/bot-interop/tsconfig.json",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/graphiti-memory-client/.gitignore",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/graphiti-memory-client/dist/src/index.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/graphiti-memory-client/dist/src/index.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/graphiti-memory-client/dist/tests/client.test.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/graphiti-memory-client/dist/tests/client.test.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/graphiti-memory-client/package-lock.json",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/graphiti-memory-client/package.json",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/graphiti-memory-client/README.md",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/graphiti-memory-client/SOURCE.txt",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/graphiti-memory-client/src/index.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/graphiti-memory-client/tests/client.test.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/graphiti-memory-client/tsconfig.json",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/.gitignore",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/dist/index.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/dist/index.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/dist/index.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/dist/index.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/dist/secrets.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/dist/secrets.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/dist/secrets.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/dist/secrets.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/dist/types.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/dist/types.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/dist/types.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/dist/types.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/package.json",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/README.md",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/SOURCE.txt",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/src/index.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/src/secrets.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/src/types.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/infisical-config/tsconfig.json",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/.gitignore",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/ARCHITECTURE.md",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/CODE_OF_CONDUCT.md",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/CONTRIBUTING.md",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/budget/index.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/budget/index.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/budget/index.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/budget/index.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/circuit-breaker.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/circuit-breaker.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/circuit-breaker.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/circuit-breaker.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/builders.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/builders.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/builders.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/builders.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/canonical-json.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/canonical-json.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/canonical-json.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/canonical-json.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/contracts.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/contracts.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/contracts.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/contracts.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/index.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/index.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/index.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/index.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/policy-engine.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/policy-engine.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/policy-engine.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/policy-engine.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/provider-adapter.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/provider-adapter.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/provider-adapter.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/control-plane/provider-adapter.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/index.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/index.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/index.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/index.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/matrices/general-matrix.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/matrices/general-matrix.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/matrices/general-matrix.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/matrices/general-matrix.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/matrices/perplexity-matrix.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/matrices/perplexity-matrix.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/matrices/perplexity-matrix.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/matrices/perplexity-matrix.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/matrices/search-policy.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/matrices/search-policy.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/matrices/search-policy.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/matrices/search-policy.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/memory.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/memory.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/memory.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/memory.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/pricing.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/pricing.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/pricing.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/pricing.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/provider-errors.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/provider-errors.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/provider-errors.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/provider-errors.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/providers/openai-transport.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/providers/openai-transport.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/providers/openai-transport.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/providers/openai-transport.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/providers/openrouter.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/providers/openrouter.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/providers/openrouter.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/providers/openrouter.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/providers/perplexity.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/providers/perplexity.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/providers/perplexity.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/providers/perplexity.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/schemas.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/schemas.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/schemas.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/schemas.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/types.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/types.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/types.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/types.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/vision/index.d.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/vision/index.d.ts.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/vision/index.js",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/dist/vision/index.js.map",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/docs/control-plane-architecture.md",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/docs/program-execution/TASK-001.md",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/docs/program-execution/TASK-002.md",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/docs/program-execution/TASK-003.md",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/docs/program-execution/TASK-004.md",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/docs/program-execution/TASK-005.md",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/package.json",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/README.md",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/RUNBOOK.md",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/SECURITY.md",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/SOURCE.txt",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "packages/llm-router/SUPPORT.md",
+      "owner": "seo-bot-runtime",
+      "purpose": "Vendored local packages consumed as file: dependencies",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "README.md",
+      "owner": "repository-governance",
+      "purpose": "Repository entrypoint and supported command surface",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "Repo.mk",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "reports/build-intelligence-blockers.md",
+      "owner": "continuous-assurance",
+      "purpose": "Assurance evidence, integrity receipts, and remediation reports",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "reports/gmp/GMP-Report-129-Accept-DataForSEO-status-40106-in-organicSerpTask-when-the-t.md",
+      "owner": "continuous-assurance",
+      "purpose": "Assurance evidence, integrity receipts, and remediation reports",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "reports/seam-competitive-landscape.json",
+      "owner": "continuous-assurance",
+      "purpose": "Assurance evidence, integrity receipts, and remediation reports",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "reports/seam-seo-content-blueprint.json",
+      "owner": "continuous-assurance",
+      "purpose": "Assurance evidence, integrity receipts, and remediation reports",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "reports/SeoBuildIntelligenceIntegrityReceipt.json",
+      "owner": "continuous-assurance",
+      "purpose": "Assurance evidence, integrity receipts, and remediation reports",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "reports/sonarcloud/HANDOFF.md",
+      "owner": "continuous-assurance",
+      "purpose": "Assurance evidence, integrity receipts, and remediation reports",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "reports/sonarcloud/SONARCLOUD_CHANGE_MANIFEST.yaml",
+      "owner": "continuous-assurance",
+      "purpose": "Assurance evidence, integrity receipts, and remediation reports",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "reports/sonarcloud/SONARCLOUD_ISSUE_REGISTER.yaml",
+      "owner": "continuous-assurance",
+      "purpose": "Assurance evidence, integrity receipts, and remediation reports",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "reports/sonarcloud/SONARCLOUD_REMEDIATION_REPORT.md",
+      "owner": "continuous-assurance",
+      "purpose": "Assurance evidence, integrity receipts, and remediation reports",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "reports/sonarcloud/SONARCLOUD_ROOT_CAUSE_PLAN.yaml",
+      "owner": "continuous-assurance",
+      "purpose": "Assurance evidence, integrity receipts, and remediation reports",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "reports/sonarcloud/SONARCLOUD_VALIDATION_REPORT.md",
+      "owner": "continuous-assurance",
+      "purpose": "Assurance evidence, integrity receipts, and remediation reports",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "reports/sonarcloud/sonarcloud-issues-before.json",
+      "owner": "continuous-assurance",
+      "purpose": "Assurance evidence, integrity receipts, and remediation reports",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "RUNBOOK.md",
+      "owner": "operations",
+      "purpose": "Operator procedures, validation, deployment, backup, and rollback",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/add-client.ts",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/build-intelligence/producer-seam-proof.ts",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/deploy.sh",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/ensure-npm-auth.sh",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/intelligence/verify-invariants.ts",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/manifest/check.ts",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/manifest/generate.ts",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/manifest/inventory.ts",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/migrate.mjs",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/reporting/provision-roles.sql",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/request-site-build.ts",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/validate-interop-parity.mjs",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/validation/cli.ts",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/validation/core/command-runner.ts",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/validation/core/evidence-writer.ts",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/validation/core/redact.ts",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/validation/core/repository-context.ts",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/validation/core/schema-validator.ts",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/validation/gate-registry.ts",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/validation/profile-loader.ts",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "scripts/validation/types.ts",
+      "owner": "developer-tooling",
+      "purpose": "Operator, deployment, manifest, and validation tooling",
+      "classification": "tooling",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "SECURITY.md",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/api/build-intelligence.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/api/client-projection.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/api/clients/monitoring-enrollment.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/api/clients/register.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/api/dashboard.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/api/index.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/api/reporting.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/api/reports/outcome.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/api/security.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/claim-grounding.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/competitive-landscape.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/content-validator.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/deepseek-llm.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/domain-classification.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/integrity-receipt.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/llm-audit.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/ordering.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/output-shape-renderer.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/preflight.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/producer.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/provider-attempts.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/query-portfolio.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/run-evidence-store.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/run-llm-audit.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/schema-guards.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/seo-blueprint-output-contract.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/seo-content-blueprint.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/spend-ledger.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/store.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/build-intelligence/structured-content.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/contracts/posthog_events.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/core/budget-guard.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/core/compensation.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/core/config.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/core/database/index.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/core/database/migrate.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/core/database/schema-extensions.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/core/database/schema-intelligence.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/core/database/schema-reporting.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/core/database/schema.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/core/execution-policy.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/core/job-id.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/core/logger.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/core/memory-aliases.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/core/posthog-auth.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/core/scheduler.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/core/schema-additions.sql",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/core/secrets.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/index.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/intelligence/action-planner.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/intelligence/evidence-pack.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/intelligence/index.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/intelligence/lifecycle.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/intelligence/mode.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/intelligence/opportunity-scorer.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/intelligence/outcome-attributor.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/intelligence/plan-synthesizer.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/intelligence/policy-engine.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/intelligence/policy-state.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/intelligence/portfolio.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/intelligence/runner.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/intelligence/signal-extractor.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/intelligence/types.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/modules/aeo-geo/answer-engine-port.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/modules/aeo-geo/index.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/modules/behavior-intelligence/index.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/modules/behavior-intelligence/recommendations.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/modules/link-building/index.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/modules/link-building/velocity.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/modules/serp-intelligence/index.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/modules/web-vitals/index.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/reporting/outcome-report-data.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/reporting/outcome-report-job.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/reporting/outcome-report.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/reporting/query-compiler.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/reporting/query-gateway.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/reporting/refresh.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/reporting/views.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/services/dataforseo.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/services/improve-llm-policy.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/services/llm-parse.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/services/llm-provider-timeout.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/services/llm-run-recorder.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/services/llm.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/services/maintenance-readiness.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/services/memory.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/services/notifications.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/services/plan-executor.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/services/secret-ref.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/services/seo-blueprint-output-budget.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/services/site-deployment-config.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/services/site-deployment.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/services/weekly-report.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "src/types/index.ts",
+      "owner": "seo-bot-runtime",
+      "purpose": "SEO Bot runtime implementation",
+      "classification": "runtime",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/api/build-intelligence-no-router.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/api/build-intelligence-provider-failures.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/api/build-intelligence.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/api/client-projection.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/api/dashboard.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/api/index.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/api/register-enriched.e2e.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/api/register-monitoring.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/api/register.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/api/reporting.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/api/reports-outcome.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/api/run-evidence.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/api/security.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/claim-grounding.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/competitive-landscape.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/deepseek-llm.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/design-blindness.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/domain-classification.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/fixtures/contract-following-model.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/integrity-receipt.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/interop-parity.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/llm-audit.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/preflight.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/provider-bypass.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/provider-policy-and-attempts.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/query-portfolio.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/remediation.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/run-evidence-store.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/run-llm-audit.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/seo-blueprint-output-contract.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/seo-blueprint-qap-5-route.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/seo-content-blueprint.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/store.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/structured-content-output-contract.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/build-intelligence/structured-content.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/contracts/posthog-events-parity.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/core/config-reporting.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/core/execution-policy.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/core/memory-required.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/core/posthog-auth.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/core/scheduler.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/core/secrets.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/intelligence/action-planner.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/intelligence/adversarial.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/intelligence/calibration.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/intelligence/evidence-pack.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/intelligence/lifecycle.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/intelligence/mode.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/intelligence/opportunity-scorer.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/intelligence/outcome-attribution.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/intelligence/plan-synthesizer.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/intelligence/policy-engine.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/intelligence/portfolio.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/intelligence/registration.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/intelligence/runner.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/intelligence/signal-extractor.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/intelligence/staged-cutover.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/live/extractors.live.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/live/migrations.live.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/live/postgres-semantics.live.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/live/queue.live.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/live/services.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/manifest/inventory.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/manifest/manifest-drift.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/migrations/static-gates.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/modules/answer-engine-port.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/modules/link-building-velocity.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/reporting/outcome-report.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/reporting/plane-contract.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/reporting/query-compiler.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/reporting/query-gateway.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/reporting/refresh.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/scripts/deploy-contract.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/scripts/verify-invariants.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/services/build-intelligence-policy.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/services/dataforseo-serp-integrity.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/services/dataforseo.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/services/improve-llm-policy.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/services/llm-parse.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/services/llm-run-recorder.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/services/llm.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/services/maintenance-readiness.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/services/plan-executor.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/services/site-deployment-config.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/services/site-deployment.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/validation/aggregate-status.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/validation/command-runner.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/validation/evidence-writer.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/validation/gate-registry.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/validation/profile-loader.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/validation/redaction.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tests/validation/schema-validation.test.ts",
+      "owner": "quality",
+      "purpose": "Automated behavioral and assurance tests",
+      "classification": "test",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "TODO.md",
+      "owner": "operations",
+      "purpose": "Externally gated work with explicit activation conditions",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tsconfig.check.json",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "tsconfig.json",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "VALIDATION.md",
+      "owner": "continuous-assurance",
+      "purpose": "Canonical validation policy and evidence model",
+      "classification": "documentation",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "validation/build_checks.jsonl",
+      "owner": "continuous-assurance",
+      "purpose": "Validation policy and operator guidance",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "validation/db_checks.jsonl",
+      "owner": "continuous-assurance",
+      "purpose": "Validation policy and operator guidance",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "validation/policy.yaml",
+      "owner": "continuous-assurance",
+      "purpose": "Validation policy and operator guidance",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "validation/preflight_checks.jsonl",
+      "owner": "continuous-assurance",
+      "purpose": "Validation policy and operator guidance",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "validation/README.md",
+      "owner": "continuous-assurance",
+      "purpose": "Validation policy and operator guidance",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "validation/schemas/gate-evidence.schema.json",
+      "owner": "continuous-assurance",
+      "purpose": "Machine-readable assurance contract",
+      "classification": "schema",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "validation/schemas/release-receipt.schema.json",
+      "owner": "continuous-assurance",
+      "purpose": "Validation policy and operator guidance",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "validation/schemas/repository-manifest.schema.json",
+      "owner": "continuous-assurance",
+      "purpose": "Machine-readable assurance contract",
+      "classification": "schema",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "validation/schemas/run-report.schema.json",
+      "owner": "continuous-assurance",
+      "purpose": "Machine-readable assurance contract",
+      "classification": "schema",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "validation/source_checks.jsonl",
+      "owner": "continuous-assurance",
+      "purpose": "Validation policy and operator guidance",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "validation/validation_report.yaml",
+      "owner": "continuous-assurance",
+      "purpose": "Validation policy and operator guidance",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "vitest.config.ts",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    },
+    {
+      "path": "vitest.live.config.ts",
+      "owner": "repository-governance",
+      "purpose": "Root repository policy, entrypoint, or configuration",
+      "classification": "configuration",
+      "status": "active",
+      "generated": false,
+      "source_of_generation": null
+    }
+  ],
+  "inventory_digest": "89715e438d122b8eb5a9b9697421389ad5be832cbe391250194458d9962c3e89"
+}
